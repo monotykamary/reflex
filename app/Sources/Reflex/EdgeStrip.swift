@@ -123,7 +123,7 @@ struct Rail: View {
                         .contentTransition(.numericText(value: Double(waiting)))
                         .foregroundStyle(waiting == 0 ? Color.secondary : Color.white)
                         .frame(minWidth: 20, minHeight: 20)
-                        .background((waiting == 0 ? Color.clear : (anyBlocked ? Tone.blocked : Color.accentColor)).gradient, in: Circle())
+                        .background((waiting == 0 ? Color.clear : (anyBlocked ? Tone.blocked : Color.accentColor)), in: Circle())
                 }
                 .padding(.horizontal, rail.expanded ? 10 : 0)
                 .contentShape(Rectangle())

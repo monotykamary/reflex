@@ -279,7 +279,7 @@ struct OnboardingView: View {
         case .projects:
             return "Reflex indexes the repositories under these folders — names, descriptions, recent commits — so a request like “fix the flaky test in jev fabric” starts in the right place."
         case .keys:
-            return "Double-tap ⌥ anywhere to ask. Rest your pointer on the right edge for a second to see your agents. Try both now."
+            return "Double-tap ⌥ anywhere to ask. Rest your pointer on the right edge for half a second to see your agents. Try both now."
         case .done:
             return "Here's everything, in one breath."
         }
@@ -385,7 +385,7 @@ struct OnboardingView: View {
                     if !model.trusted { GlassAction("Allow…") { DoubleOption.requestTrust() } }
                 }
                 Check(ok: model.triedHotkey, title: "Double-tap ⌥", detail: model.triedHotkey ? "that's the one" : "try it now") { EmptyView() }
-                Check(ok: model.triedEdge, title: "Rest on the right edge", detail: model.triedEdge ? "there they are" : "move to the edge and hold still for a second") { EmptyView() }
+                Check(ok: model.triedEdge, title: "Rest on the right edge", detail: model.triedEdge ? "there they are" : "move to the edge and hold still for half a second") { EmptyView() }
                 if model.trusted && !model.triedHotkey {
                     Text("Just allowed it? Relaunch so macOS hands Reflex the keys.")
                         .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
@@ -544,24 +544,13 @@ private struct Cheat: View {
     }
 }
 
-/// A slow, dark mesh — Tokyo Night's blues and violets drifting under the glass.
+/// Dark glass: the desktop softly through Liquid Glass, tinted near-black.
 private struct Backdrop: View {
-    @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduce)) { context in
-            let t = reduce ? 0 : context.date.timeIntervalSinceReferenceDate
-            let w = { (a: Double, f: Double) -> Float in Float(0.5 + a * sin(t * f)) }
-            MeshGradient(width: 3, height: 3, points: [
-                [0, 0], [w(0.12, 0.11), 0], [1, 0],
-                [0, w(0.14, 0.09)], [w(0.18, 0.07), w(0.16, 0.13)], [1, w(0.12, 0.08)],
-                [0, 1], [w(0.15, 0.10), 1], [1, 1],
-            ], colors: [
-                Color(hex: "#0d0e17"), Color(hex: "#16172a"), Color(hex: "#1a1b2e"),
-                Color(hex: "#151a33"), Color(hex: "#2a2350"), Color(hex: "#0f2237"),
-                Color(hex: "#0b0c14"), Color(hex: "#1b1534"), Color(hex: "#0d1622"),
-            ])
-        }
-        .ignoresSafeArea()
+        Rectangle()
+            .fill(.clear)
+            .glassEffect(.regular.tint(Color.black.opacity(0.62)), in: .rect)
+            .ignoresSafeArea()
     }
 }
 
@@ -591,7 +580,7 @@ private struct RailIllustration: View {
             }
             VStack(spacing: 14) {
                 Text(celebrate ? "✓" : "2").font(Type.count).foregroundStyle(.white)
-                    .frame(width: 22, height: 22).background((celebrate ? Tone.done : Tone.blocked).gradient, in: Circle())
+                    .frame(width: 22, height: 22).background((celebrate ? Tone.done : Tone.blocked), in: Circle())
                 Bead(status: "working", size: 10)
                 Bead(status: "blocked", size: 10)
                 Bead(status: "done", size: 10)
@@ -675,7 +664,7 @@ private struct DecisionIllustration: View {
             }
             GeometryReader { g in
                 Capsule().fill(.white.opacity(0.08))
-                Capsule().fill(tone.gradient).frame(width: g.size.width * (fill ? p : 0))
+                Capsule().fill(tone).frame(width: g.size.width * (fill ? p : 0))
             }
             .frame(height: 5)
         }

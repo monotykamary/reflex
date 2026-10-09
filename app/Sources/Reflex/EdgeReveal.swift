@@ -1,14 +1,14 @@
 import AppKit
 
 // The rail stays out of sight. Rest the pointer on the right edge of a screen
-// for one second (a sliver grows there meanwhile) and it slides in at the
+// for half a second (a sliver grows there meanwhile) and it slides in at the
 // pointer's height. It stays while the pointer is anywhere near it — a
 // generous dead zone and a short grace period — then slides away.
 
 @MainActor
 final class EdgeReveal {
     /// Seconds of stillness at the edge before the rail appears.
-    var delay: TimeInterval = 1.0
+    var delay: TimeInterval = 0.5
     /// How far around the rail the pointer may wander before it hides.
     let deadzone = CGSize(width: 96, height: 64)
     /// How long the pointer may be outside the dead zone before it hides.

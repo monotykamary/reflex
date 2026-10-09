@@ -260,7 +260,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.titleVisibility = .hidden
             w.titlebarAppearsTransparent = true
             w.isMovableByWindowBackground = true
-            w.backgroundColor = NSColor(hex: "#0d0e17")
+            w.isOpaque = false
+            w.backgroundColor = .clear
             w.appearance = NSAppearance(named: .darkAqua)
             w.contentView = NSHostingView(rootView: OnboardingView())
             w.isReleasedWhenClosed = false

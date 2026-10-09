@@ -189,7 +189,7 @@ private struct Card: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Circle().fill(tone.gradient).frame(width: 7, height: 7).shadow(color: tone.opacity(0.6), radius: 3)
+                Circle().fill(tone).frame(width: 7, height: 7).shadow(color: tone.opacity(0.6), radius: 3)
                 Text(item.agent).font(Type.title).lineLimit(1)
                 Text(item.title).font(Type.meta).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)

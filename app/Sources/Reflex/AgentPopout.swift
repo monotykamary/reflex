@@ -21,6 +21,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
+        TerminalScroll.install()
+        TerminalScroll.views[ObjectIdentifier(view)] = view
         apply(Themes.shared.current, size: Themes.shared.fontSize)
         Themes.shared.$current.combineLatest(Themes.shared.$fontSize)
             .sink { [weak self] t, s in self?.apply(t, size: s) }
@@ -64,6 +66,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     func detach() {
         if attached { view.terminate() }
         attached = false
+        TerminalScroll.views[ObjectIdentifier(view)] = nil
     }
 
     // MARK: LocalProcessTerminalViewDelegate
@@ -79,10 +82,85 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     }
 }
 
+/// Hosts the terminal one scroller-width wider than it shows, so SwiftTerm's
+/// legacy scroller (which it always reserves) is clipped off and every visible
+/// pixel is a column.
+final class TerminalContainer: NSView {
+    let term: LocalProcessTerminalView
+    static let scrollerWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
+
+    init(term: LocalProcessTerminalView) {
+        self.term = term
+        super.init(frame: .zero)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        addSubview(term)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        term.frame = NSRect(x: 0, y: 0, width: bounds.width + TerminalContainer.scrollerWidth, height: bounds.height)
+        for case let scroller as NSScroller in term.subviews { scroller.isHidden = true }
+    }
+}
+
 private struct TerminalHost: NSViewRepresentable {
     let session: TerminalSession
-    func makeNSView(context: Context) -> LocalProcessTerminalView { session.view }
-    func updateNSView(_ v: LocalProcessTerminalView, context: Context) {}
+    func makeNSView(context: Context) -> TerminalContainer { TerminalContainer(term: session.view) }
+    func updateNSView(_ v: TerminalContainer, context: Context) {}
+}
+
+/// Scrolling in an agent terminal. herdr's attach client (like most TUIs) runs
+/// in the alternate screen with mouse reporting on, where there is no local
+/// scrollback: the wheel must reach the program as mouse wheel events (SGR),
+/// or as arrow keys in an alternate screen without mouse reporting. Only a
+/// plain shell falls back to SwiftTerm's own scrollback.
+@MainActor
+enum TerminalScroll {
+    private static var monitor: Any?
+    private static var carry: CGFloat = 0
+    static var views: [ObjectIdentifier: LocalProcessTerminalView] = [:]
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { e in
+            guard let view = views.values.first(where: { $0.window === e.window && $0.window != nil }) else { return e }
+            let p = view.convert(e.locationInWindow, from: nil)
+            guard view.bounds.contains(p) else { return e }
+            return handle(e, view: view, at: p) ? nil : e
+        }
+    }
+
+    private static func handle(_ e: NSEvent, view: LocalProcessTerminalView, at p: NSPoint) -> Bool {
+        let t = view.getTerminal()
+        let mouse = t.mouseMode != .off
+        guard mouse || t.isCurrentBufferAlternate else { return false }
+        // Trackpads report many small precise deltas; turn them into whole lines.
+        let unit: CGFloat = e.hasPreciseScrollingDeltas ? 18 : 1
+        carry += e.scrollingDeltaY / unit
+        let lines = Int(carry.rounded(.towardZero))
+        guard lines != 0 else { return true }
+        carry -= CGFloat(lines)
+        let up = lines > 0
+        let cols = max(t.cols, 1), rows = max(t.rows, 1)
+        let width = view.bounds.width - TerminalContainer.scrollerWidth
+        let col = min(cols - 1, max(0, Int(p.x / max(width, 1) * CGFloat(cols))))
+        let row = min(rows - 1, max(0, Int((view.bounds.height - p.y) / max(view.bounds.height, 1) * CGFloat(rows))))
+        for _ in 0..<min(abs(lines), 12) {
+            if mouse {
+                let flags = t.encodeButton(button: up ? 4 : 5, release: false,
+                                           shift: e.modifierFlags.contains(.shift),
+                                           meta: e.modifierFlags.contains(.option),
+                                           control: e.modifierFlags.contains(.control))
+                t.sendEvent(buttonFlags: flags, x: col, y: row)
+            } else {
+                view.send(txt: t.applicationCursor ? (up ? "\u{1b}OA" : "\u{1b}OB") : (up ? "\u{1b}[A" : "\u{1b}[B"))
+            }
+        }
+        return true
+    }
 }
 
 struct AgentPopout: View {
@@ -99,8 +177,9 @@ struct AgentPopout: View {
             header
             ZStack {
                 TerminalHost(session: session)
-                    .padding(.horizontal, 10)
-                    .padding(.bottom, 8)
+                    .padding(.leading, 10)
+                    .padding(.trailing, 4)
+                    .padding(.bottom, 6)
                 if session.ended {
                     VStack(spacing: 10) {
                         Text("Detached from \(agent?.kind ?? "the agent")").font(Type.title)
@@ -130,24 +209,17 @@ struct AgentPopout: View {
                     .contentTransition(.interpolate)
             }
             Spacer()
-            Menu {
-                ForEach(themes.names, id: \.self) { n in
-                    Button { themes.select(n) } label: {
-                        if n == theme.name { Label(n, systemImage: "checkmark") } else { Text(n) }
-                    }
-                }
-            } label: {
-                Label(theme.name, systemImage: "paintpalette")
-            }
-            .menuStyle(.button)
-            .buttonStyle(.glass)
-            .controlSize(.small)
-            .fixedSize()
-            Button("Focus in herdr", systemImage: "rectangle.portrait.and.arrow.right") {
+            Button {
                 Task { await Client.local.focus(session.pane) }
+            } label: {
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 13, weight: .regular))
+                    .frame(width: 26, height: 26)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(.glass)
-            .controlSize(.small)
+            .buttonStyle(Pressable())
+            .opacity(0.55)
+            .help("Focus this pane in herdr")
         }
         .foregroundStyle(Color(hex: theme.foreground))
         .padding(.leading, 84)

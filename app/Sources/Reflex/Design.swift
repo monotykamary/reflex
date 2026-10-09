@@ -129,7 +129,7 @@ struct Bead: View {
     var body: some View {
         let tone = Tone.of(status)
         ZStack {
-            Circle().fill(tone.gradient)
+            Circle().fill(tone)
                 .shadow(color: tone.opacity(status == "idle" || status == "unknown" ? 0 : 0.7), radius: 4)
             if status == "blocked" {
                 Circle().strokeBorder(tone.opacity(0.55), lineWidth: 1.2).scaleEffect(1.9)
