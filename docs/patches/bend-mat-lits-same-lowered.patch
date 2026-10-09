@@ -1,0 +1,77 @@
+--- a/bend2/comp.ts	2026-10-06 11:54:42
++++ b/bend2/comp.ts	2026-10-09 22:39:46
+@@ -1083,10 +1083,63 @@
+   return { arms, end };
+ }
+ 
++// same_lowered(a, b) is JSON.stringify(term_lower(a)) === JSON.stringify(
++// term_lower(b)) with mat_lits' replacer (spans dropped, Ann stripped), decided
++// in lockstep without building either string: binders open on the same fresh
++// variable, the first difference answers false, and one shared subterm object
++// at the same depth answers true without being walked.
++function same_plain(x: any, y: any): boolean {
++  if (x && typeof x === "object" && x.$ === "Ann") x = Bend.term_strip(x);
++  if (y && typeof y === "object" && y.$ === "Ann") y = Bend.term_strip(y);
++  if (x === y) return true;
++  if (x === null || y === null || typeof x !== "object" || typeof y !== "object") {
++    const nx = x === undefined || typeof x === "function" ? null : x;
++    const ny = y === undefined || typeof y === "function" ? null : y;
++    return nx === ny || (typeof nx === "number" && typeof ny === "number"
++      && JSON.stringify(nx) === JSON.stringify(ny));
++  }
++  if (Array.isArray(x) !== Array.isArray(y)) return false;
++  if (Array.isArray(x)) {
++    return x.length === y.length && x.every((v: unknown, i: number) => same_plain(v, y[i]));
++  }
++  const kx = Object.keys(x).filter((k) => k !== "s" && x[k] !== undefined && typeof x[k] !== "function");
++  const ky = Object.keys(y).filter((k) => k !== "s" && y[k] !== undefined && typeof y[k] !== "function");
++  return kx.length === ky.length && kx.every((k, i) => k === ky[i] && same_plain(x[k], y[k]));
++}
++
++function same_lowered(a: HTerm, b: HTerm, d: number = 0): boolean {
++  const x = Bend.term_strip(a) as any;
++  const y = Bend.term_strip(b) as any;
++  if (x === y) return true;
++  if (x.$ !== y.$) return false;
++  const all = (p: HTerm[], q: HTerm[]) => p.length === q.length && p.every((t, i) => same_lowered(t, q[i], d));
++  switch (x.$) {
++    case "Let": {
++      if (!same_plain(x.k, y.k) || !same_plain(x.q, y.q) || !all(x.v, y.v)) return false;
++      const xs = x.k.map((k: Name, j: number): HTerm => Bend.Var(k, d + j));
++      const ys = y.k.map((k: Name, j: number): HTerm => Bend.Var(k, d + j));
++      return same_lowered(x.f(xs), y.f(ys), d + x.k.length);
++    }
++    case "Typ": return same_lowered(x.g, y.g, d);
++    case "Min": return same_lowered(x.a, y.a, d) && same_lowered(x.b, y.b, d);
++    case "All":
++      return same_plain(x.q, y.q) && x.k === y.k && same_lowered(x.A, y.A, d)
++        && same_lowered(x.B(Bend.Var(x.k, d)), y.B(Bend.Var(y.k, d)), d + 1);
++    case "Lam":
++      return x.k === y.k && same_plain(x.q, y.q)
++        && same_lowered(x.f(Bend.Var(x.k, d)), y.f(Bend.Var(y.k, d)), d + 1);
++    case "App": return same_lowered(x.f, y.f, d) && same_lowered(x.x, y.x, d);
++    case "ADT": return x.k === y.k && same_plain(x.r, y.r) && all(x.x, y.x);
++    case "Ctr": return x.k === y.k && all(x.x, y.x);
++    case "Mat": return x.k === y.k && same_lowered(x.h, y.h, d) && same_lowered(x.m, y.m, d);
++    case "Eql": return same_lowered(x.a, y.a, d) && same_lowered(x.b, y.b, d) && same_lowered(x.T, y.T, d);
++    case "Rwt": return same_lowered(x.e, y.e, d) && same_lowered(x.p, y.p, d) && same_lowered(x.f, y.f, d);
++    default: return same_plain(x, y);
++  }
++}
++
+ function mat_lits(x: HTerm): Row[] {
+   const ws: Row[] = [];
+-  const key = (t: HTerm) => JSON.stringify(Bend.term_lower(t),
+-    (k, v) => k === "s" ? undefined : v?.$ === "Ann" ? Bend.term_strip(v) : v);
+   const walk = (t: HTerm, j: number, n: number,
+     cov: ((w: Of<"Ctr">) => HTerm) | null) => {
+     const h = mat_arms(t).arms[0]?.[1];
+@@ -1098,7 +1151,7 @@
+     const inst = (w: Of<"Ctr">) => (h ? w.x : [w])
+       .reduce((f, a) => Bend.term_apply(f, a), end);
+     const w = Bend.Ctr("WCon", [probe("b"), probe("t")]) as Of<"Ctr">;
+-    const own = arms.length < 2 && (!cov || key(cov(w)) !== key(inst(w)));
++    const own = arms.length < 2 && (!cov || !same_lowered(cov(w), inst(w)));
+     const sub = own ? inst : cov;
+     for (const [k, a] of arms) {
+       walk(a, j + 1, n + (k === "True" ? 2 ** j : 0), sub && ((v) =>

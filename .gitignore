@@ -1,0 +1,4 @@
+build/
+app/.build/
+.jev-fabric-native/
+*.c.tmp

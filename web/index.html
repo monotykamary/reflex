@@ -1,0 +1,309 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Reflex</title>
+<style>
+  /* "Meniscus" on the web: glass for chrome, solid surfaces for content,
+     ease-out motion under 250ms, nothing animated that you trigger by habit. */
+  :root {
+    --bg: #eef0f3; --panel: rgba(255,255,255,.86); --glass: rgba(255,255,255,.55); --ink: #15171c; --mute: #646a75; --line: rgba(20,22,28,.08);
+    --blue: #5b8cff; --amber: #ffb021; --green: #40d187; --grey: #a3a7ae; --violet: #9e7bff; --red: #e5484d;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --out: cubic-bezier(0.23, 1, 0.32, 1);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #0c0d10; --panel: rgba(28,30,36,.92); --glass: rgba(40,43,50,.5); --ink: #eceef2; --mute: #8d93a0; --line: rgba(255,255,255,.08); --grey: #5d626c; }
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
+  body { padding: env(safe-area-inset-top) 16px calc(104px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto;
+    background: radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--blue) 14%, transparent), transparent 60%), var(--bg);
+    background-attachment: fixed; }
+  header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; margin: 0 -16px; padding: 14px 16px 10px;
+    background: var(--glass); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
+  header .health { margin-left: auto; font-size: 12px; color: var(--mute); font-variant-numeric: tabular-nums; }
+  h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--mute); margin: 20px 2px 8px; font-weight: 600; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--grey); }
+  .working { background: var(--blue); box-shadow: 0 0 8px var(--blue); animation: breathe 1.4s ease-in-out infinite alternate; }
+  .blocked { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 28%, transparent), 0 0 8px var(--amber); }
+  .done { background: var(--green); box-shadow: 0 0 8px var(--green); } .idle { background: var(--grey); } .unknown { background: var(--grey); opacity: .5; }
+  .route { background: var(--violet); box-shadow: 0 0 8px var(--violet); }
+  @keyframes breathe { from { opacity: 1 } to { opacity: .5 } }
+  .agents { display: grid; gap: 6px; }
+  .agent { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 11px 12px; cursor: pointer; min-width: 0; }
+  .agent .who { font-weight: 600; white-space: nowrap; }
+  .agent .where { color: var(--mute); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 13px; margin-bottom: 8px;
+    box-shadow: 0 6px 18px rgba(0,0,0,.06); }
+  .card.new, .agent.new, .pending.new { animation: rise .24s var(--out) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px) scale(.98); filter: blur(3px) } }
+  .card .top { display: flex; gap: 8px; align-items: center; }
+  .card .agent-name { font-weight: 600; }
+  .card .title { color: var(--mute); font-size: 13px; }
+  .card .x { margin-left: auto; background: none; border: 0; color: var(--mute); font-size: 18px; cursor: pointer; padding: 0 4px; }
+  .card pre { font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; margin: 9px 0 0;
+    max-height: 220px; overflow: auto; color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 10px; padding: 9px; }
+  .opts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+  button { transition: transform .12s var(--out); }
+  button:active { transform: scale(.97); }
+  .opts button, .btn { text-align: left; border: 1px solid var(--line); background: color-mix(in srgb, var(--ink) 4%, transparent); color: var(--ink);
+    border-radius: 12px; padding: 10px 11px; font: inherit; cursor: pointer; display: flex; gap: 10px; align-items: center; }
+  .key { font: 700 11px/18px ui-rounded, -apple-system, sans-serif; min-width: 18px; height: 18px; text-align: center; border-radius: 5px;
+    background: color-mix(in srgb, var(--tone, var(--blue)) 18%, transparent); color: var(--ink); flex: none; }
+  .pending { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 14px; padding: 11px 12px; margin-bottom: 6px; }
+  .pending .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pending button { border: 0; background: var(--ink); color: var(--bg); border-radius: 9px; padding: 6px 11px; font: inherit; font-weight: 600; cursor: pointer; }
+  .pending .drain { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--blue); width: 100%; transform-origin: left;
+    animation: drain linear forwards; }
+  @keyframes drain { from { transform: scaleX(var(--from, 1)) } to { transform: scaleX(0) } }
+  .receipt { font-size: 13px; color: var(--mute); padding: 3px 2px; overflow-wrap: anywhere; }
+  .receipt.bad { color: var(--red); }
+  .empty { color: var(--mute); font-size: 14px; padding: 18px 0; text-align: center; }
+  form.ask { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
+    background: var(--glass); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border-top: 1px solid var(--line); }
+  form.ask .row { display: flex; gap: 8px; max-width: 720px; margin: 0 auto; }
+  form.ask textarea { flex: 1; resize: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
+    border-radius: 22px; padding: 11px 15px; font: inherit; min-height: 44px; max-height: 140px; }
+  form.ask button { border: 0; background: var(--ink); color: var(--bg); border-radius: 22px; width: 44px; font: 600 18px/1 inherit; }
+  .toast { margin: 10px 0 0; padding: 11px 13px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); font-size: 14px;
+    animation: rise .22s var(--out) both; }
+  dialog { border: 0; border-radius: 20px; padding: 0; width: min(720px, calc(100vw - 24px)); background: var(--panel); color: var(--ink);
+    box-shadow: 0 24px 60px rgba(0,0,0,.3); }
+  dialog[open] { animation: rise .22s var(--out) both; }
+  dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(4px); }
+  dialog .head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px; }
+  dialog .head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  dialog .tools { display: flex; gap: 8px; padding: 0 12px 10px; border-bottom: 1px solid var(--line); }
+  dialog .tools .btn, dialog .head .btn { padding: 6px 10px; font-size: 13px; }
+  /* A terminal keeps its columns: no wrapping, scroll sideways like the real thing. */
+  dialog pre { font: 10.5px/1.38 var(--mono); white-space: pre; margin: 0; padding: 12px; max-height: 62vh; overflow: auto;
+    background: var(--term-bg, #1a1b26); color: var(--term-fg, #c0caf5); }
+  dialog select { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 9px; padding: 5px 8px; font: inherit; font-size: 12px; max-width: 40vw; }
+  dialog .send { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
+  dialog input { flex: 1; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; min-width: 0; }
+  .lock { text-align: center; padding: 60px 16px; color: var(--mute); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+    .pending .drain { animation-duration: inherit !important; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <span class="dot" id="hdot"></span>
+  <h1>Reflex</h1>
+  <span class="health" id="health">connecting…</span>
+</header>
+<div id="app"></div>
+<form class="ask" id="ask">
+  <div class="row">
+    <textarea id="text" rows="1" placeholder="Ask your agents…" autocomplete="off"></textarea>
+    <button type="submit" aria-label="Send">↑</button>
+  </div>
+</form>
+<dialog id="pane">
+  <div class="head"><span class="dot" id="pdot"></span><b id="ptitle"></b>
+    <button class="btn" id="pclose" aria-label="Close">✕</button></div>
+  <div class="tools"><select id="ptheme" aria-label="Terminal theme"></select>
+    <button class="btn" id="pfocus">Focus in herdr</button></div>
+  <pre id="ptext"></pre>
+  <form class="send" id="psend"><input id="pinput" placeholder="Message this agent (prefix btw for a side question)"><button class="btn" type="submit">Send</button></form>
+</dialog>
+<script>
+(() => {
+  const qs = new URLSearchParams(location.search);
+  let token = qs.get("t") || "";
+  try { if (token) localStorage.setItem("reflex.token", token); else token = localStorage.getItem("reflex.token") || ""; } catch (e) {}
+  if (qs.get("t")) history.replaceState(null, "", location.pathname + location.hash);
+
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const api = async (path, body) => {
+    const r = await fetch(path, { method: body ? "POST" : "GET", headers: { authorization: "Bearer " + token },
+      body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
+    if (r.status === 401) throw new Error("token");
+    return r.json();
+  };
+  let state = null, toast = "", openPane = null;
+  const seen = new Set();
+  // Only things that just appeared animate in; a re-render never replays motion.
+  const fresh = (key) => { if (seen.has(key)) return ""; seen.add(key); return " new"; };
+  const tone = { ask: "var(--amber)", ready: "var(--green)", reply: "var(--green)", route: "var(--violet)", note: "var(--grey)" };
+  const home = (p) => p.replace(/^\/Users\/[^/]+/, "~");
+
+  function render() {
+    const app = $("app");
+    if (!token) { app.innerHTML = `<div class="lock">Open this page from the QR code in Reflex's settings.</div>`; return; }
+    if (!state) return;
+    const s = state;
+    $("hdot").className = "dot " + (s.herdr ? "done" : "blocked");
+    $("health").textContent = s.herdr ? `${s.agents.length} agents · ${s.folders} folders` : "herdr not reachable";
+    let h = toast ? `<div class="toast">${esc(toast)}</div>` : "";
+    if (s.pending.length) {
+      h += `<h2>Sending</h2>` + s.pending.map((p) => `<div class="pending${fresh("p" + p.id)}"><span class="label">${esc(p.label.replace(/^→ /, ""))}</span>
+        <button data-cancel="${p.id}">Undo</button><span class="drain" style="animation-duration:${p.left}ms;--from:${(p.left / Math.max(s.undo, 1)).toFixed(3)}"></span></div>`).join("");
+    }
+    h += `<h2>Inbox</h2>`;
+    h += s.inbox.length ? s.inbox.map((i) => `<div class="card${fresh("i" + i.id)}" style="--tone:${tone[i.kind] || "var(--blue)"}">
+        <div class="top"><span class="dot ${i.kind === "ask" ? "blocked" : i.kind === "ready" || i.kind === "reply" ? "done" : i.kind === "route" ? "route" : "idle"}"></span>
+          <span class="agent-name">${esc(i.agent)}</span><span class="title">${esc(i.title)}</span>
+          <button class="x" data-dismiss="${i.id}" aria-label="Dismiss">×</button></div>
+        ${i.body ? `<pre>${esc(i.body)}</pre>` : ""}
+        ${i.options.length ? `<div class="opts">${i.options.map((o) => `<button data-item="${i.id}" data-key="${esc(o.key)}"><span class="key">${esc(o.key)}</span><span>${esc(o.label)}</span></button>`).join("")}</div>` : ""}
+      </div>`).join("") : `<div class="empty">✓ All clear — nothing needs you.</div>`;
+    h += `<h2>Agents</h2><div class="agents">` + (s.agents.length ? s.agents.map((a) => `<div class="agent${fresh("a" + a.pane)}" data-pane="${esc(a.pane)}">
+        <span class="dot ${esc(a.status)}"></span><span class="who">${esc(a.kind)}</span>
+        <span class="where">${esc(home(a.cwd))}${a.title ? " · " + esc(a.title) : ""}</span></div>`).join("")
+      : `<div class="empty">No agents running in herdr.</div>`) + `</div>`;
+    if (s.receipts.length) {
+      h += `<h2>Recent</h2>` + s.receipts.slice(0, 8).map((r) => `<div class="receipt ${r.ok ? "" : "bad"}">${r.ok ? "✓" : "✗"} ${esc(r.label)} — ${esc(r.detail)}</div>`).join("");
+    }
+    app.innerHTML = h;
+  }
+
+  async function refresh() {
+    if (!token) return render();
+    try { state = await api("/api/state"); }
+    catch (e) { $("health").textContent = e.message === "token" ? "bad token" : "offline"; }
+    render();
+  }
+
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-cancel],[data-dismiss],[data-item],[data-pane]");
+    if (!t) return;
+    if (t.dataset.cancel) await api("/api/cancel", { id: +t.dataset.cancel });
+    else if (t.dataset.dismiss) await api("/api/dismiss", { item: +t.dataset.dismiss });
+    else if (t.dataset.item) await api("/api/answer", { item: +t.dataset.item, key: t.dataset.key });
+    else if (t.dataset.pane) return showPane(t.dataset.pane);
+    refresh();
+  });
+
+  $("ask").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("text").value.trim();
+    if (!text) return;
+    $("text").value = "";
+    toast = "Routing…"; render();
+    try {
+      const r = await api("/api/route", { text });
+      const d = r.route || {};
+      toast = d.decision === "go" ? d.label.replace(/^→ /, "→ ") : d.decision === "choose" ? d.title + " (see Inbox)" : "Could not route: " + (d.error || r.error);
+    } catch (err) { toast = "Failed: " + err.message; }
+    refresh();
+    setTimeout(() => { toast = ""; render(); }, 6000);
+  });
+  $("text").addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("ask").requestSubmit(); }
+  });
+
+  // Terminal themes (Ghostty's palettes); Tokyo Night by default.
+  const THEMES = {
+    "TokyoNight": ["#1a1b26", "#c0caf5", "#15161e #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #a9b1d6 #414868 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5"],
+    "TokyoNight Storm": ["#24283b", "#c0caf5", "#1d202f #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #a9b1d6 #414868 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5"],
+    "TokyoNight Moon": ["#222436", "#c8d3f5", "#1b1d2b #ff757f #c3e88d #ffc777 #82aaff #c099ff #86e1fc #828bb8 #444a73 #ff757f #c3e88d #ffc777 #82aaff #c099ff #86e1fc #c8d3f5"],
+    "TokyoNight Day": ["#e1e2e7", "#3760bf", "#e9e9ed #f52a65 #587539 #8c6c3e #2e7de9 #9854f1 #007197 #6172b0 #a1a6c5 #f52a65 #587539 #8c6c3e #2e7de9 #9854f1 #007197 #3760bf"],
+    "Catppuccin Mocha": ["#1e1e2e", "#cdd6f4", "#45475a #f38ba8 #a6e3a1 #f9e2af #89b4fa #f5c2e7 #94e2d5 #bac2de #585b70 #f38ba8 #a6e3a1 #f9e2af #89b4fa #f5c2e7 #94e2d5 #a6adc8"],
+    "Dracula": ["#282a36", "#f8f8f2", "#21222c #ff5555 #50fa7b #f1fa8c #bd93f9 #ff79c6 #8be9fd #f8f8f2 #6272a4 #ff6e6e #69ff94 #ffffa5 #d6acff #ff92df #a4ffff #ffffff"],
+    "GitHub Light": ["#ffffff", "#1f2328", "#24292f #cf222e #116329 #4d2d00 #0969da #8250df #1b7c83 #6e7781 #57606a #a40e26 #1a7f37 #633c01 #218bff #a475f9 #3192aa #8c959f"],
+  };
+  let themeName = "TokyoNight";
+  try { themeName = localStorage.getItem("reflex.theme") || themeName; } catch (e) {}
+  if (!THEMES[themeName]) themeName = "TokyoNight";
+  $("ptheme").innerHTML = Object.keys(THEMES).map((n) => `<option${n === themeName ? " selected" : ""}>${esc(n)}</option>`).join("");
+  $("ptheme").onchange = (e) => { themeName = e.target.value; try { localStorage.setItem("reflex.theme", themeName); } catch (err) {} paneTick(true); };
+
+  const xterm = (n, pal) => {
+    if (n < 16) return pal[n];
+    if (n < 232) { n -= 16; const v = [0, 95, 135, 175, 215, 255]; return `rgb(${v[Math.floor(n / 36)]},${v[Math.floor(n / 6) % 6]},${v[n % 6]})`; }
+    const g = 8 + (n - 232) * 10; return `rgb(${g},${g},${g})`;
+  };
+  // SGR-colored text to HTML; other escapes (cursor moves, modes) are dropped.
+  function ansiHtml(text, theme) {
+    const pal = theme[2].split(" ");
+    let st = {}, out = "", last = 0;
+    const span = (chunk) => {
+      if (!chunk) return;
+      let fg = st.fg, bg = st.bg;
+      if (st.inv) [fg, bg] = [bg || theme[0], fg || theme[1]];
+      const css = [fg && `color:${fg}`, bg && `background:${bg}`, st.bold && "font-weight:700", st.dim && "opacity:.6",
+        st.it && "font-style:italic", st.ul && "text-decoration:underline"].filter(Boolean).join(";");
+      out += css ? `<span style="${css}">${esc(chunk)}</span>` : esc(chunk);
+    };
+    const re = /\x1b\[([0-9;?:]*)([A-Za-z@])|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r/g;
+    let m;
+    while ((m = re.exec(text))) {
+      span(text.slice(last, m.index));
+      last = re.lastIndex;
+      if (m[2] !== "m") continue;
+      const ps = (m[1] || "0").split(/[;:]/).map((x) => +x || 0);
+      for (let i = 0; i < ps.length; i++) {
+        const c = ps[i];
+        if (c === 0) st = {};
+        else if (c === 1) st.bold = 1; else if (c === 2) st.dim = 1; else if (c === 3) st.it = 1;
+        else if (c === 4) st.ul = 1; else if (c === 7) st.inv = 1;
+        else if (c === 22) st.bold = st.dim = 0; else if (c === 23) st.it = 0; else if (c === 24) st.ul = 0; else if (c === 27) st.inv = 0;
+        else if (c >= 30 && c <= 37) st.fg = pal[c - 30]; else if (c >= 90 && c <= 97) st.fg = pal[c - 82];
+        else if (c >= 40 && c <= 47) st.bg = pal[c - 40]; else if (c >= 100 && c <= 107) st.bg = pal[c - 92];
+        else if (c === 39) st.fg = null; else if (c === 49) st.bg = null;
+        else if (c === 38 || c === 48) {
+          const key = c === 38 ? "fg" : "bg";
+          if (ps[i + 1] === 5) { st[key] = xterm(ps[i + 2], pal); i += 2; }
+          else if (ps[i + 1] === 2) { st[key] = `rgb(${ps[i + 2]},${ps[i + 3]},${ps[i + 4]})`; i += 4; }
+        }
+      }
+    }
+    span(text.slice(last));
+    return out;
+  }
+
+  async function showPane(pane) {
+    openPane = pane;
+    const a = state.agents.find((x) => x.pane === pane) || { kind: "agent", cwd: "", status: "unknown" };
+    $("ptitle").textContent = `${a.kind} · ${a.cwd.split("/").filter(Boolean).pop() || a.cwd}`;
+    $("pdot").className = "dot " + a.status;
+    $("pane").showModal();
+    paneTick();
+  }
+  let paneTimer = null;
+  async function paneTick(once) {
+    if (!openPane || !$("pane").open) return;
+    const t = THEMES[themeName];
+    $("ptext").style.setProperty("--term-bg", t[0]);
+    $("ptext").style.setProperty("--term-fg", t[1]);
+    try {
+      const r = await api("/api/pane?format=ansi&id=" + encodeURIComponent(openPane) + "&lines=150");
+      const pinned = $("ptext").scrollHeight - $("ptext").scrollTop - $("ptext").clientHeight < 40;
+      $("ptext").innerHTML = r.text ? ansiHtml(r.text, t) : esc(r.error || "");
+      if (pinned) $("ptext").scrollTop = $("ptext").scrollHeight;
+    } catch (e) {}
+    if (once !== true) { clearTimeout(paneTimer); paneTimer = setTimeout(paneTick, 1200); }
+  }
+  $("pclose").onclick = () => { openPane = null; $("pane").close(); };
+  $("pfocus").onclick = () => api("/api/focus", { pane: openPane });
+  $("psend").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = $("pinput").value.trim();
+    if (!text) return;
+    $("pinput").value = "";
+    const side = /^\/?btw\b/i.test(text);
+    await api(side ? "/api/side" : "/api/send", { pane: openPane, text, label: "agent" });
+    refresh();
+  });
+
+  refresh().then(() => {
+    const m = /^#pane=(.+)$/.exec(location.hash);
+    if (m && state) showPane(decodeURIComponent(m[1]));
+  });
+  setInterval(refresh, 1500);
+})();
+</script>
+</body>
+</html>
