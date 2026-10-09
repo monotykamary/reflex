@@ -692,6 +692,27 @@ def side_ctx(+cfg: Cfg, +chan: Chan(Env), +pane: String, +text: String, ctx: M.R
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false}")
 
+# One tiny typed Jev call, to prove the credentials and measure latency.
+def ping_line() -> String:
+  "{\"id\":1,\"op\":\"jev\",\"request\":{\"state\":\"Reflex setup check.\",\"questions\":{\"ready\":{\"type\":\"noul\",\"instructions\":\"Is this a setup check?\"}}}}\n"
+
+def ping_json(r: Result<&1, &1, U32 & String, J.JSON>, +ms: U32) -> String:
+  match r:
+    case Done{v}:
+      Js.obj([Js.kv("ok", "true"), Js.kv("ms", Js.num(ms))])
+    case Fail{(code, msg)}:
+      Js.obj([Js.kv("ok", "false"), Js.kv("ms", Js.num(ms)), Js.kv("error", Js.str(msg))])
+
+def ok(json: String) -> IO(String):
+  IO.pure(String, Http.json(200, json))
+
+def jev_ping(+cfg: Cfg) -> IO(String):
+  do IO<String>:
+    t0 : Nat <- IO.now()
+    out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), ping_line(), 1048576, 45000)
+    t1 : Nat <- IO.now()
+    ok(ping_json(R.response(text_or(stdout_of(out), "")), U32.from_nat(Nat.sub(t1, t0))))
+
 def folders_json(+home: String, fs: List<&2, M.Folder>) -> List<&2, String>:
   match fs:
     case Nil{}:
@@ -724,6 +745,7 @@ type Ep is Data:
   EHealth{}
   ESide{}
   EFocus{}
+  EJevPing{}
   EStatic{}
   EMissing{}
 
@@ -746,6 +768,7 @@ def rows() -> List<&2, Row>:
     Row{"/api/health", EHealth{}},
     Row{"/api/side", ESide{}},
     Row{"/api/focus", EFocus{}},
+    Row{"/api/jev/ping", EJevPing{}},
   ]
 
 def ep_pick(hit: Bool, ep: Ep, rest: Ep) -> Ep:
@@ -832,9 +855,6 @@ def serve_static.if(safe: Bool, +cfg: Cfg, +name: String) -> IO(String):
 def serve_static(+cfg: Cfg, +name: String) -> IO(String):
   serve_static.if(safe_name(name) && Core.bool_not(String.starts_with(name, ".")), cfg, name)
 
-def ok(json: String) -> IO(String):
-  IO.pure(String, Http.json(200, json))
-
 def pane_read(ansi: Bool, sock: String, pane: String, lines: U32) -> IO(Result<&1, &1, U32 & String, String>):
   match ansi:
     case True{}:
@@ -906,6 +926,8 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ctx : M.Reply <- ask(chan, M.Context{})
         r : String <- side_ctx(cfg, chan, Js.text_at(body, "pane"), Js.text_at(body, "text"), ctx)
         ok(r)
+    case EJevPing{}:
+      jev_ping(cfg)
     case EFocus{}:
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.focus(Cfg.sock(cfg), Js.text_at(body, "pane"))

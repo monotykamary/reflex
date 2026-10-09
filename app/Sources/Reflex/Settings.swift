@@ -18,6 +18,11 @@ final class Settings: ObservableObject {
     @Published var jevCredentialCommand: String { didSet { d.set(jevCredentialCommand, forKey: "jevCredentialCommand") } }
     @Published var herdrSession: String { didSet { d.set(herdrSession, forKey: "herdrSession") } }
     @Published var showStrip: Bool { didSet { d.set(showStrip, forKey: "showStrip") } }
+    /// Keep the rail on screen instead of revealing it at the edge.
+    @Published var railAlways: Bool { didSet { d.set(railAlways, forKey: "railAlways") } }
+    /// Let a new question surface at the edge on its own for a few seconds.
+    @Published var surfaceQuestions: Bool { didSet { d.set(surfaceQuestions, forKey: "surfaceQuestions") } }
+    @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
 
     private init() {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
@@ -30,6 +35,9 @@ final class Settings: ObservableObject {
         jevCredentialCommand = d.string(forKey: "jevCredentialCommand") ?? ""
         herdrSession = d.string(forKey: "herdrSession") ?? ""
         showStrip = d.object(forKey: "showStrip") as? Bool ?? true
+        railAlways = d.bool(forKey: "railAlways")
+        surfaceQuestions = d.object(forKey: "surfaceQuestions") as? Bool ?? true
+        onboarded = d.bool(forKey: "onboarded")
     }
 
     static var supportDir: URL {

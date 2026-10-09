@@ -35,9 +35,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenu()
         setupStrip()
         command.close = { [weak self] in self?.hideBar() }
-        hotkey = DoubleOption { [weak self] in self?.toggleBar() }
+        hotkey = DoubleOption { [weak self] in
+            if Onboarding.shared.consumeHotkey() { return }
+            self?.toggleBar()
+        }
         hotkey?.start()
-        if !DoubleOption.trusted, ProcessInfo.processInfo.environment["REFLEX_NO_AX_PROMPT"] == nil { DoubleOption.requestTrust() }
+        command.openSetup = { [weak self] step in self?.showOnboarding(at: step) }
+        if !Settings.shared.onboarded && ProcessInfo.processInfo.environment["REFLEX_SHOW"] == nil {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
+        }
         Settings.shared.$showStrip.sink { [weak self] show in
             DispatchQueue.main.async { show ? self?.strip?.orderFrontRegardless() : self?.strip?.orderOut(nil) }
         }.store(in: &bag)
@@ -58,6 +64,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 case "inbox": self?.showInbox()
                 case "settings": self?.showSettings()
                 case "rail": RailModel.shared.hover(true)
+                case "none": break
+                case "onboarding": self?.showOnboarding(at: Onboarding.Step(rawValue: Int(ProcessInfo.processInfo.environment["REFLEX_STEP"] ?? "0") ?? 0) ?? .welcome)
                 default: if let a = Store.shared.state.agents.first { self?.showPane(a.pane) }
                 }
             }
@@ -82,6 +90,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(item("Inbox", #selector(showInbox), key: "i"))
         m.addItem(.separator())
         m.addItem(item("Settings…", #selector(showSettings), key: ","))
+        m.addItem(item("Setup Guide…", #selector(openGuide)))
         m.addItem(item("Restart reflexd", #selector(restartDaemon)))
         m.addItem(item("Open log", #selector(openLog)))
         m.addItem(.separator())
@@ -104,26 +113,46 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private let railNarrow: CGFloat = 46
     private let railWide: CGFloat = 560
 
+    private let edge = EdgeReveal()
+    private var railScreen: NSScreen?
+    private var railY: CGFloat?
+
     private func setupStrip() {
         let view = Rail(openInbox: { [weak self] in self?.showInbox() },
                         openAgent: { [weak self] a in self?.showPane(a.pane) },
                         openBar: { [weak self] in self?.toggleBar() })
         let p = Panels.floating(view, size: NSSize(width: railNarrow, height: 300), key: false)
         p.level = .statusBar
+        p.ignoresMouseEvents = true
         strip = p
         placeStrip()
         if Settings.shared.showStrip { p.orderFrontRegardless() }
         RailModel.shared.$wide.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeStrip() }
         }.store(in: &bag)
+        edge.panel = { [weak self] in self?.strip }
+        edge.place = { [weak self] screen, y in
+            self?.railScreen = screen
+            self?.railY = y
+            self?.placeStrip()
+        }
+        edge.keepOpen = { InboxModel.shared.shown }
+        edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
+        edge.start()
+        Store.shared.$peek.map { $0?.id }.removeDuplicates().sink { [weak self] id in
+            guard id != nil, Settings.shared.surfaceQuestions else { return }
+            DispatchQueue.main.async { self?.edge.surface() }
+        }.store(in: &bag)
     }
 
+    /// Size the rail panel and keep it at the height where it was summoned.
     private func placeStrip() {
         guard let p = strip else { return }
-        let s = Panels.screen
+        let s = (railScreen ?? NSScreen.main)?.visibleFrame ?? Panels.screen
         let w = RailModel.shared.wide ? railWide : railNarrow
         let h = min(s.height * 0.9, CGFloat(170 + 46 * Store.shared.state.agents.count))
-        p.setFrame(NSRect(x: s.maxX - w, y: s.midY - h / 2, width: w, height: h), display: true)
+        let y = min(max((railY ?? s.midY) - h / 2, s.minY), s.maxY - h)
+        p.setFrame(NSRect(x: s.maxX - w, y: y, width: w, height: h), display: true)
     }
 
     // Command bar — shown instantly (used all day; no entrance animation)
@@ -216,6 +245,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.activate()
         w.makeKeyAndOrderFront(nil)
         w.makeFirstResponder(session.view)
+    }
+
+    // Onboarding
+
+    private var onboarding: NSWindow?
+
+    @objc private func openGuide() { showOnboarding() }
+
+    func showOnboarding(at step: Onboarding.Step = .welcome) {
+        if onboarding == nil {
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 600),
+                             styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
+            w.titleVisibility = .hidden
+            w.titlebarAppearsTransparent = true
+            w.isMovableByWindowBackground = true
+            w.backgroundColor = NSColor(hex: "#0d0e17")
+            w.appearance = NSAppearance(named: .darkAqua)
+            w.contentView = NSHostingView(rootView: OnboardingView())
+            w.isReleasedWhenClosed = false
+            NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in
+                Task { @MainActor in Onboarding.shared.closed() }
+            }
+            Onboarding.shared.close = { [weak w] in w?.close() }
+            onboarding = w
+        }
+        Onboarding.shared.begin(at: step)
+        onboarding!.center()
+        NSApp.activate()
+        onboarding!.makeKeyAndOrderFront(nil)
     }
 
     // Settings

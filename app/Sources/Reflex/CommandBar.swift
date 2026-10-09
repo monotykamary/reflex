@@ -24,6 +24,7 @@ final class CommandModel: ObservableObject {
     @Published var arrivals = 0
     private var lastText = ""
     var close: () -> Void = {}
+    var openSetup: (Onboarding.Step) -> Void = { _ in }
 
     func reset() {
         text = ""
@@ -277,6 +278,13 @@ struct CommandBar: View {
                     Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Tone.blocked)
                     Text(message).font(Type.body).lineLimit(3)
                     Spacer()
+                    if message.contains("provider key") || message.contains("CREDENTIAL") || message.lowercased().contains("credential") {
+                        Button("Set up Jev") { model.close(); model.openSetup(.jev) }
+                            .buttonStyle(.glassProminent).controlSize(.small)
+                    } else if message.contains("no live sessions") {
+                        Button("Set up") { model.close(); model.openSetup(.herdr) }
+                            .buttonStyle(.glass).controlSize(.small)
+                    }
                     Text("esc to edit").font(Type.meta).foregroundStyle(.tertiary)
                 }
             }

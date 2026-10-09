@@ -1,0 +1,784 @@
+import AppKit
+import SwiftUI
+
+// First run: six short steps, each one checking itself live — herdr running,
+// Jev answering (with its real latency), your projects indexed, ⌥⌥ and the
+// edge gesture actually tried. Seen once, so it may move a little more than
+// the everyday UI; it still never makes you wait for an animation.
+
+@MainActor
+final class Onboarding: ObservableObject {
+    static let shared = Onboarding()
+
+    enum Step: Int, CaseIterable { case welcome, herdr, jev, projects, keys, done }
+    enum Ping: Equatable { case idle, testing, ok(Int), failed(String) }
+
+    @Published var step: Step = .welcome
+    @Published var forward = true
+    @Published var herdrInstalled = false
+    @Published var integrations = false
+    @Published var jevInstalled = false
+    @Published var ping: Ping = .idle
+    @Published var installed: Set<String> = []
+    @Published var folders: [FolderInfo] = []
+    @Published var trusted = false
+    @Published var triedHotkey = false
+    @Published var triedEdge = false
+    @Published var working: String?
+    var close: () -> Void = {}
+    private(set) var isOpen = false
+    private var poll: Timer?
+
+    static let harnesses = ["claude", "codex", "pi", "grok", "opencode", "amp", "gemini"]
+
+    func begin(at step: Step = .welcome) {
+        self.step = step
+        isOpen = true
+        refresh()
+        poll?.invalidate()
+        poll = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.refresh() }
+        }
+        if step == .jev { test() }
+        if step == .projects { Task { await loadFolders() } }
+    }
+
+    func end() {
+        Settings.shared.onboarded = true
+        closed()
+        close()
+    }
+
+    /// The window went away (finished or closed).
+    func closed() {
+        isOpen = false
+        poll?.invalidate()
+    }
+
+    func go(_ s: Step) {
+        forward = s.rawValue >= step.rawValue
+        withAnimation(Motion.enter) { step = s }
+        if s == .jev, ping == .idle { test() }
+        if s == .projects { Task { await loadFolders() } }
+    }
+
+    func next() { if let n = Step(rawValue: step.rawValue + 1) { go(n) } else { end() } }
+    func back() { if let p = Step(rawValue: step.rawValue - 1) { go(p) } }
+
+    // MARK: Checks
+
+    private static func which(_ name: String) -> Bool {
+        let path = Daemon.shared.childEnvironment()["PATH"] ?? ""
+        return path.split(separator: ":").contains { FileManager.default.isExecutableFile(atPath: "\($0)/\(name)") }
+    }
+
+    func refresh() {
+        herdrInstalled = Onboarding.which("herdr")
+        jevInstalled = Onboarding.which("jev-fabric")
+        installed = Set(Onboarding.harnesses.filter { Onboarding.which($0) })
+        let home = NSHomeDirectory()
+        integrations = FileManager.default.fileExists(atPath: home + "/.claude/hooks/herdr-agent-state.sh")
+            || FileManager.default.fileExists(atPath: home + "/.pi/agent/extensions/herdr-agent-state.ts")
+        trusted = DoubleOption.trusted
+    }
+
+    var herdrRunning: Bool { Store.shared.connected && Store.shared.state.herdr }
+
+    func loadFolders() async {
+        folders = Array(await Client.local.folders("").prefix(8))
+    }
+
+    // MARK: Actions
+
+    func run(_ label: String, _ command: String) {
+        working = label
+        let env = Daemon.shared.childEnvironment()
+        Task.detached {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", command]
+            p.environment = env
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            try? p.run()
+            p.waitUntilExit()
+            await MainActor.run {
+                self.working = nil
+                self.refresh()
+            }
+        }
+    }
+
+    func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    func usePiKey() {
+        guard let cmd = Settings.piCredentialCommand else { return }
+        Settings.shared.jevProvider = "typesafe"
+        Settings.shared.jevCredentialCommand = cmd
+        restartAndTest()
+    }
+
+    func saveKey(_ key: String) {
+        let k = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !k.isEmpty else { return }
+        Settings.jevKey = k
+        Settings.shared.jevCredentialCommand = ""
+        restartAndTest()
+    }
+
+    private func restartAndTest() {
+        Daemon.shared.restart()
+        ping = .testing
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.6) { [weak self] in self?.test() }
+    }
+
+    func test() {
+        ping = .testing
+        Task {
+            struct R: Decodable { var ok: Bool; var ms: Int?; var error: String? }
+            do {
+                let r = try await Client.local.post("/api/jev/ping", [:], as: R.self)
+                withAnimation(Motion.enter) { ping = r.ok ? .ok(r.ms ?? 0) : .failed(r.error ?? "no answer") }
+            } catch {
+                withAnimation(Motion.enter) { ping = .failed("reflexd is not answering yet") }
+            }
+        }
+    }
+
+    func setRoots(_ roots: [String]) {
+        Settings.shared.roots = roots.joined(separator: ":")
+        Daemon.shared.restart()
+        Task {
+            try? await Task.sleep(for: .seconds(9))
+            await loadFolders()
+        }
+    }
+
+    func addRoot() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Add"
+        panel.directoryURL = URL(fileURLWithPath: NSHomeDirectory())
+        guard panel.runModal() == .OK else { return }
+        var roots = Settings.shared.roots.split(separator: ":").map(String.init)
+        for u in panel.urls where !roots.contains(u.path) { roots.append(u.path) }
+        setRoots(roots)
+    }
+
+    func pick(_ harness: String) {
+        Settings.shared.harness = harness
+        Daemon.shared.restart()
+    }
+
+    /// While the keyboard step is open, ⌥⌥ is practice: it checks the box
+    /// instead of opening the bar.
+    func consumeHotkey() -> Bool {
+        guard isOpen, step == .keys else { return false }
+        withAnimation(Motion.arrive) { triedHotkey = true }
+        return true
+    }
+
+    func noteEdgeReveal() {
+        guard isOpen, step == .keys else { return }
+        withAnimation(Motion.arrive) { triedEdge = true }
+    }
+}
+
+// MARK: - View
+
+struct OnboardingView: View {
+    @ObservedObject var model = Onboarding.shared
+    @ObservedObject var store = Store.shared
+    @ObservedObject var settings = Settings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var key = ""
+
+    var body: some View {
+        ZStack {
+            Backdrop()
+            HStack(spacing: 0) {
+                copy
+                    .frame(width: 400, alignment: .leading)
+                    .padding(.leading, 48)
+                    .padding(.trailing, 28)
+                stage
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.trailing, 36)
+            }
+            .padding(.top, 52)
+            .padding(.bottom, 92)
+            VStack { Spacer(); footer }
+        }
+        .frame(width: 920, height: 600)
+        .environment(\.colorScheme, .dark)
+        .onKeyPress(.return) { model.next(); return .handled }
+    }
+
+    // MARK: Copy column
+
+    private var copy: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text(eyebrow)
+                .font(.system(size: 11, weight: .semibold))
+                .tracking(1.6)
+                .textCase(.uppercase)
+                .foregroundStyle(.white.opacity(0.5))
+            Text(title)
+                .font(.system(size: 38, weight: .regular, design: .serif))
+                .foregroundStyle(.white)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(lede)
+                .font(.system(size: 15))
+                .foregroundStyle(.white.opacity(0.68))
+                .lineSpacing(3)
+                .fixedSize(horizontal: false, vertical: true)
+            checks.padding(.top, 8)
+            Spacer(minLength: 0)
+        }
+        .id(model.step)
+        .transition(.asymmetric(
+            insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 1, y: 10, blur: 6), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0)),
+            removal: .modifier(active: SurfaceFX(opacity: 0, scale: 1, y: -6, blur: 4), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))))
+    }
+
+    private var eyebrow: String {
+        switch model.step {
+        case .welcome: return "Reflex"
+        case .herdr: return "1 of 4 · Your agents"
+        case .jev: return "2 of 4 · The reflex"
+        case .projects: return "3 of 4 · Your work"
+        case .keys: return "4 of 4 · Your hands"
+        case .done: return "Ready"
+        }
+    }
+
+    private var title: String {
+        switch model.step {
+        case .welcome: return "Every agent,\none reflex away."
+        case .herdr: return "Agents live\nin herdr."
+        case .jev: return "A reflex,\nnot a conversation."
+        case .projects: return "Where do\nyou work?"
+        case .keys: return "Two taps,\none edge."
+        case .done: return "You're set."
+        }
+    }
+
+    private var lede: String {
+        switch model.step {
+        case .welcome:
+            return "Reflex sends what you say to the right coding agent — or starts one in the right folder — and brings back everything that needs you. Your agents keep running in their own terminals, on the plans you already have."
+        case .herdr:
+            return "Reflex sees and talks to agents through herdr, a terminal built for them. Run your agents in it; Reflex reads their state, answers their questions and opens their terminals."
+        case .jev:
+            return "No chat model rewrites your words. Jev, a System 1 model, answers three typed questions — which session, which folder, is it a side question — in a few hundred milliseconds. Below 60% confidence, Reflex asks you instead."
+        case .projects:
+            return "Reflex indexes the repositories under these folders — names, descriptions, recent commits — so a request like “fix the flaky test in jev fabric” starts in the right place."
+        case .keys:
+            return "Double-tap ⌥ anywhere to ask. Rest your pointer on the right edge for a second to see your agents. Try both now."
+        case .done:
+            return "Here's everything, in one breath."
+        }
+    }
+
+    // MARK: Checklists
+
+    @ViewBuilder private var checks: some View {
+        switch model.step {
+        case .welcome:
+            EmptyView()
+        case .herdr:
+            VStack(alignment: .leading, spacing: 10) {
+                Check(ok: model.herdrInstalled, title: "herdr installed", detail: model.herdrInstalled ? nil : "brew install herdr") {
+                    if !model.herdrInstalled { GlassAction("Copy") { model.copy("brew install herdr") } }
+                }
+                Check(ok: model.herdrRunning, title: "herdr running", detail: model.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "run `herdr` in your terminal") {
+                    if !model.herdrRunning { GlassAction("Copy") { model.copy("herdr") } }
+                }
+                Check(ok: model.integrations, title: "Agent integrations", detail: model.integrations ? "exact sessions for side questions" : "lets side questions fork the exact session") {
+                    if !model.integrations {
+                        GlassAction(model.working == "integrations" ? "Installing…" : "Install") {
+                            model.run("integrations", "herdr integration install claude; herdr integration install pi")
+                        }
+                    }
+                }
+            }
+        case .jev:
+            VStack(alignment: .leading, spacing: 10) {
+                Check(ok: model.jevInstalled, title: "jev-fabric installed",
+                      detail: model.jevInstalled ? nil : "curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh") {
+                    if !model.jevInstalled {
+                        GlassAction("Copy") { model.copy("curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh") }
+                    }
+                }
+                Check(ok: pingOK, title: "Jev answering", detail: pingDetail) {
+                    GlassAction(model.ping == .testing ? "Testing…" : "Test") { model.test() }
+                }
+                if !pingOK {
+                    if Settings.piCredentialCommand != nil {
+                        Button { model.usePiKey() } label: {
+                            Label("Use the TypeSafe key pi already has", systemImage: "key.fill")
+                                .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.glassProminent)
+                        .tint(Tone.working)
+                        .controlSize(.large)
+                    }
+                    HStack {
+                        SecureField("…or paste a TypeSafe API key", text: $key)
+                            .textFieldStyle(.plain)
+                            .padding(.horizontal, 12).padding(.vertical, 8)
+                            .glassEffect(.regular, in: Capsule())
+                            .onSubmit { model.saveKey(key); key = "" }
+                        GlassAction("Save") { model.saveKey(key); key = "" }
+                    }
+                }
+            }
+        case .projects:
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(settings.roots.split(separator: ":").map(String.init), id: \.self) { root in
+                    HStack {
+                        Image(systemName: "folder.fill").foregroundStyle(Tone.working)
+                        Text(root.abbreviatingHome).font(.system(size: 13, weight: .medium))
+                        Spacer()
+                        Button {
+                            model.setRoots(settings.roots.split(separator: ":").map(String.init).filter { $0 != root })
+                        } label: { Image(systemName: "xmark") }
+                        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5))
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
+                HStack {
+                    GlassAction("Add folder…") { model.addRoot() }
+                    Spacer()
+                    Text(store.state.folders == 0 ? "indexing…" : "\(store.state.folders) repositories")
+                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
+                        .contentTransition(.numericText(value: Double(store.state.folders)))
+                }
+                Text("New sessions start with").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).padding(.top, 6)
+                LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), alignment: .leading, spacing: 6) {
+                    ForEach(Onboarding.harnesses, id: \.self) { h in
+                        let on = settings.harness == h
+                        let have = model.installed.contains(h)
+                        Button { model.pick(h) } label: {
+                            Text(h).font(.system(size: 12, weight: on ? .semibold : .regular))
+                                .lineLimit(1).fixedSize()
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 7)
+                                .opacity(have ? 1 : 0.4)
+                        }
+                        .buttonStyle(Pressable())
+                        .glassEffect(on ? .regular.tint(Tone.working.opacity(0.45)) : .regular, in: Capsule())
+                        .disabled(!have)
+                        .help(have ? h : "\(h) is not installed")
+                    }
+                }
+            }
+        case .keys:
+            VStack(alignment: .leading, spacing: 10) {
+                Check(ok: model.trusted, title: "Accessibility", detail: model.trusted ? "⌥⌥ works everywhere" : "needed to hear ⌥⌥ in other apps") {
+                    if !model.trusted { GlassAction("Allow…") { DoubleOption.requestTrust() } }
+                }
+                Check(ok: model.triedHotkey, title: "Double-tap ⌥", detail: model.triedHotkey ? "that's the one" : "try it now") { EmptyView() }
+                Check(ok: model.triedEdge, title: "Rest on the right edge", detail: model.triedEdge ? "there they are" : "move to the edge and hold still for a second") { EmptyView() }
+                if model.trusted && !model.triedHotkey {
+                    Text("Just allowed it? Relaunch so macOS hands Reflex the keys.")
+                        .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
+                }
+            }
+        case .done:
+            VStack(alignment: .leading, spacing: 9) {
+                Cheat(keys: "⌥⌥", what: "Ask — Jev routes it")
+                Cheat(keys: "⇥", what: "Pin an agent instead of routing")
+                Cheat(keys: "btw", what: "Ask on the side, without interrupting")
+                Cheat(keys: "esc", what: "Undo during the 2-second window")
+                Cheat(keys: "edge", what: "Rest on the right edge to see agents")
+                Cheat(keys: "J K 1–9", what: "Move and answer in the inbox")
+            }
+        }
+    }
+
+    private var pingOK: Bool { if case .ok = model.ping { return true } else { return false } }
+
+    private var pingDetail: String {
+        switch model.ping {
+        case .idle: return "not tested yet"
+        case .testing: return "asking Jev…"
+        case .ok(let ms): return "answered in \(ms) ms"
+        case .failed(let e): return e
+        }
+    }
+
+    // MARK: Stage (illustrations)
+
+    private var stage: some View {
+        ZStack {
+            switch model.step {
+            case .welcome: RailIllustration()
+            case .herdr: PanesIllustration(agents: store.state.agents)
+            case .jev: DecisionIllustration(ping: model.ping)
+            case .projects: FoldersIllustration(folders: model.folders)
+            case .keys: KeysIllustration(hotkey: model.triedHotkey, edge: model.triedEdge)
+            case .done: RailIllustration(celebrate: true)
+            }
+        }
+        .id(model.step)
+        .transition(.asymmetric(
+            insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 0.96, y: 0, blur: 8), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0)),
+            removal: .modifier(active: SurfaceFX(opacity: 0, scale: 1.02, y: 0, blur: 6), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))))
+    }
+
+    // MARK: Footer
+
+    private var footer: some View {
+        HStack(spacing: 14) {
+            HStack(spacing: 6) {
+                ForEach(Onboarding.Step.allCases, id: \.self) { s in
+                    Capsule()
+                        .fill(.white.opacity(s == model.step ? 0.9 : (s.rawValue < model.step.rawValue ? 0.45 : 0.18)))
+                        .frame(width: s == model.step ? 22 : 7, height: 7)
+                        .onTapGesture { model.go(s) }
+                }
+            }
+            .animation(Motion.spring, value: model.step)
+            Spacer()
+            if model.step != .welcome && model.step != .done {
+                Button("Back") { model.back() }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white.opacity(0.6))
+                    .keyboardShortcut(.leftArrow, modifiers: [])
+            }
+            Button {
+                model.next()
+            } label: {
+                Text(primaryLabel).font(.system(size: 14, weight: .semibold)).padding(.horizontal, 10)
+            }
+            .buttonStyle(.glassProminent)
+            .tint(Tone.working)
+            .controlSize(.large)
+            .keyboardShortcut(.defaultAction)
+        }
+        .padding(.horizontal, 48)
+        .padding(.bottom, 32)
+    }
+
+    private var primaryLabel: String {
+        switch model.step {
+        case .welcome: return "Get started"
+        case .done: return "Start using Reflex"
+        case .herdr: return model.herdrRunning ? "Continue" : "Skip for now"
+        case .jev: return pingOK ? "Continue" : "Skip for now"
+        case .keys: return model.triedHotkey || model.triedEdge ? "Continue" : "Skip for now"
+        default: return "Continue"
+        }
+    }
+}
+
+// MARK: - Pieces
+
+private struct Check<Accessory: View>: View {
+    var ok: Bool
+    var title: String
+    var detail: String?
+    @ViewBuilder var accessory: Accessory
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            ZStack {
+                Circle().strokeBorder(.white.opacity(ok ? 0 : 0.25), lineWidth: 1.5)
+                if ok {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(Tone.done)
+                        .transition(.symbolEffect(.drawOn))
+                }
+            }
+            .frame(width: 20, height: 20)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                if let detail {
+                    Text(detail).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55))
+                        .lineLimit(2).textSelection(.enabled)
+                        .contentTransition(.interpolate)
+                }
+            }
+            Spacer(minLength: 8)
+            accessory
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .glassEffect(ok ? .regular.tint(Tone.done.opacity(0.10)) : .regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .animation(Motion.enter, value: ok)
+    }
+}
+
+private struct GlassAction: View {
+    var title: String
+    var action: () -> Void
+    init(_ title: String, action: @escaping () -> Void) {
+        self.title = title
+        self.action = action
+    }
+    var body: some View {
+        Button(title, action: action).buttonStyle(.glass).controlSize(.small)
+    }
+}
+
+private struct Cheat: View {
+    var keys: String
+    var what: String
+    var body: some View {
+        HStack(spacing: 12) {
+            Text(keys)
+                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .padding(.horizontal, 9).padding(.vertical, 4)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .frame(minWidth: 70, alignment: .leading)
+            Text(what).font(.system(size: 13.5)).foregroundStyle(.white.opacity(0.8))
+        }
+    }
+}
+
+/// A slow, dark mesh — Tokyo Night's blues and violets drifting under the glass.
+private struct Backdrop: View {
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    var body: some View {
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduce)) { context in
+            let t = reduce ? 0 : context.date.timeIntervalSinceReferenceDate
+            let w = { (a: Double, f: Double) -> Float in Float(0.5 + a * sin(t * f)) }
+            MeshGradient(width: 3, height: 3, points: [
+                [0, 0], [w(0.12, 0.11), 0], [1, 0],
+                [0, w(0.14, 0.09)], [w(0.18, 0.07), w(0.16, 0.13)], [1, w(0.12, 0.08)],
+                [0, 1], [w(0.15, 0.10), 1], [1, 1],
+            ], colors: [
+                Color(hex: "#0d0e17"), Color(hex: "#16172a"), Color(hex: "#1a1b2e"),
+                Color(hex: "#151a33"), Color(hex: "#2a2350"), Color(hex: "#0f2237"),
+                Color(hex: "#0b0c14"), Color(hex: "#1b1534"), Color(hex: "#0d1622"),
+            ])
+        }
+        .ignoresSafeArea()
+    }
+}
+
+// MARK: - Illustrations
+
+private struct RailIllustration: View {
+    var celebrate = false
+    @State private var bud = false
+    var body: some View {
+        HStack(alignment: .center, spacing: 14) {
+            if bud {
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Tone.blocked).frame(width: 6, height: 6)
+                        Text("claude · api").font(Type.title)
+                        Text("needs you").font(Type.meta).foregroundStyle(.secondary)
+                    }
+                    Text("Run the migration?").font(Type.meta)
+                    HStack(spacing: 6) {
+                        KeyCap(key: "1", tint: Tone.blocked); Text("Yes").font(Type.meta)
+                        KeyCap(key: "2", tint: Tone.blocked); Text("No").font(Type.meta)
+                    }
+                }
+                .padding(14)
+                .glassEffect(.regular.tint(Tone.blocked.opacity(0.18)), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                .transition(.surface())
+            }
+            VStack(spacing: 14) {
+                Text(celebrate ? "✓" : "2").font(Type.count).foregroundStyle(.white)
+                    .frame(width: 22, height: 22).background((celebrate ? Tone.done : Tone.blocked).gradient, in: Circle())
+                Bead(status: "working", size: 10)
+                Bead(status: "blocked", size: 10)
+                Bead(status: "done", size: 10)
+                Bead(status: "working", size: 10)
+                Image(systemName: "sparkle").font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            .padding(.vertical, 16).padding(.horizontal, 10)
+            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        }
+        .task {
+            try? await Task.sleep(for: .milliseconds(700))
+            withAnimation(Motion.spring) { bud = true }
+        }
+    }
+}
+
+private struct PanesIllustration: View {
+    var agents: [AgentInfo]
+    private var rows: [(String, String)] {
+        let live = agents.prefix(4).map { ("\($0.kind) · \($0.folder)", $0.status) }
+        return live.isEmpty ? [("claude · api", "working"), ("pi · web", "blocked"), ("codex · infra", "done")] : Array(live)
+    }
+    var body: some View {
+        VStack(spacing: 10) {
+            ForEach(Array(rows.enumerated()), id: \.offset) { i, r in
+                HStack(spacing: 10) {
+                    Bead(status: r.1, size: 8)
+                    Text(r.0).font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    Spacer()
+                    Text(r.1).font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16).padding(.vertical, 14)
+                .background(Color(hex: "#1a1b26").opacity(0.85), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.08)))
+                .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.06)))
+            }
+        }
+        .frame(width: 330)
+        .padding(18)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+    }
+}
+
+private struct DecisionIllustration: View {
+    var ping: Onboarding.Ping
+    @State private var fill = false
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("“fix the flaky follow test in jev fabric”")
+                .font(.system(size: 15, design: .serif)).foregroundStyle(.white.opacity(0.9))
+            Divider().opacity(0.3)
+            bar("target", "pi · jev-fabric", 0.97, Tone.working)
+            bar("folder", "jev-fabric", 1.0, Tone.route)
+            bar("side question", "no", 0.31, Tone.blocked)
+            HStack {
+                Image(systemName: "bolt.fill").foregroundStyle(Tone.done)
+                Text(latency).font(.system(size: 12, design: .monospaced)).foregroundStyle(.white.opacity(0.7))
+            }
+        }
+        .frame(width: 330)
+        .padding(20)
+        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .task {
+            try? await Task.sleep(for: .milliseconds(250))
+            withAnimation(.timingCurve(0.23, 1, 0.32, 1, duration: 0.7)) { fill = true }
+        }
+    }
+
+    private var latency: String {
+        if case .ok(let ms) = ping { return "jev · \(ms) ms · typed, no text" }
+        return "jev · typed answers, no text"
+    }
+
+    private func bar(_ q: String, _ answer: String, _ p: Double, _ tone: Color) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack {
+                Text(q).font(.system(size: 11, weight: .semibold)).textCase(.uppercase).tracking(0.8).foregroundStyle(.white.opacity(0.45))
+                Spacer()
+                Text(answer).font(.system(size: 12.5, weight: .semibold))
+                Text("\(Int(p * 100))%").font(.system(size: 12, design: .monospaced)).foregroundStyle(.white.opacity(0.6))
+            }
+            GeometryReader { g in
+                Capsule().fill(.white.opacity(0.08))
+                Capsule().fill(tone.gradient).frame(width: g.size.width * (fill ? p : 0))
+            }
+            .frame(height: 5)
+        }
+    }
+}
+
+private struct FoldersIllustration: View {
+    var folders: [FolderInfo]
+    private var names: [(String, String)] {
+        folders.isEmpty ? [("api", "Payments API"), ("web", "Marketing site"), ("infra", "Terraform"), ("jev-fabric", "Native process orchestration")]
+            : folders.prefix(6).map { ($0.name, $0.desc) }
+    }
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(Array(names.enumerated()), id: \.offset) { i, f in
+                HStack(spacing: 10) {
+                    Image(systemName: "folder.fill").foregroundStyle(Tone.working.opacity(0.9))
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(f.0).font(.system(size: 13, weight: .semibold))
+                        if !f.1.isEmpty { Text(f.1).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(1) }
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 12).padding(.vertical, 8)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.05)))
+            }
+        }
+        .frame(width: 320)
+    }
+}
+
+private struct KeysIllustration: View {
+    var hotkey: Bool
+    var edge: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        VStack(spacing: 28) {
+            HStack(spacing: 12) {
+                cap(delay: 0)
+                cap(delay: 0.22)
+                if hotkey {
+                    Image(systemName: "checkmark.circle.fill").font(.system(size: 22)).foregroundStyle(Tone.done)
+                        .transition(.symbolEffect(.drawOn))
+                }
+            }
+            ZStack(alignment: .trailing) {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(.white.opacity(0.04))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
+                    .frame(width: 300, height: 170)
+                Sliver(done: edge)
+            }
+            .frame(width: 300, height: 170)
+        }
+    }
+
+    private func cap(delay: Double) -> some View {
+        PhaseAnimator([false, true, false], trigger: reduce) { down in
+            Text("⌥")
+                .font(.system(size: 28, weight: .medium))
+                .frame(width: 64, height: 58)
+                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .scaleEffect(down && !reduce ? 0.93 : 1)
+                .offset(y: down && !reduce ? 2 : 0)
+        } animation: { down in
+            down ? .timingCurve(0.23, 1, 0.32, 1, duration: 0.12).delay(delay) : .timingCurve(0.23, 1, 0.32, 1, duration: 0.5).delay(0.9)
+        }
+    }
+}
+
+/// The edge gesture, demonstrated: a sliver grows, then the rail appears.
+private struct Sliver: View {
+    var done: Bool
+    @State private var grow = false
+    var body: some View {
+        HStack(spacing: 8) {
+            if done {
+                VStack(spacing: 10) {
+                    Bead(status: "working", size: 8)
+                    Bead(status: "blocked", size: 8)
+                    Bead(status: "done", size: 8)
+                }
+                .padding(.vertical, 12).padding(.horizontal, 8)
+                .glassEffect(.regular, in: Capsule())
+                .transition(.surface())
+            } else {
+                Capsule()
+                    .fill(Color.accentColor.opacity(grow ? 0.85 : 0.25))
+                    .frame(width: 4, height: grow ? 80 : 18)
+                    .shadow(color: Color.accentColor.opacity(grow ? 0.6 : 0), radius: 6)
+            }
+        }
+        .padding(.trailing, 4)
+        .animation(Motion.spring, value: done)
+        .task(id: done) {
+            while !done && !Task.isCancelled {
+                withAnimation(.linear(duration: 1.0)) { grow = true }
+                try? await Task.sleep(for: .milliseconds(1400))
+                withAnimation(Motion.exit) { grow = false }
+                try? await Task.sleep(for: .milliseconds(600))
+            }
+        }
+    }
+}

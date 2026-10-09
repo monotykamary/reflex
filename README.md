@@ -37,7 +37,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 
 | | |
 |---|---|
-| **Edge strip** | A dot per agent on the screen's right edge: blue working, amber needs you, green done. Click one to open it. |
+| **Rail** | Hidden until you want it: rest the pointer on the right edge of a screen for a second (a sliver grows meanwhile) and a glass rail slides in at that height — a dot per agent, blue working, amber needs you, green done. It stays while you're near it and slides away when you leave. New questions surface on their own for a few seconds. |
 | **⌥⌥ command bar** | Double-tap Option, type, ⏎. Reflex routes it to the right session, or starts a new one in the right folder. ⇥ pins a specific agent instead. The action waits out a **2 s undo window** (Esc undoes and gives your text back). |
 | **Unsure? It asks.** | Below the confidence threshold (default 60%) nothing is sent: you get numbered choices (1/2/3) instead. |
 | **Inbox** | Every blocked question (with its numbered options parsed off the agent's screen), finished turn, side answer and routing question. J/K move, 1–9 answer, E clear, ⏎ open, U undo. |
@@ -105,8 +105,10 @@ scripts/build-app.sh          # reflexd + Reflex.app → build/Reflex.app
 open build/Reflex.app
 ```
 
-First run: grant Accessibility (for ⌥⌥), then in Settings set your project
-roots, default agent and Jev key (or "Use the TypeSafe key pi already has").
+First run opens the setup guide (menu bar → Setup Guide… to reopen it): it
+checks herdr and its integrations, connects Jev (one click to reuse pi's
+TypeSafe key, or paste a key) and pings it, indexes your project roots, picks
+your default agent, and has you try ⌥⌥ and the edge gesture.
 For `btw` forks to target the exact session, install herdr's integrations:
 `herdr integration install claude && herdr integration install pi`
 (without them Reflex forks the newest session in that folder).

@@ -8,6 +8,10 @@ import SwiftUI
 final class RailModel: ObservableObject {
     static let shared = RailModel()
     @Published var expanded = false
+    /// The rail is hidden until summoned at the screen edge (or a question surfaces).
+    @Published var visible = false
+    /// 0…1 while the pointer rests on the edge: the sliver grows as it fills.
+    @Published var dwell: CGFloat = CGFloat(Double(ProcessInfo.processInfo.environment["REFLEX_DEBUG_DWELL"] ?? "") ?? 0)
     /// The panel must be wide while the rail is open or a peek is showing.
     @Published private(set) var wide = false
     private var intent: Task<Void, Never>?
@@ -32,7 +36,7 @@ final class RailModel: ObservableObject {
         intent = Task { [weak self] in
             try? await Task.sleep(for: .milliseconds(320))
             guard !Task.isCancelled, let self else { return }
-            if !self.expanded && Store.shared.peek == nil { self.wide = false }
+            if !self.expanded && (Store.shared.peek == nil || !self.visible) { self.wide = false }
         }
     }
 
@@ -52,6 +56,33 @@ struct Rail: View {
     private var anyBlocked: Bool { store.state.agents.contains { $0.status == "blocked" } }
 
     var body: some View {
+        ZStack(alignment: .trailing) {
+            if !rail.visible && rail.dwell > 0.12 {
+                sliver.transition(.opacity)
+            }
+            content
+                .opacity(rail.visible ? 1 : 0)
+                .offset(x: rail.visible || reduce ? 0 : 36)
+                .blur(radius: rail.visible || reduce ? 0 : 4)
+                .allowsHitTesting(rail.visible)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .animation(rail.visible ? Motion.enter : Motion.exit, value: rail.visible)
+    }
+
+    /// The dwell indicator: a glass sliver on the edge that grows for the one
+    /// second you rest there, so the gesture explains itself.
+    private var sliver: some View {
+        Capsule()
+            .fill(Color.accentColor.opacity(0.35 + 0.5 * rail.dwell))
+            .frame(width: 4, height: 18 + 70 * rail.dwell)
+            .glassEffect(.regular.tint(Color.accentColor.opacity(0.3)), in: Capsule())
+            .shadow(color: Color.accentColor.opacity(0.6 * rail.dwell), radius: 6)
+            .padding(.trailing, 2)
+            .animation(.linear(duration: 0.05), value: rail.dwell)
+    }
+
+    private var content: some View {
         GlassEffectContainer(spacing: 14) {
             HStack(alignment: .center, spacing: 10) {
                 if let peek = store.peek, !rail.expanded {
