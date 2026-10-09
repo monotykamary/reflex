@@ -372,8 +372,10 @@ private struct QuestionCard: View {
                                 .foregroundStyle(Ink.dim)
                                 .frame(width: 18, height: 18)
                                 .background(Ink.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            Text(o.label.bare).font(.system(size: 13)).foregroundStyle(Ink.text).lineLimit(1)
-                            Spacer(minLength: 0)
+                            Text(o.label.bare).font(.system(size: 13)).foregroundStyle(Ink.text)
+                                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                .multilineTextAlignment(.leading)
+                                .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 9)
                         .background(hoverKey == o.key ? Ink.hover : Ink.raised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -419,10 +421,14 @@ private struct KeyHint: View {
         HStack(spacing: 6) {
             Text("Press").foregroundStyle(Ink.dim)
             ForEach(Array(keys.enumerated()), id: \.offset) { i, k in
-                Text(k).font(.system(size: 10.5, weight: .semibold, design: .rounded)).foregroundStyle(Ink.text)
-                    .frame(width: 17, height: 17)
-                    .background(Ink.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                if i < keys.count - 1 { Text(i == keys.count - 2 ? "or" : ",").foregroundStyle(Ink.dim) }
+                // The comma hugs its key ("1, 2 or 3"); "or" keeps normal spacing.
+                HStack(spacing: 1) {
+                    Text(k).font(.system(size: 10.5, weight: .semibold, design: .rounded)).foregroundStyle(Ink.text)
+                        .frame(width: 17, height: 17)
+                        .background(Ink.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    if i < keys.count - 2 { Text(",").foregroundStyle(Ink.dim) }
+                }
+                if i == keys.count - 2 { Text("or").foregroundStyle(Ink.dim) }
             }
             Text("to answer").foregroundStyle(Ink.dim)
         }
