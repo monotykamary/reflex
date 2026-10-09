@@ -37,7 +37,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 
 | | |
 |---|---|
-| **Rail** | Hidden until you want it: rest the pointer on the right edge of a screen for half a second (a sliver grows meanwhile) and a glass rail slides in at that height — a dot per agent, blue working, amber needs you, green done. It stays while you're near it and slides away when you leave. New questions surface on their own for a few seconds. |
+| **Tab & rail** | While agents are active, a small dark tab grows out of the right screen edge: a spinning ring per working agent, amber for waiting, green for done. Hover it (or rest on an empty edge for half a second) to open the rail: inbox, agents, Ask, Settings, the setup guide, and — when something waits on you — its question as a card you answer with 1, 2 or 3. |
 | **⌥⌥ command bar** | Double-tap Option, type, ⏎. Reflex routes it to the right session, or starts a new one in the right folder. ⇥ pins a specific agent instead. The action waits out a **2 s undo window** (Esc undoes and gives your text back). |
 | **Unsure? It asks.** | Below the confidence threshold (default 60%) nothing is sent: you get numbered choices (1/2/3) instead. |
 | **Inbox** | Every blocked question (with its numbered options parsed off the agent's screen), finished turn, side answer and routing question. J/K move, 1–9 answer, E clear, ⏎ open, U undo. |

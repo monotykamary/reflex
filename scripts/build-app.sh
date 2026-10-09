@@ -30,10 +30,24 @@ echo "Reflex.app: building"
 swift build -c release --package-path app
 bin=$(swift build -c release --package-path app --show-bin-path)/Reflex
 
+# App icon, drawn by code (scripts/make-icon.swift) into an .icns.
+icon=build/AppIcon.icns
+if [ ! -f "$icon" ] || [ scripts/make-icon.swift -nt "$icon" ]; then
+  set_dir=build/AppIcon.iconset
+  rm -rf "$set_dir" && mkdir -p "$set_dir"
+  swift scripts/make-icon.swift build/AppIcon-1024.png
+  for s in 16 32 128 256 512; do
+    sips -z $s $s build/AppIcon-1024.png --out "$set_dir/icon_${s}x${s}.png" >/dev/null
+    sips -z $((s * 2)) $((s * 2)) build/AppIcon-1024.png --out "$set_dir/icon_${s}x${s}@2x.png" >/dev/null
+  done
+  iconutil -c icns "$set_dir" -o "$icon"
+fi
+
 app=build/Reflex.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/scripts" "$app/Contents/Resources/web"
 cp "$bin" "$app/Contents/MacOS/Reflex"
+cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
 cp scripts/reflex-scan.sh scripts/reflex-fork.sh "$app/Contents/Resources/scripts/"
 cp web/* "$app/Contents/Resources/web/"
@@ -50,8 +64,8 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
   <key>CFBundleVersion</key><string>$version</string>
-  <key>LSMinimumSystemVersion</key><string>14.0</string>
-  <key>LSUIElement</key><true/>
+  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
 </dict>
 </plist>

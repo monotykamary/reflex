@@ -165,6 +165,8 @@ enum TerminalScroll {
 
 struct AgentPopout: View {
     @ObservedObject var session: TerminalSession
+    /// The window's title-bar height: the header shares that row with the traffic lights.
+    var titlebar: CGFloat = 28
     @ObservedObject var store = Store.shared
     @ObservedObject var themes = Themes.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -177,6 +179,7 @@ struct AgentPopout: View {
             header
             ZStack {
                 TerminalHost(session: session)
+                    .padding(.top, 4)
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
                     .padding(.bottom, 6)
@@ -199,31 +202,35 @@ struct AgentPopout: View {
         .onDisappear { session.detach() }
     }
 
+    /// One line, exactly as tall as the title bar, so it sits level with the
+    /// traffic lights.
     private var header: some View {
-        HStack(spacing: 10) {
-            Bead(status: agent?.status ?? "unknown", size: 8, pulse: store.pulses[session.pane] ?? 0)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane).font(Type.title).lineLimit(1)
-                Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
-                    .font(Type.meta).opacity(0.6).lineLimit(1)
-                    .contentTransition(.interpolate)
-            }
-            Spacer()
+        HStack(spacing: 8) {
+            AgentGlyph(status: agent?.status ?? "unknown", size: 10, pulse: store.pulses[session.pane] ?? 0)
+            Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane)
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(1)
+            Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
+                .font(.system(size: 12))
+                .opacity(0.55)
+                .lineLimit(1)
+                .contentTransition(.interpolate)
+            Spacer(minLength: 8)
             Button {
-                Task { await Client.local.focus(session.pane) }
+                HerdrWindow.reveal(pane: session.pane)
             } label: {
                 Image(systemName: "arrow.up.forward.app")
-                    .font(.system(size: 13, weight: .regular))
-                    .frame(width: 26, height: 26)
+                    .font(.system(size: 12))
+                    .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }
             .buttonStyle(Pressable())
-            .opacity(0.55)
-            .help("Focus this pane in herdr")
+            .opacity(0.5)
+            .help("Show in herdr")
         }
         .foregroundStyle(Color(hex: theme.foreground))
-        .padding(.leading, 84)
-        .padding(.trailing, 12)
-        .frame(height: 52)
+        .padding(.leading, 78)
+        .padding(.trailing, 10)
+        .frame(height: titlebar)
     }
 }

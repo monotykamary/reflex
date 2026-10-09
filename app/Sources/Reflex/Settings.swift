@@ -23,6 +23,8 @@ final class Settings: ObservableObject {
     /// Let a new question surface at the edge on its own for a few seconds.
     @Published var surfaceQuestions: Bool { didSet { d.set(surfaceQuestions, forKey: "surfaceQuestions") } }
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
+    /// A regular app (Dock, ⌘Tab, menu bar) rather than menu-bar only.
+    @Published var showInDock: Bool { didSet { d.set(showInDock, forKey: "showInDock") } }
 
     private init() {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
@@ -38,6 +40,7 @@ final class Settings: ObservableObject {
         railAlways = d.bool(forKey: "railAlways")
         surfaceQuestions = d.object(forKey: "surfaceQuestions") as? Bool ?? true
         onboarded = d.bool(forKey: "onboarded")
+        showInDock = d.object(forKey: "showInDock") as? Bool ?? true
     }
 
     static var supportDir: URL {

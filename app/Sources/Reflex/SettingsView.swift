@@ -32,7 +32,8 @@ struct SettingsView: View {
             }
             Stepper("Undo window: \(String(format: "%.1f", Double(s.undoMs) / 1000))s", value: $s.undoMs, in: 0...10000, step: 500)
             TextField("Herdr session (empty = default)", text: $s.herdrSession)
-            Toggle("Show the rail", isOn: $s.showStrip)
+            Toggle("Show in the Dock and ⌘Tab", isOn: $s.showInDock)
+            Toggle("Show the tab while agents are active", isOn: $s.showStrip)
             Toggle("Keep the rail visible (otherwise rest on the right edge for half a second)", isOn: $s.railAlways)
             Toggle("Surface new questions at the edge", isOn: $s.surfaceQuestions)
             HStack {

@@ -717,7 +717,7 @@ private struct KeysIllustration: View {
                     .fill(.white.opacity(0.04))
                     .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
                     .frame(width: 300, height: 170)
-                Sliver(done: edge)
+                EdgeDemo(done: edge)
             }
             .frame(width: 300, height: 170)
         }
@@ -738,7 +738,7 @@ private struct KeysIllustration: View {
 }
 
 /// The edge gesture, demonstrated: a sliver grows, then the rail appears.
-private struct Sliver: View {
+private struct EdgeDemo: View {
     var done: Bool
     @State private var grow = false
     var body: some View {
