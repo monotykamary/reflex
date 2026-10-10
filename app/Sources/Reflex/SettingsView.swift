@@ -988,6 +988,12 @@ private struct SetupPane: View {
                     }
                     .disabled(o.working != nil)
                 }
+                if o.installed.contains("pi") {
+                    CheckRow(ok: o.piShells, title: "pi background shells",
+                             detail: "While pi-fabric shells still run after a turn, the session counts as working — no early “finished”, and the Mac stays awake. New pi sessions pick it up.") {
+                        Button("Install") { o.installPiShells() }
+                    }
+                }
             }
             Section("Jev") {
                 CheckRow(ok: o.jevInstalled, title: "jev-fabric installed", detail: o.jevInstalled ? nil : "One line in a terminal.") {

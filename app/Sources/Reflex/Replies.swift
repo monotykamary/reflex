@@ -28,7 +28,9 @@ final class Replies: ObservableObject {
     func refresh(_ items: [ItemInfo], agents: [AgentInfo]) {
         for item in items {
             guard let a = Replies.session(of: item, in: agents), !busy.contains(a.session) else { continue }
-            let id = a.session, kind = a.kind, known = paths[id], last = read[id]
+            // pi's session is its file's path (as herdr reports it); Claude's an id.
+            let id = a.session, kind = a.kind, last = read[id]
+            let known = paths[id] ?? (id.hasPrefix("/") && FileManager.default.fileExists(atPath: id) ? URL(fileURLWithPath: id) : nil)
             busy.insert(id)
             Task.detached(priority: .utility) {
                 let url = known ?? Replies.locate(kind: kind, id: id)

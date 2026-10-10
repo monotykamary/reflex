@@ -51,6 +51,8 @@ cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
 cp scripts/reflex-scan.sh scripts/reflex-fork.sh "$app/Contents/Resources/scripts/"
 cp web/* "$app/Contents/Resources/web/"
+mkdir -p "$app/Contents/Resources/integrations/pi"
+cp integrations/pi/reflex-shells.ts "$app/Contents/Resources/integrations/pi/"
 # CFBundleVersion must be numeric (updaters compare it): the commit count.
 # The commit itself is kept in ReflexCommit.
 build_number=$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)

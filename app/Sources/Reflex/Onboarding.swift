@@ -20,6 +20,8 @@ final class Onboarding: ObservableObject {
     @Published var forward = true
     @Published var herdrInstalled = false
     @Published var integrations = false
+    /// Reflex's pi extension: pi-fabric's background shells count as work.
+    @Published var piShells = false
     @Published var jevInstalled = false
     @Published var ping: Ping = .idle
     @Published var installed: Set<String> = []
@@ -88,6 +90,18 @@ final class Onboarding: ObservableObject {
         return error.map { $0.isEmpty ? "Jev didn't answer." : $0 } ?? "Jev didn't answer."
     }
 
+    static let piShellsPath = NSHomeDirectory() + "/.pi/agent/extensions/reflex-shells.ts"
+
+    /// Copy the bundled extension into pi (new pi sessions load it).
+    func installPiShells() {
+        let src = Daemon.resources.appendingPathComponent("integrations/pi/reflex-shells.ts")
+        let dst = URL(fileURLWithPath: Onboarding.piShellsPath)
+        try? FileManager.default.createDirectory(at: dst.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? FileManager.default.removeItem(at: dst)
+        try? FileManager.default.copyItem(at: src, to: dst)
+        refresh()
+    }
+
     private static func which(_ name: String) -> Bool {
         let path = Daemon.shared.childEnvironment()["PATH"] ?? ""
         return path.split(separator: ":").contains { FileManager.default.isExecutableFile(atPath: "\($0)/\(name)") }
@@ -100,6 +114,7 @@ final class Onboarding: ObservableObject {
         let home = NSHomeDirectory()
         integrations = FileManager.default.fileExists(atPath: home + "/.claude/hooks/herdr-agent-state.sh")
             || FileManager.default.fileExists(atPath: home + "/.pi/agent/extensions/herdr-agent-state.ts")
+        piShells = FileManager.default.fileExists(atPath: Onboarding.piShellsPath)
         trusted = DoubleOption.trusted
         if folders.isEmpty && Store.shared.state.folders > 0 { Task { await loadFolders() } }
     }

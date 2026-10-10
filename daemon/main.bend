@@ -635,8 +635,10 @@ type Snap is Data:
 # "busy" while a turn runs and "shell" while a shell it started in the
 # background still runs after the turn — which Herdr reports as done (Claude wakes and carries on when
 # the shell finishes). Only files of live processes count.
+# pi reports the same way through Reflex's pi extension (integrations/pi):
+# ~/.pi/agent/reflex/sessions/<pid>.json while pi-fabric's background shells run.
 def busy_script() -> String:
-  "for f in \"$HOME\"/.claude/sessions/*.json; do p=${f##*/}; p=${p%.json}; kill -0 \"$p\" 2>/dev/null && { cat \"$f\"; echo; }; done"
+  "for f in \"$HOME\"/.claude/sessions/*.json \"$HOME\"/.pi/agent/reflex/sessions/*.json; do [ -f \"$f\" ] || continue; p=${f##*/}; p=${p%.json}; kill -0 \"$p\" 2>/dev/null && { cat \"$f\"; echo; }; done"
 
 def busy_pick(busy: Bool, +sid: String) -> String:
   match busy:
@@ -678,12 +680,17 @@ def read_busy() -> IO(List<&2, String>):
     out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/bin/sh", ["-c", busy_script()], "", 1048576, 3000)
     return busy_list(String.lines(text_or(stdout_of(out), "")))
 
+# An agent's session is its id (Claude) or its session file (pi, as herdr
+# reports it: …/<time>_<id>.jsonl); the status files carry the id.
+def same_session(+session: String, +id: String) -> Bool:
+  String.eq(session, id) || String.ends_with(session, "_" ++ id ++ ".jsonl")
+
 def member(+x: String, xs: List<&2, String>) -> Bool:
   match xs:
     case Nil{}:
       False{}
     case Con{+h, t}:
-      String.eq(h, x) || member(x, t)
+      same_session(x, h) || member(x, t)
 
 # Done or idle, but its shell still runs: still working.
 def still_working(s: M.Status) -> M.Status:
@@ -705,7 +712,7 @@ def busy_status(busy: Bool, s: M.Status) -> M.Status:
 def mark_busy(a: M.Agent, +busy: List<&2, String>) -> M.Agent:
   match a:
     case M.Agent{pane, name, +kind, status, cwd, title, seq, +session, screen}:
-      M.Agent{pane, name, kind, busy_status(String.eq(kind, "claude") && R.bool_not(String.is_empty(session)) && member(session, busy), status), cwd, title, seq, session, screen}
+      M.Agent{pane, name, kind, busy_status((String.eq(kind, "claude") || String.eq(kind, "pi")) && R.bool_not(String.is_empty(session)) && member(session, busy), status), cwd, title, seq, session, screen}
 
 def marks(xs: List<&2, M.Agent>, +busy: List<&2, String>) -> List<&2, M.Agent>:
   match xs:
