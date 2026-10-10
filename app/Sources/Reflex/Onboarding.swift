@@ -277,18 +277,21 @@ struct OnboardingView: View {
     private var copy: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text(eyebrow)
-                .font(.system(size: 11, weight: .semibold))
-                .tracking(1.6)
+                .font(.system(size: 11.5, weight: .semibold))
+                .tracking(0.8)
                 .textCase(.uppercase)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.white.opacity(0.55))
             Text(title)
-                .font(.system(size: 38, weight: .regular, design: .serif))
+                .font(OnboardType.display)
+                .tracking(-1.3)
+                .lineSpacing(-4)
                 .foregroundStyle(.white)
                 .fixedSize(horizontal: false, vertical: true)
             Text(lede)
-                .font(.system(size: 15))
-                .foregroundStyle(.white.opacity(0.68))
-                .lineSpacing(3)
+                .font(.system(size: 15, weight: .regular))
+                .tracking(-0.1)
+                .foregroundStyle(.white.opacity(0.72))
+                .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
             checks.padding(.top, 8)
             Spacer(minLength: 0)
@@ -404,7 +407,7 @@ struct OnboardingView: View {
                         .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5))
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .pane(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 HStack {
                     GlassAction("Add folder…") { model.addRoot() }
@@ -566,7 +569,7 @@ private struct Check<Accessory: View>: View {
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 11)
-        .glassEffect(ok ? .regular.tint(Tone.done.opacity(0.10)) : .regular, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .pane(RoundedRectangle(cornerRadius: 16, style: .continuous), tint: ok ? Tone.done : nil)
         .animation(Motion.enter, value: ok)
     }
 }
@@ -591,19 +594,20 @@ private struct Cheat: View {
             Text(keys)
                 .font(.system(size: 12, weight: .bold, design: .rounded))
                 .padding(.horizontal, 9).padding(.vertical, 4)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                .pane(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .frame(minWidth: 70, alignment: .leading)
             Text(what).font(.system(size: 13.5)).foregroundStyle(.white.opacity(0.8))
         }
     }
 }
 
-/// Dark glass: the desktop softly through Liquid Glass, tinted near-black.
+/// Liquid Glass, untinted: the desktop frosted behind the whole window, the
+/// same glass as the rail.
 private struct Backdrop: View {
     var body: some View {
         Rectangle()
             .fill(.clear)
-            .glassEffect(.regular.tint(Color.black.opacity(0.62)), in: .rect)
+            .glassEffect(.regular, in: .rect)
             .ignoresSafeArea()
     }
 }
@@ -633,7 +637,7 @@ private struct PanesIllustration: View {
         }
         .frame(width: 330)
         .padding(18)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .pane(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 }
 
@@ -655,7 +659,7 @@ private struct FoldersIllustration: View {
                     Spacer()
                 }
                 .padding(.horizontal, 12).padding(.vertical, 8)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .pane(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.05)))
             }
         }
@@ -891,7 +895,7 @@ private struct TryReflex: View {
             }
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .glassEffect(.regular.tint(Color.black.opacity(0.35)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .pane(RoundedRectangle(cornerRadius: 16, style: .continuous), tint: Tone.done)
             .transition(.surface())
         case .failed(let e):
             Label(e, systemImage: "exclamationmark.triangle.fill").font(.system(size: 12.5)).foregroundStyle(Tone.blocked)
@@ -943,7 +947,7 @@ private struct MemberCard: View {
                 .glassEffect(.regular.tint(Color.black.opacity(0.6)), in: Capsule())
             }
             Spacer()
-            Text(name).font(.system(size: 26, weight: .regular, design: .serif)).lineLimit(1).minimumScaleFactor(0.6)
+            Text(name).font(.system(size: 26, weight: .semibold)).tracking(-0.7).lineLimit(1).minimumScaleFactor(0.6)
             Text("Member since \(since)").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55)).padding(.top, 2)
             Spacer().frame(height: 18)
             HStack(spacing: 0) {
@@ -986,5 +990,21 @@ private struct MemberCard: View {
             Text(label).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.5))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+// MARK: - Styling
+
+enum OnboardType {
+    /// Headlines: SF Pro Display, heavy and tightly tracked.
+    static let display = Font.system(size: 42, weight: .bold)
+}
+
+private extension View {
+    /// A content surface on the glass window: a faint fill and a hairline,
+    /// so cards read as layers of the glass rather than glass on glass.
+    func pane<S: InsettableShape>(_ shape: S, tint: Color? = nil) -> some View {
+        background((tint ?? .white).opacity(tint == nil ? 0.07 : 0.12), in: shape)
+            .overlay(shape.strokeBorder(.white.opacity(0.1), lineWidth: 0.5))
     }
 }

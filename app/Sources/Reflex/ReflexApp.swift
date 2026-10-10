@@ -435,6 +435,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         onboarding!.center()
         NSApp.activate()
         onboarding!.makeKeyAndOrderFront(nil)
+        // Seen even if macOS declines to activate Reflex (e.g. at login).
+        onboarding!.orderFrontRegardless()
     }
 
     // MARK: Settings
