@@ -553,8 +553,10 @@ def wants_screen(prev: Maybe<&2, M.Agent>, +a: M.Agent) -> Bool:
   match prev:
     case None{}:
       Core.is_blocked(Core.Agent.status(a)) || Core.is_ready(Core.Agent.status(a))
+    # A blocked agent's screen is read every poll: its question can change
+    # while it stays blocked (the next question, a ticked box, the review).
     case Some{+p}:
-      (Core.bool_not(U32.is_eq(Core.Agent.seq(p), Core.Agent.seq(a))) || Core.bool_not(String.eq(M.Status.show(Core.Agent.status(p)), M.Status.show(Core.Agent.status(a))))) && (Core.is_blocked(Core.Agent.status(a)) || Core.is_ready(Core.Agent.status(a)))
+      Core.is_blocked(Core.Agent.status(a)) || ((Core.bool_not(U32.is_eq(Core.Agent.seq(p), Core.Agent.seq(a))) || Core.bool_not(String.eq(M.Status.show(Core.Agent.status(p)), M.Status.show(Core.Agent.status(a))))) && Core.is_ready(Core.Agent.status(a)))
 
 def source_for(s: M.Status) -> String:
   match s:
@@ -819,6 +821,7 @@ type Ep is Data:
   EHealth{}
   ESide{}
   EFocus{}
+  EPair{}
   EKeys{}
   EText{}
   EClose{}
@@ -848,6 +851,7 @@ def rows() -> List<&2, Row>:
     Row{"/api/health", EHealth{}},
     Row{"/api/side", ESide{}},
     Row{"/api/focus", EFocus{}},
+    Row{"/api/pair", EPair{}},
     Row{"/api/keys", EKeys{}},
     Row{"/api/text", EText{}},
     Row{"/api/close", EClose{}},
@@ -880,11 +884,31 @@ def fallback_ep(api: Bool) -> Ep:
 def ep_of(+path: String) -> Ep:
   ep_find(rows(), path, fallback_ep(String.starts_with(path, "/api/")))
 
+# Pairing a phone: the app writes a one-time code to pair.txt (and wipes it
+# after ten minutes); the phone trades it for its token here, once — the
+# file is wiped as the token goes out. The QR never carries the token.
+def pair_file(+cfg: Cfg) -> String:
+  Cfg.data(cfg) ++ "/pair.txt"
+
+def pair_reply(hit: Bool, +cfg: Cfg) -> IO(String):
+  match hit:
+    case True{}:
+      do IO<String>:
+        w : Result<&1, &1, U32 & String, Unit> <- Fs.put(pair_file(cfg), "w", "")
+        ok(Js.obj([Js.kv("ok", "true"), Js.kv("token", Js.str(Cfg.token(cfg)))]))
+    case False{}:
+      IO.pure(String, Http.json(403, "{\"ok\":false,\"error\":\"used or expired\"}"))
+
+def pair_check(+code: String, +given: String, +cfg: Cfg) -> IO(String):
+  pair_reply(String.eq(code, given) && R.bool_not(String.is_empty(code)), cfg)
+
 def needs_token(ep: Ep) -> Bool:
   match ep:
     case EStatic{}:
       False{}
     case EHealth{}:
+      False{}
+    case EPair{}:
       False{}
     case other:
       True{}
@@ -1011,6 +1035,10 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok("{\"ok\":true}")
     case EHealth{}:
       ok("{\"ok\":true,\"service\":\"reflexd\"}")
+    case EPair{}:
+      do IO<String>:
+        r : Result<&1, &1, U32 & String, String> <- Fs.read(pair_file(cfg), 4096)
+        pair_check(String.trim(text_or(r, "")), Js.text_at(body, "code"), cfg)
     case ESide{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})

@@ -33,6 +33,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var sliver: KeyPanel?
     private var bar: KeyPanel?
     private var inbox: KeyPanel?
+    private var pairing: KeyPanel?
     private var settings: NSWindow?
     private var popouts: [String: NSWindow] = [:]
     private let command = CommandModel()
@@ -136,6 +137,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.command.submit() }
                 }
             case "inbox": self.showInbox()
+            case "pairing": self.showPairing()
             case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
             case "railclick":
@@ -275,6 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         openSettings: { [weak self] in self?.showSettings() },
                         restart: { Daemon.shared.restart() },
                         openLog: { NSWorkspace.shared.open(Daemon.logURL) },
+                        openPhone: { [weak self] in self?.showPairing() },
                         quit: { NSApp.terminate(nil) })
         // Neither rail window ever becomes key (see RailKeys); clicks still land.
         let p = Panels.floating(view, size: NSSize(width: 30, height: 100), key: false)
@@ -343,6 +346,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
         edge.start()
+        // A pairing code never outlives the app that made it.
+        Pairing.shared.stop()
         KeepAwake.shared.start()
         Store.shared.watching = { [weak self] in
             self?.popouts.first { $0.value.isKeyWindow }?.key
@@ -402,7 +407,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func clickAway(at p: NSPoint, in window: NSWindow?) {
-        let mine = [strip, side, railKeys, inbox].compactMap { $0 }
+        let mine = [strip, side, railKeys, inbox, pairing].compactMap { $0 }
         if let window, mine.contains(where: { $0 === window }) { return }
         if InboxModel.shared.shown, !(inboxRect()?.contains(p) ?? false) {
             hideInbox()
@@ -586,6 +591,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self, !self.command.shown else { return }
             b.orderOut(nil)
             self.command.reset()
+        }
+    }
+
+    // MARK: Take Reflex with you — a one-time QR beside the rail
+
+    @objc func showPairing() {
+        edge.hide(returnFocus: false)
+        if InboxModel.shared.shown { hideInbox() }
+        if pairing == nil {
+            let view = PairingHost(done: { [weak self] in self?.hidePairing() })
+            let p = Panels.floating(view, size: NSSize(width: 340, height: 560), key: true)
+            p.onEscape = { [weak self] in self?.hidePairing() }
+            pairing = p
+        }
+        guard let w = pairing else { return }
+        let s = (railScreen ?? NSScreen.main)?.visibleFrame ?? Panels.screen
+        let y = min(max((railY ?? s.midY) - 280, s.minY), s.maxY - 560)
+        w.setFrame(NSRect(x: s.maxX - Rail.columnWidth - 12 - 340, y: y, width: 340, height: 560), display: true)
+        Pairing.shared.start()
+        AppDelegate.activateSelf()
+        w.makeKeyAndOrderFront(nil)
+        DispatchQueue.main.async { Pairing.shared.shown = true }
+    }
+
+    private func hidePairing() {
+        Pairing.shared.shown = false
+        Pairing.shared.stop()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in
+            if !Pairing.shared.shown { self?.pairing?.orderOut(nil) }
         }
     }
 

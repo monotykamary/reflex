@@ -333,6 +333,7 @@ struct Rail: View {
     var openSettings: () -> Void
     var restart: () -> Void
     var openLog: () -> Void
+    var openPhone: () -> Void
     var quit: () -> Void
 
     private var side: RailSideMode { Rail.side(rail, store, inboxShown: inbox.shown) }
@@ -467,6 +468,8 @@ struct Rail: View {
             .raySurface(Capsule())
 
             Menu {
+                Button("Take Reflex with You…", systemImage: "iphone", action: openPhone)
+                Divider()
                 Button("Restart reflexd", action: restart)
                 Button("Open log", action: openLog)
                 Divider()

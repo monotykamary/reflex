@@ -37,6 +37,10 @@ struct Client {
 
     func state() async throws -> StateInfo { try await get("/api/state", as: StateInfo.self) }
 
+    private struct Health: Decodable { var ok: Bool }
+    /// reflexd is up and answering.
+    func healthy() async -> Bool { (try? await get("/api/health", as: Health.self))?.ok ?? false }
+
     /// Route a request. `dry`: decide only — nothing is sent or started.
     func route(_ text: String, dry: Bool = false) async throws -> RouteResponse {
         var body: [String: Any] = ["text": text, "memory": await Memory.shared.context(for: text)]

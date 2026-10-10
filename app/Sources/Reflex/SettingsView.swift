@@ -916,27 +916,17 @@ private struct PhonePane: View {
                 }
             }
             .onAppear { tailnet.refresh() }
-            if s.remote {
-                let url = Remote.url(port: s.port, token: Settings.token, tailnet: tailnet.current)
-                Section {
-                    HStack(alignment: .top, spacing: 16) {
-                        if let img = Remote.qr(url) {
-                            Image(nsImage: img).interpolation(.none).resizable().frame(width: 150, height: 150)
-                                .padding(8).background(.white, in: RoundedRectangle(cornerRadius: 10))
-                        }
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Scan with your phone's camera, then add the page to your home screen.")
-                            Text(url).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).foregroundStyle(.secondary)
-                            Label(tailnet.current != nil ? "Over Tailscale: encrypted end to end." : "No Tailscale: this LAN link is not encrypted.",
-                                  systemImage: tailnet.current != nil ? "lock.fill" : "exclamationmark.triangle.fill")
-                                .font(.system(size: 11.5))
-                                .foregroundStyle(tailnet.current != nil ? Color.secondary : Tone.blocked)
-                        }
-                    }
+            Section {
+                LabeledContent {
+                    Button("Pair a Phone…") { AppDelegate.current?.showPairing() }
+                } label: {
+                    RowLabel("Your phone", "Shows a code to scan. It works once and expires in 10 minutes — the same as ⋯ → Take Reflex with You on the rail.")
+                }
+                if s.remote {
                     LabeledContent {
-                        Button("New Link") { Settings.rotateToken(); Daemon.shared.restart() }
+                        Button("Sign Out Phones") { Settings.rotateToken(); Daemon.shared.restart() }
                     } label: {
-                        RowLabel("Revoke", "Makes a new link; the old one stops working.")
+                        RowLabel("Sign out", "Every phone that paired needs a new code.")
                     }
                 }
             }
@@ -1101,11 +1091,6 @@ enum Remote {
         return parts.count == 4 && parts[0] == 100 && (64...127).contains(parts[1])
     }
 
-    /// The phone link: the tailnet name when Tailscale runs here, else
-    /// this Mac's first LAN address.
-    static func url(port: Int, token: String, tailnet: Tailnet?) -> String {
-        "http://\(tailnet?.host ?? addresses.first ?? "127.0.0.1"):\(port)/?t=\(token)"
-    }
 
     static func qr(_ text: String) -> NSImage? {
         let f = CIFilter.qrCodeGenerator()

@@ -258,8 +258,210 @@ def options_go(lines: List<&2, String>, +pane: String, acc: List<&2, M.Opt>) -> 
     case Con{l, t}:
       options_go(t, pane, add_opt(opt_of(strip_marker(String.trim_start(l)), pane), acc))
 
-def options(screen: String, +pane: String) -> List<&2, M.Opt>:
-  options_go(String.lines(screen), pane, [])
+# Checkbox lists (multi-select): a digit only ticks a box, so there is also
+# a way on — Tab, to the next question or the review.
+def is_check(+label: String) -> Bool:
+  String.starts_with(label, "[ ]") || String.starts_with(label, "[✔]") || String.starts_with(label, "[✓]") || String.starts_with(label, "[x]")
+
+def any_check(xs: List<&2, M.Opt>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{M.Opt{key, +label, action}, t}:
+      is_check(label) || any_check(t)
+
+def with_next.if(multi: Bool, +xs: List<&2, M.Opt>, +pane: String) -> List<&2, M.Opt>:
+  match multi:
+    case True{}:
+      List.append(&2, M.Opt, xs, [M.Opt{"⇥", "Next — keep these choices", M.Press{pane, "tab"}}])
+    case False{}:
+      xs
+
+def with_next(+xs: List<&2, M.Opt>, +pane: String) -> List<&2, M.Opt>:
+  with_next.if(any_check(xs), xs, pane)
+
+# Menus without numbers ("❯ No, exit" over "  Yes, I trust this folder"):
+# the run of lines at the selected line's indent are its items, answered by
+# moving there with the arrows and pressing Enter.
+type Line is Data:
+  Line{col: U32, text: String, sel: Bool}
+
+def lead.if(sp: Bool, +rest: U32) -> U32:
+  match sp:
+    case True{}:
+      (1 + rest : U32)
+    case False{}:
+      0
+
+def lead(s: String) -> U32:
+  match s:
+    case SNil{}:
+      0
+    case SCon{Chr{+c}, t}:
+      lead.if(U32.is_eq(c, 32), lead(t))
+
+def line_sel.if(sel: Bool, +n: U32, whole: String, rest: String) -> Line:
+  match sel:
+    case True{}:
+      Line{(n + 2 : U32), String.trim(rest), True{}}
+    case False{}:
+      Line{n, String.trim(whole), False{}}
+
+def line_sel(+n: U32, t: String) -> Line:
+  match t:
+    case SCon{Chr{+c}, SCon{Chr{+sp}, +rest}}:
+      line_sel.if(U32.is_eq(c, 10095) && U32.is_eq(sp, 32), n, SCon{Chr{c}, SCon{Chr{sp}, rest}}, rest)
+    case other:
+      Line{n, String.trim(other), False{}}
+
+def line_of(+s: String) -> Line:
+  line_sel(lead(s), String.trim_start(s))
+
+def has_sel(xs: List<&2, Line>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{Line{c, t, +sel}, rest}:
+      sel || has_sel(rest)
+
+def two_or_more(xs: List<&2, Line>) -> Bool:
+  match xs:
+    case Con{a, Con{b, rest}}:
+      True{}
+    case other:
+      False{}
+
+def settle.if(ok: Bool, run: List<&2, Line>, best: List<&2, Line>) -> List<&2, Line>:
+  match ok:
+    case True{}:
+      run
+    case False{}:
+      best
+
+def settle(+run: List<&2, Line>, best: List<&2, Line>) -> List<&2, Line>:
+  settle.if(has_sel(run) && two_or_more(run), run, best)
+
+def Line.col(x: Line) -> U32:
+  match x:
+    case Line{c, t, s}:
+      c
+
+# Scanning a screen: the current run of lines at one indent, and the best
+# run so far.
+type Scan is Data:
+  Scan{col: U32, run: List<&2, Line>, best: List<&2, Line>}
+
+def scan_feed.of(blank: Bool, same: Bool, +x: Line, +run: List<&2, Line>, best: List<&2, Line>) -> Scan:
+  match blank same:
+    case True{} _:
+      Scan{100000, [], settle(run, best)}
+    case False{} True{}:
+      Scan{Line.col(x), List.append(&2, Line, run, [x]), best}
+    case False{} False{}:
+      Scan{Line.col(x), [x], settle(run, best)}
+
+def scan_feed(+x: Line, sc: Scan) -> Scan:
+  match x sc:
+    case Line{+c, +text, sel} Scan{+col, +run, best}:
+      scan_feed.of(String.is_empty(text), U32.is_eq(c, col), Line{c, text, sel}, run, best)
+
+def scan_end(sc: Scan) -> List<&2, Line>:
+  match sc:
+    case Scan{col, +run, best}:
+      settle(run, best)
+
+# The last run on screen that holds the selected line and at least one other.
+def menu_go(ls: List<&2, String>, sc: Scan) -> List<&2, Line>:
+  match ls:
+    case Nil{}:
+      scan_end(sc)
+    case Con{l, t}:
+      menu_go(t, scan_feed(line_of(l), sc))
+
+def sel_index.pick(sel: Bool, +i: Nat, +later: Nat) -> Nat:
+  match sel:
+    case True{}:
+      i
+    case False{}:
+      later
+
+def sel_index(xs: List<&2, Line>, +i: Nat) -> Nat:
+  match xs:
+    case Nil{}:
+      0n
+    case Con{Line{c, t, +sel}, rest}:
+      sel_index.pick(sel, i, sel_index(rest, 1n+i))
+
+def reps(+s: String, n: Nat) -> String:
+  match n:
+    case 0n:
+      ""
+    case 1n+p:
+      s ++ reps(s, p)
+
+def moves.if(up: Bool, +i: Nat, +sel: Nat) -> String:
+  match up:
+    case True{}:
+      reps("up ", Nat.sub(sel, i)) ++ "enter"
+    case False{}:
+      reps("down ", Nat.sub(i, sel)) ++ "enter"
+
+# The keys from the selected item to item i, then Enter.
+def moves(+i: Nat, +sel: Nat) -> String:
+  moves.if(Nat.is_lt(i, sel), i, sel)
+
+def menu_opts.pick(fits: Bool, o: M.Opt, rest: List<&2, M.Opt>) -> List<&2, M.Opt>:
+  match fits:
+    case True{}:
+      o <> rest
+    case False{}:
+      []
+
+def menu_opts(xs: List<&2, Line>, +sel: Nat, +i: Nat, +pane: String) -> List<&2, M.Opt>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{Line{c, +text, s}, rest}:
+      menu_opts.pick(Nat.is_lt(i, 9n),
+        M.Opt{SCon{Chr{(49 + U32.from_nat(i) : U32)}, SNil{}}, text, M.Press{pane, moves(i, sel)}},
+        menu_opts(rest, sel, 1n+i, pane))
+
+def arrows.of(+menu: List<&2, Line>, +pane: String) -> List<&2, M.Opt>:
+  menu_opts(menu, sel_index(menu, 0n), 0n, pane)
+
+def arrows(screen: String, +pane: String) -> List<&2, M.Opt>:
+  arrows.of(menu_go(String.lines(screen), Scan{100000, [], []}), pane)
+
+def options.pick(none: Bool, +nums: List<&2, M.Opt>, +screen: String, +pane: String) -> List<&2, M.Opt>:
+  match none:
+    case True{}:
+      arrows(screen, pane)
+    case False{}:
+      with_next(nums, pane)
+
+def opts_empty(xs: List<&2, M.Opt>) -> Bool:
+  match xs:
+    case Nil{}:
+      True{}
+    case Con{h, t}:
+      False{}
+
+def options.of(+nums: List<&2, M.Opt>, +screen: String, +pane: String) -> List<&2, M.Opt>:
+  options.pick(opts_empty(nums), nums, screen, pane)
+
+# The answers on a blocked agent's screen: numbered options; failing those,
+# an arrow menu; with checkboxes, a way on.
+def options(+screen: String, +pane: String) -> List<&2, M.Opt>:
+  options.of(options_go(String.lines(screen), pane, []), screen, pane)
+
+# What a question offers, as one string: when it changes while the agent
+# stays blocked (the next question, a ticked box, the review), it is a new ask.
+def opts_sig(xs: List<&2, M.Opt>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{M.Opt{key, label, action}, t}:
+      key ++ label ++ "|" ++ opts_sig(t)
 
 # The last n non-empty lines of a screen, for an inbox card.
 def nonempty.put(empty: Bool, h: String, rest: List<&2, String>) -> List<&2, String>:
@@ -339,13 +541,26 @@ def find_agent(agents: List<&2, M.Agent>, +pane: String) -> Maybe<&2, M.Agent>:
     case Con{+h, t}:
       pick_agent(String.eq(Agent.pane(h), pane), h, find_agent(t, pane))
 
+def Agent.screen(a: M.Agent) -> String:
+  match a:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+      screen
+
+# The same question as before: same choices — or none readable right now
+# (a redraw), which is not a new one either.
+def same_ask.of(+was: String, +now: String) -> Bool:
+  String.eq(was, now) || String.is_empty(now)
+
+def same_ask(+p: M.Agent, +cur: M.Agent) -> Bool:
+  same_ask.of(opts_sig(options(Agent.screen(p), "")), opts_sig(options(Agent.screen(cur), "")))
+
 def change(prev: Maybe<&2, M.Agent>, +cur: M.Agent) -> Change:
   match prev:
     case None{}:
       change.of(False{}, False{}, False{}, is_blocked(Agent.status(cur)), False{})
     case Some{+p}:
       change.of(is_blocked(Agent.status(p)), is_working(Agent.status(p)),
-        U32.is_eq(Agent.seq(p), Agent.seq(cur)),
+        U32.is_eq(Agent.seq(p), Agent.seq(cur)) && same_ask(p, cur),
         is_blocked(Agent.status(cur)), is_ready(Agent.status(cur)))
 
 def base_name.pick(empty: Bool, h: String, last: String) -> String:
@@ -439,10 +654,37 @@ def ok_reply() -> M.Reply:
 def err_reply(msg: String) -> M.Reply:
   M.RText{Js.obj([Js.kv("ok", "false"), Js.kv("error", Js.str(msg))])}
 
+def Item.pane(i: M.Item) -> String:
+  match i:
+    case M.Item{id, kind, pane, agent, title, body, opts, at}:
+      pane
+
+def is_ask(i: M.Item) -> Bool:
+  match i:
+    case M.Item{id, M.IAsk{}, pane, agent, title, body, opts, at}:
+      True{}
+    case other:
+      False{}
+
+def has_ask_for(+pane: String, items: List<&2, M.Item>) -> Bool:
+  match items:
+    case Nil{}:
+      False{}
+    case Con{+h, t}:
+      (is_ask(h) && String.eq(Item.pane(h), pane)) || has_ask_for(pane, t)
+
+# A pane's new question replaces the one it asked before.
+def drop_stale(items: List<&2, M.Item>, +fresh: List<&2, M.Item>) -> List<&2, M.Item>:
+  match items:
+    case Nil{}:
+      []
+    case Con{+h, t}:
+      keep_item(bool_not(is_ask(h) && has_ask_for(Item.pane(h), fresh)), h, drop_stale(t, fresh))
+
 def on_polled.fold(f: Fold, now: U32, undo: U32, inbox: List<&2, M.Item>, pending: List<&2, M.Dispatch>, receipts: List<&2, M.Receipt>, folders: List<&2, M.Folder>, +agents: List<&2, M.Agent>) -> M.Out:
   match f:
-    case Fold{next, fresh}:
-      M.Out{M.State{now, next, undo, True{}, agents, take(List.append(&2, M.Item, fresh, prune(inbox, agents)), 60n), pending, receipts, folders}, [], ok_reply()}
+    case Fold{next, +fresh}:
+      M.Out{M.State{now, next, undo, True{}, agents, take(List.append(&2, M.Item, fresh, prune(drop_stale(inbox, fresh), agents)), 60n), pending, receipts, folders}, [], ok_reply()}
 
 def on_polled(s: M.State, ok: Bool, +agents: List<&2, M.Agent>) -> M.Out:
   match s ok:

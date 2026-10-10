@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
-<meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" id="themeColor" content="#f4f4f5">
+<meta name="color-scheme" content="light dark">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -26,14 +26,22 @@
     --r: 16px;
     --vvh: 100dvh;
   }
+  /* Dark: by the phone's setting (System), or chosen in Appearance. */
   @media (prefers-color-scheme: dark) {
-    :root {
+    :root:not([data-theme="light"]) {
       --bg: #0c0c0d; --surface: #171719; --raise: rgba(255,255,255,.05); --line: rgba(255,255,255,.09); --hair: rgba(255,255,255,.06);
       --ink: #ededef; --ink2: rgba(237,237,239,.6); --ink3: rgba(237,237,239,.38);
       --blue: #6e94ff; --amber: #ffb224; --green: #3dd68c; --grey: #6f6f78; --violet: #a58bff;
-      --shadow: none;
+      --shadow: none; color-scheme: dark;
     }
   }
+  :root[data-theme="dark"] {
+      --bg: #0c0c0d; --surface: #171719; --raise: rgba(255,255,255,.05); --line: rgba(255,255,255,.09); --hair: rgba(255,255,255,.06);
+      --ink: #ededef; --ink2: rgba(237,237,239,.6); --ink3: rgba(237,237,239,.38);
+      --blue: #6e94ff; --amber: #ffb224; --green: #3dd68c; --grey: #6f6f78; --violet: #a58bff;
+      --shadow: none; color-scheme: dark;
+  }
+  :root[data-theme="light"] { color-scheme: light; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   html { background: var(--bg); }
   body { margin: 0; color: var(--ink); background: var(--bg); font: 15px/1.4 var(--sans); -webkit-font-smoothing: antialiased;
@@ -129,14 +137,18 @@
   .lock b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
 
   /* ---------- a session ---------- */
+  .session { --ov: rgba(255,255,255,.08); --ov2: rgba(255,255,255,.18); --edge: rgba(255,255,255,.07);
+    --chrome: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000); }
+  .session[data-term="light"] { --ov: rgba(0,0,0,.06); --ov2: rgba(0,0,0,.13); --edge: rgba(0,0,0,.09);
+    --chrome: color-mix(in srgb, var(--term-bg, #e1e2e7) 94%, #000); }
   .session { position: fixed; z-index: 10; left: 0; top: 0; width: 100%; height: var(--vvh); display: flex; flex-direction: column;
     background: var(--term-bg, #1a1b26); color: var(--term-fg, #c0caf5);
     transform: translateX(100%); visibility: hidden; transition: transform .28s var(--out), visibility 0s linear .28s; }
   .session.on { transform: none; visibility: visible; transition: transform .28s var(--out); }
   .bar { display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top) + 6px) 8px 8px;
-    background: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000); border-bottom: 1px solid rgba(255,255,255,.06); }
+    background: var(--chrome); border-bottom: 1px solid var(--edge); }
   .bar .back { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 99px; }
-  .bar .back:active, .bar .more:active { background: rgba(255,255,255,.08); }
+  .bar .back:active, .bar .more:active { background: var(--ov); }
   .bar .title { flex: 1; min-width: 0; text-align: center; }
   .bar .title b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .bar .title span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: .65; }
@@ -148,36 +160,54 @@
   .term pre { margin: 0; font: var(--fs, 11px)/1.36 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 8; font-variant-ligatures: none; }
   .term.fit pre { white-space: pre; overflow-wrap: normal; line-height: 1.3; }
   .term.typing { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 55%, transparent); }
-  .keys { display: flex; gap: 5px; padding: 8px 8px; overflow-x: auto; scrollbar-width: none; background: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000);
-    border-top: 1px solid rgba(255,255,255,.06); }
+  .keys { display: flex; gap: 5px; padding: 8px 8px; overflow-x: auto; scrollbar-width: none; background: var(--chrome);
+    border-top: 1px solid var(--edge); }
   .keys::-webkit-scrollbar { display: none; }
   .k { flex: 1 0 auto; min-width: 34px; height: 38px; padding: 0 8px; border-radius: 10px; display: grid; place-items: center;
-    background: rgba(255,255,255,.08); color: inherit; font: 600 13px/1 var(--sans); }
-  .k:active { background: rgba(255,255,255,.18); transform: scale(.95); }
+    background: var(--ov); color: inherit; font: 600 13px/1 var(--sans); }
+  .k:active { background: var(--ov2); transform: scale(.95); }
   .k.on { background: var(--blue); color: #fff; }
   .k.num { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }
-  .k.sep { min-width: 1px; width: 1px; padding: 0; background: rgba(255,255,255,.1); margin: 6px 2px; }
-  .sdock { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000); }
-  .sdock .compose { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.08); box-shadow: none; }
+  .k.sep { min-width: 1px; width: 1px; padding: 0; background: var(--edge); margin: 6px 2px; }
+  .sdock { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); background: var(--chrome); }
+  .sdock .compose { background: var(--ov); border-color: var(--edge); box-shadow: none; }
   .sdock .compose textarea { color: inherit; }
   .sdock .compose textarea::placeholder { color: currentColor; opacity: .4; }
   .sdock .send { background: var(--term-fg, #c0caf5); color: var(--term-bg, #1a1b26); }
   .kbd { flex: none; width: 36px; height: 36px; border-radius: 99px; display: grid; place-items: center; opacity: .75; }
-  .kbd:active { background: rgba(255,255,255,.1); }
+  .kbd:active { background: var(--ov); }
   .live { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 6px 0 14px; border-radius: 24px; background: color-mix(in srgb, var(--blue) 22%, transparent); font-size: 14px; }
   .live span { flex: 1; }
-  .live button { font-weight: 600; padding: 8px 12px; border-radius: 99px; background: rgba(255,255,255,.12); }
+  .live button { font-weight: 600; padding: 8px 12px; border-radius: 99px; background: var(--ov2); }
   .ghost { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; }
   .menu { position: absolute; right: 10px; top: calc(env(safe-area-inset-top) + 50px); z-index: 2; min-width: 220px; padding: 6px; border-radius: 14px;
-    background: color-mix(in srgb, var(--term-bg, #1a1b26) 70%, #2a2a30); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    background: var(--chrome); border: 1px solid var(--edge); box-shadow: 0 12px 40px rgba(0,0,0,.28);
     transform-origin: top right; animation: pop .18s var(--out) both; }
   .menu[hidden] { display: none; }
   @keyframes pop { from { opacity: 0; transform: scale(.96); } }
   .menu button, .menu label { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 42px; padding: 0 10px; border-radius: 9px; font-size: 14.5px; text-align: left; }
-  .menu button:active { background: rgba(255,255,255,.08); transform: none; }
-  .menu select { appearance: none; -webkit-appearance: none; border: 0; background: rgba(255,255,255,.08); color: inherit; font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 8px; max-width: 140px; }
-  .menu hr { border: 0; height: 1px; background: rgba(255,255,255,.08); margin: 4px 6px; }
+  .menu button:active { background: var(--ov); transform: none; }
+  .menu select { appearance: none; -webkit-appearance: none; border: 0; background: var(--ov); color: inherit; font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 8px; max-width: 140px; }
+  .menu hr { border: 0; height: 1px; background: var(--edge); margin: 4px 6px; }
 
+  .icon { flex: none; width: 34px; height: 34px; border-radius: 99px; display: grid; place-items: center; color: var(--ink2); background: var(--raise); }
+  .sheet { position: fixed; inset: 0; z-index: 20; display: flex; align-items: flex-end; justify-content: center; background: rgba(0,0,0,.28);
+    animation: fade .2s var(--out) both; }
+  .sheet[hidden] { display: none; }
+  @keyframes fade { from { opacity: 0; } }
+  .sheet .card { width: 100%; max-width: 640px; margin: 0 8px calc(8px + env(safe-area-inset-bottom)); padding: 8px 16px 14px; border-radius: 24px;
+    background: var(--surface); box-shadow: 0 20px 60px rgba(0,0,0,.3); animation: up .26s var(--out) both; }
+  @keyframes up { from { transform: translateY(24px); opacity: 0; } }
+  .sheet .grab { width: 36px; height: 5px; border-radius: 99px; background: var(--line); margin: 0 auto 12px; }
+  .sheet h3 { margin: 14px 2px 8px; font-size: 13px; font-weight: 600; color: var(--ink2); }
+  .seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 2px; padding: 3px; border-radius: 12px; background: var(--raise); }
+  .seg button { height: 34px; border-radius: 9px; font-size: 14px; font-weight: 500; color: var(--ink2); }
+  .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.12), 0 0 0 1px var(--hair); }
+  .themes { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .theme { display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 12px; background: var(--raise); font-size: 13.5px; text-align: left; border: 1.5px solid transparent; }
+  .theme[aria-pressed="true"] { border-color: var(--blue); }
+  .swatch { flex: none; width: 26px; height: 26px; border-radius: 7px; display: grid; place-items: center; font: 700 11px/1 var(--mono); border: 1px solid var(--hair); }
+  .sheet .done { display: block; width: 100%; height: 46px; margin-top: 16px; border-radius: 14px; background: var(--ink); color: var(--bg); font-weight: 600; font-size: 15px; }
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
     .g.working i { animation: none; border-color: var(--blue); }
@@ -194,6 +224,17 @@
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </form>
+</div>
+
+<div class="sheet" id="prefs" hidden>
+  <div class="card" role="dialog" aria-label="Appearance">
+    <div class="grab"></div>
+    <h3>Appearance</h3>
+    <div class="seg" id="appearance"></div>
+    <h3>Terminal</h3>
+    <div class="themes" id="themes"></div>
+    <button class="done" id="prefsDone">Done</button>
+  </div>
 </div>
 
 <section class="session" id="session" aria-hidden="true">
@@ -225,6 +266,11 @@
   let token = qs.get("t") || "";
   try { if (token) localStorage.setItem("reflex.token", token); else token = localStorage.getItem("reflex.token") || ""; } catch (e) {}
   if (qs.get("t")) history.replaceState(null, "", location.pathname + location.hash);
+  // A pairing link (?p=…) from "Take Reflex with you": its one-time code is
+  // traded for the phone's token, and the link is spent.
+  const pairCode = qs.get("p");
+  let pairError = "";
+  if (pairCode) history.replaceState(null, "", location.pathname + location.hash);
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } },
@@ -266,17 +312,24 @@
   }
 
   // ---------- home ----------
+  const prefsButton = `<button class="icon" data-prefs aria-label="Appearance"><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6.4" stroke="currentColor" stroke-width="1.5"/><path d="M8 1.6a6.4 6.4 0 0 1 0 12.8Z" fill="currentColor"/></svg></button>`;
   const asks = (i) => i.options && i.options.length;
   function renderHome() {
     const home = $("home");
-    if (!token) { home.innerHTML = `<div class="lock"><div><b>Open Reflex from your Mac</b>Scan the code in Reflex → Settings → Phone.</div></div>`; $("dock").hidden = true; return; }
+    if (!token) {
+      home.innerHTML = `<div class="lock"><div><b>${pairError ? "This code has been used" : "Pair with your Mac"}</b>${pairError
+        ? "Each code works once, for ten minutes. Make a new one on your Mac: ⋯ on the rail → Take Reflex with You."
+        : "On your Mac, click ⋯ on the rail → Take Reflex with You, and scan the code."}</div></div>`;
+      $("dock").hidden = true; return;
+    }
+    $("dock").hidden = false;
     if (!state) { home.innerHTML = `<header class="top"><h1>Reflex</h1><span class="chip">${offline ? "Can't reach your Mac" : "Connecting…"}</span></header>`; return; }
     const s = state;
     const qs = s.inbox.filter(asks), ups = s.inbox.filter((i) => !asks(i));
     const working = s.agents.filter((a) => a.status === "working").length;
     let h = `<header class="top"><h1>Reflex</h1>${offline ? `<span class="chip bad">Offline</span>`
       : !s.herdr ? `<span class="chip bad">herdr isn't running</span>`
-      : `<span class="chip">${glyph(working ? "working" : s.agents.length ? "done" : "idle")}${working ? `${working} working` : `${s.agents.length} agent${s.agents.length === 1 ? "" : "s"}`}</span>`}</header>`;
+      : `<span class="chip">${glyph(working ? "working" : s.agents.length ? "done" : "idle")}${working ? `${working} working` : `${s.agents.length} agent${s.agents.length === 1 ? "" : "s"}`}</span>`}${prefsButton}</header>`;
 
     // Questions first: they wait on you.
     if (qs.length) {
@@ -364,7 +417,17 @@
     refresh();
   });
 
+  // The appearance sheet.
+  const showPrefs = (on) => { $("prefs").hidden = !on; if (on) renderPrefs(); };
+  $("prefs").addEventListener("click", (e) => {
+    const a = e.target.closest("[data-appearance]"), t = e.target.closest("[data-term]");
+    if (a) { appearance = a.dataset.appearance; store.set("reflex.appearance", appearance); applyAppearance(); }
+    else if (t) setTerm(t.dataset.term);
+    else if (e.target === $("prefs") || e.target.closest("#prefsDone")) showPrefs(false);
+  });
+
   document.addEventListener("click", async (e) => {
+    if (e.target.closest("[data-prefs]")) return showPrefs(true);
     const t = e.target.closest("[data-dismiss],[data-item],[data-open],[data-clearall]");
     if (!t) return;
     if (t.dataset.dismiss) { e.stopPropagation(); state.inbox = state.inbox.filter((i) => i.id !== +t.dataset.dismiss); renderHome(); await api("/api/dismiss", { item: +t.dataset.dismiss }); }
@@ -384,17 +447,43 @@
     "Dracula": ["#282a36", "#f8f8f2", "#21222c #ff5555 #50fa7b #f1fa8c #bd93f9 #ff79c6 #8be9fd #f8f8f2 #6272a4 #ff6e6e #69ff94 #ffffa5 #d6acff #ff92df #a4ffff #ffffff"],
     "GitHub Light": ["#ffffff", "#1f2328", "#24292f #cf222e #116329 #4d2d00 #0969da #8250df #1b7c83 #6e7781 #57606a #a40e26 #1a7f37 #633c01 #218bff #a475f9 #3192aa #8c959f"],
   };
-  let themeName = store.get("reflex.theme", "Tokyo Night").replace("TokyoNight", "Tokyo Night");
-  if (!THEMES[themeName]) themeName = "Tokyo Night";
+  // The page: System (the phone's setting), Light or Dark. The terminal: Auto
+  // pairs with it (Tokyo Night by night, Tokyo Night Day by day), or one theme.
+  let appearance = store.get("reflex.appearance", "system");
+  let themeName = store.get("reflex.term", "Auto");
+  if (themeName !== "Auto" && !THEMES[themeName]) themeName = "Auto";
+  const mq = matchMedia("(prefers-color-scheme: dark)");
+  const isDark = () => appearance === "dark" || (appearance === "system" && mq.matches);
+  const termTheme = () => THEMES[themeName === "Auto" ? (isDark() ? "Tokyo Night" : "Tokyo Night Day") : themeName];
+  const light = (hex) => { const n = parseInt(hex.slice(1), 16); return (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255 > 0.6; };
+  function applyAppearance() {
+    if (appearance === "system") delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = appearance;
+    applyTheme();
+    renderPrefs();
+  }
+  function setThemeColor() {
+    $("themeColor").content = open ? termTheme()[0] : (isDark() ? "#0c0c0d" : "#f4f4f5");
+  }
+  function renderPrefs() {
+    $("appearance").innerHTML = [["system", "System"], ["light", "Light"], ["dark", "Dark"]]
+      .map(([v, l]) => `<button data-appearance="${v}" aria-pressed="${appearance === v}">${l}</button>`).join("");
+    const auto = THEMES[isDark() ? "Tokyo Night" : "Tokyo Night Day"];
+    const tile = (name, t, label) => `<button class="theme" data-term="${esc(name)}" aria-pressed="${themeName === name}">
+      <span class="swatch" style="background:${t[0]};color:${t[2].split(" ")[4]}">A</span><span>${esc(label)}</span></button>`;
+    $("themes").innerHTML = tile("Auto", auto, "Auto") + Object.keys(THEMES).map((n) => tile(n, THEMES[n], n)).join("");
+    $("theme").innerHTML = ["Auto", ...Object.keys(THEMES)].map((n) => `<option${n === themeName ? " selected" : ""}>${esc(n)}</option>`).join("");
+  }
+  mq.addEventListener("change", () => { if (appearance === "system") applyAppearance(); });
   // Wrap (readable, the default) or fit every column (for TUIs that need them).
   let fit = store.get("reflex.fit2", "0") === "1";
-  $("theme").innerHTML = Object.keys(THEMES).map((n) => `<option${n === themeName ? " selected" : ""}>${esc(n)}</option>`).join("");
-  $("theme").onchange = (e) => { themeName = e.target.value; store.set("reflex.theme", themeName); applyTheme(); tick(true); };
+  const setTerm = (name) => { themeName = name; store.set("reflex.term", name); applyTheme(); renderPrefs(); tick(true); };
+  $("theme").onchange = (e) => setTerm(e.target.value);
   function applyTheme() {
-    const t = THEMES[themeName], el = $("session");
+    const t = termTheme(), el = $("session");
+    el.dataset.term = light(t[0]) ? "light" : "dark";
+    setThemeColor();
     el.style.setProperty("--term-bg", t[0]); el.style.setProperty("--term-fg", t[1]);
   }
-  applyTheme();
 
   const xterm = (n, pal) => {
     if (n < 16) return pal[n];
@@ -517,6 +606,7 @@
     renderSessionChrome();
     $("screen").innerHTML = "";
     $("session").classList.add("on"); $("session").setAttribute("aria-hidden", "false");
+    setThemeColor();
     if (location.hash !== "#pane=" + encodeURIComponent(pane)) history.pushState({ pane }, "", "#pane=" + encodeURIComponent(pane));
     // Opening a session reads its notifications (Jev's routing questions stay).
     const ids = (state?.inbox || []).filter((i) => i.pane === pane && i.kind !== "route").map((i) => i.id);
@@ -528,6 +618,7 @@
     open = null; setLive(false);
     $("menu").hidden = true;
     $("session").classList.remove("on"); $("session").setAttribute("aria-hidden", "true");
+    setThemeColor();
     clearTimeout(timer);
     if (!fromPop && location.hash.startsWith("#pane=")) history.back();
   }
@@ -545,7 +636,7 @@
       const plain = text.replace(/\x1b\[[0-9;?:]*[A-Za-z@]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r/g, "");
       cols = Math.min(240, Math.max(40, ...plain.split("\n").map((l) => l.replace(/\s+$/, "").length)));
       fitFont();
-      $("screen").innerHTML = text ? ansiHtml(fit ? text : tidy(text), THEMES[themeName]) : `<span style="opacity:.5">${esc(r.error || "Nothing on screen yet.")}</span>`;
+      $("screen").innerHTML = text ? ansiHtml(fit ? text : tidy(text), termTheme()) : `<span style="opacity:.5">${esc(r.error || "Nothing on screen yet.")}</span>`;
       if (pinned) $("term").scrollTop = $("term").scrollHeight;
     } catch (e) {}
     busy = false;
@@ -626,7 +717,17 @@
   fitViewport();
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(); if (open) tick(true); } });
 
-  refresh().then(() => { const m = /^#pane=(.+)$/.exec(location.hash); if (m && state) openSession(decodeURIComponent(m[1])); });
+  applyAppearance();
+  async function pair() {
+    if (!pairCode) return;
+    try {
+      const r = await fetch("/api/pair", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ code: pairCode }) });
+      const j = await r.json();
+      if (j.ok && j.token) { token = j.token; store.set("reflex.token", token); }
+      else if (!token) pairError = "used";
+    } catch (e) { if (!token) pairError = "offline"; }
+  }
+  pair().then(refresh).then(() => { const m = /^#pane=(.+)$/.exec(location.hash); if (m && state) openSession(decodeURIComponent(m[1])); });
   setInterval(refresh, 1500);
 })();
 </script>

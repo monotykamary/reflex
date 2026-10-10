@@ -105,8 +105,23 @@ def p_read(pane: String, source: String, +lines: U32) -> String:
 def p_prompt(target: String, text: String) -> String:
   Js.obj([Js.kv("target", Js.str(target)), Js.kv("text", Js.str(text))])
 
+def words.put(empty: Bool, w: String, rest: List<&2, String>) -> List<&2, String>:
+  match empty:
+    case True{}:
+      rest
+    case False{}:
+      w <> rest
+
+def words(ws: List<&2, String>) -> List<&2, String>:
+  match ws:
+    case Nil{}:
+      []
+    case Con{+w, t}:
+      words.put(String.is_empty(w), w, words(t))
+
+# One key, or several separated by spaces ("down down enter").
 def p_keys(pane: String, key: String) -> String:
-  Js.obj([Js.kv("pane_id", Js.str(pane)), Js.kv("keys", Js.strs([key]))])
+  Js.obj([Js.kv("pane_id", Js.str(pane)), Js.kv("keys", Js.strs(words(String.split(key, ' '))))])
 
 def p_workspace(cwd: String, label: String) -> String:
   Js.obj([Js.kv("cwd", Js.str(cwd)), Js.kv("label", Js.str(label)), Js.kv("focus", "false")])
