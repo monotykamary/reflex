@@ -64,6 +64,13 @@ struct Client {
     func answer(item: Int, key: String) async { await post("/api/answer", ["item": item, "key": key]) }
     func dismiss(_ item: Int) async { await post("/api/dismiss", ["item": item]) }
     func focus(_ pane: String) async { await post("/api/focus", ["pane": pane]) }
+    /// Bring an earlier session back in a new herdr workspace (resume, fork
+    /// or attach), then submit `text` there if it is not empty.
+    func resume(_ p: PastSession, mode: String, text: String) async throws -> PendingInfo {
+        try await post("/api/resume", ["cwd": p.cwd, "kind": p.agent, "session": p.id, "mode": mode, "text": text,
+                                       "label": "\(p.agent) · \(p.title.prefix(40))"], as: PendingInfo.self)
+    }
+
     /// Ends the session: herdr closes the pane and the agent in it.
     func close(_ pane: String) async { await post("/api/close", ["pane": pane]) }
     func reindex() async { await post("/api/reindex", [:]) }

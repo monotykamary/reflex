@@ -19,7 +19,7 @@ import SwiftUI
 
 /// A row in the Ask bar's list.
 struct Candidate: Identifiable, Equatable {
-    enum Kind: Equatable { case session, folder, newFolder, chooseFolder, command, ask }
+    enum Kind: Equatable { case session, folder, newFolder, chooseFolder, command, ask, resume }
     var id: String
     var kind: Kind
     var title: String
@@ -29,6 +29,8 @@ struct Candidate: Identifiable, Equatable {
     var agent: AgentInfo?
     var path: String?
     var command: SlashCommand?
+    /// An earlier session (resume rows).
+    var past: PastSession?
 }
 
 /// What a leading "/word" does.
@@ -37,6 +39,7 @@ enum SlashCommand: Equatable, Hashable {
     case newFolder
     case btw
     case folder
+    case resume
 
     var token: String {
         switch self {
@@ -44,6 +47,7 @@ enum SlashCommand: Equatable, Hashable {
         case .newFolder: return "/new"
         case .btw: return "/btw"
         case .folder: return "/folder"
+        case .resume: return "/resume"
         }
     }
 
@@ -54,11 +58,12 @@ enum SlashCommand: Equatable, Hashable {
         case .newFolder: return "Start in a new project folder"
         case .btw: return "Ask a side question, without interrupting"
         case .folder: return "Choose any folder to start in"
+        case .resume: return "Bring back an earlier session — Claude, pi or Codex"
         }
     }
 
     @MainActor static var all: [SlashCommand] {
-        Onboarding.harnesses.map { .harness($0) } + [.newFolder, .btw, .folder]
+        [.resume] + Onboarding.harnesses.map { .harness($0) } + [.newFolder, .btw, .folder]
     }
 }
 
@@ -83,6 +88,8 @@ final class CommandModel: ObservableObject {
 
     // Tokens set by slash commands.
     @Published var harness: String?
+    /// /resume: the words filter earlier sessions, nothing else.
+    @Published var resumeOnly = false
     @Published var sideForced = false
     @Published var newForced = false
 
@@ -132,6 +139,7 @@ final class CommandModel: ObservableObject {
         text = ""
         phase = .typing
         harness = nil
+        resumeOnly = false
         sideForced = false
         newForced = false
         jev = nil
@@ -165,6 +173,7 @@ final class CommandModel: ObservableObject {
     /// (prose, a question, a command) asks; anything else is a lookup, which
     /// only ever opens a session — it is never sent anywhere.
     var mode: Mode {
+        if resumeOnly { return .search }
         if sideForced || newForced || harness != nil { return .ask }
         return CommandModel.looksLikeProse(request) ? .ask : .search
     }
@@ -256,6 +265,7 @@ final class CommandModel: ObservableObject {
         case .newFolder: newForced = true
         case .btw: sideForced = true
         case .folder: chooseFolder()
+        case .resume: resumeOnly = true; SessionArchive.shared.refresh()
         }
         if text.hasPrefix("/") { text = "" }
         focusTick += 1
@@ -264,7 +274,7 @@ final class CommandModel: ObservableObject {
 
     /// Backspace on an empty field takes the last token off.
     func dropToken() -> Bool {
-        if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else { return false }
+        if resumeOnly { resumeOnly = false } else if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else { return false }
         schedule()
         return true
     }
@@ -316,6 +326,9 @@ final class CommandModel: ObservableObject {
     /// Jev is sure enough to act on ⏎ without a look at the list.
     var confident: Bool { jevText == request && jev?.decision?.decision == "go" && pick != nil && pick != "new" }
 
+    /// The rows changed underneath (earlier sessions re-read): keep a valid selection.
+    func resettle() { settle() }
+
     /// Keep the selection on Jev's pick until the user takes over.
     private func settle() {
         let ids = rows.map(\.id)
@@ -341,6 +354,7 @@ final class CommandModel: ObservableObject {
         for r in ranked {
             if let p = r.action.pane, r.action.type == "prompt", "s:" + p == id { return r.bp }
             if let c = r.action.cwd, r.action.type == "spawn", "f:" + c == id { return r.bp }
+            if let x = r.action.session, r.action.type == "resume", "r:" + x == id { return r.bp }
         }
         return nil
     }
@@ -363,6 +377,7 @@ final class CommandModel: ObservableObject {
         if newForced || (keywordHit && !request.isEmpty) { return "new" }
         guard !request.isEmpty, jevText == request, let r = jev, r.ok else { return nil }
         if let a = r.decision?.action, r.decision?.decision == "go" {
+            if a.type == "resume", let x = a.session { return "r:" + x }
             if let p = a.pane { return "s:" + p }
             if let c = a.cwd { return "f:" + c }
         }
@@ -420,6 +435,14 @@ final class CommandModel: ObservableObject {
                 folders.append(Candidate(id: "f:" + f.path, kind: .folder, title: f.name,
                                          detail: "new \(kind) · \(f.short)" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path))
             }
+            // Earlier sessions Jev weighed for this request.
+            for r in (jevText == request ? jev?.ranked ?? [] : []) where r.action.type == "resume" {
+                guard let x = r.action.session else { continue }
+                let past = SessionArchive.shared.sessions.first { $0.id == x }
+                    ?? PastSession(agent: r.action.kind ?? "claude", id: x, cwd: r.action.cwd ?? "", title: r.label,
+                                   last: "", modified: Date(), state: .past)
+                out.append(resumeRow(past, bp: r.bp))
+            }
             out += folders.prefix(8)
             if !request.isEmpty {
                 out.append(Candidate(id: "new", kind: .newFolder, title: "New folder “\(suggestedName)”",
@@ -434,13 +457,28 @@ final class CommandModel: ObservableObject {
         return out
     }
 
-    /// Search: the sessions matching every word, waiting ones first.
+    /// Search: the live sessions matching every word (most recent first),
+    /// then earlier sessions that could be resumed. /resume: only those.
     private var searchRows: [Candidate] {
-        sessionMatches.map { a in
+        let pasts = SessionArchive.shared.matching(request, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
+        if resumeOnly { return pasts }
+        return sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
                       title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
                       detail: "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status), agent: a, path: a.cwd)
+        } + pasts
+    }
+
+    private func resumeRow(_ p: PastSession, bp: Int?) -> Candidate {
+        let state: String
+        switch p.state {
+        case .running: state = " · running in the background"
+        case .background: state = " · background, stopped"
+        case .elsewhere: state = " · open elsewhere — forks"
+        case .past: state = ""
         }
+        return Candidate(id: "r:" + p.id, kind: .resume, title: p.title,
+                         detail: "\(p.agent) · \(p.folder) · \(p.ago)" + state, bp: bp, path: p.cwd, past: p)
     }
 
     var selected: Candidate? { rows.first { $0.id == selection } ?? rows.first }
@@ -475,6 +513,7 @@ final class CommandModel: ObservableObject {
         if selected?.kind == .command, let c = selected?.command { apply(c); return }
         if selected?.kind == .chooseFolder { chooseFolder(); return }
         if mode == .search {
+            if selected?.kind == .resume, let c = selected { send(to: c, open: true); return }
             if let a = selected?.agent { openPane(a.pane); close() }
             return
         }
@@ -491,6 +530,23 @@ final class CommandModel: ObservableObject {
 
     private func nudge() {
         withAnimation(.linear(duration: 0.36)) { shake += 1 }
+    }
+
+    /// ⌘⏎ on an earlier session in search: a fork, not the session itself.
+    func forkSelected() {
+        guard let c = selected, c.kind == .resume, let p = c.past else { submit(); return }
+        resume(p, mode: "fork", text: "", open: true)
+    }
+
+    private func resume(_ p: PastSession, mode: String?, text: String, open: Bool) {
+        let how = (mode ?? p.mode) == "fork" ? "Forking" : ((mode ?? p.mode) == "attach" ? "Attaching" : "Resuming")
+        phase = .sending("\(how) \(p.agent) · \(p.title.prefix(40))")
+        Task {
+            do {
+                try await Sessions.resume(p, mode: mode, text: text, open: open)
+                done("\(how) \(p.agent) in \(p.folder)")
+            } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
+        }
     }
 
     /// ⌘⏎ in ask mode: send, then open that agent's terminal to watch.
@@ -546,6 +602,10 @@ final class CommandModel: ObservableObject {
             if let cmd = c.command { apply(cmd) }
         case .ask:
             break
+        case .resume:
+            guard let p = c.past else { return }
+            // From search: just bring it back. From a request: bring it back and send it.
+            resume(p, mode: nil, text: mode == .ask ? words : "", open: open)
         }
     }
 
@@ -555,7 +615,7 @@ final class CommandModel: ObservableObject {
         Task {
             do {
                 let p = try await Client.local.spawn(cwd: path, kind: kind, text: text)
-                if open { openWhenStarted(p.id) }
+                if open { Sessions.openWhenStarted(p.id) }
                 if isNew {
                     // The new folder is inside a root: the next index finds it.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { Task { await Client.local.reindex() } }
@@ -563,23 +623,6 @@ final class CommandModel: ObservableObject {
                 // Starting an agent takes a few seconds; a failure lands in the inbox.
                 done("Starting " + label)
             } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
-        }
-    }
-
-    /// A new session's pane is known once it has started ("started rx1-42 in
-    /// w7:p1"): open its terminal then. Gives up quietly after half a minute.
-    private func openWhenStarted(_ id: Int) {
-        let open = openPane
-        Task {
-            for _ in 0..<60 {
-                try? await Task.sleep(for: .milliseconds(500))
-                await Store.shared.refresh()
-                guard let r = Store.shared.state.receipts.first(where: { $0.id == id }) else { continue }
-                if r.ok, let range = r.detail.range(of: " in ", options: .backwards) {
-                    open(String(r.detail[range.upperBound...]).trimmingCharacters(in: .whitespaces))
-                }
-                return
-            }
         }
     }
 
@@ -651,6 +694,7 @@ enum StatusWord {
 struct CommandBar: View {
     @ObservedObject var model: CommandModel
     @ObservedObject var store = Store.shared
+    @ObservedObject var archive = SessionArchive.shared
     @FocusState private var focused: Bool
     @FocusState private var nameFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -681,6 +725,7 @@ struct CommandBar: View {
         .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.phase)
         .onChange(of: model.focusTick) { _, _ in focused = true }
         .onChange(of: store.state.folders > 0) { _, ready in if ready { model.indexReady() } }
+        .onChange(of: archive.sessions.map(\.id)) { _, _ in model.resettle() }
         .onChange(of: model.naming) { _, n in if n { nameFocused = true } else { focused = true } }
         .onAppear { focused = true }
         .sensoryFeedback(.alignment, trigger: model.selection)
@@ -742,6 +787,7 @@ struct CommandBar: View {
     private var placeholder: String {
         if model.sideForced { return "Ask on the side…" }
         if model.newForced { return "What's the new project for?" }
+        if model.resumeOnly { return "Find an earlier session…" }
         if let h = model.harness { return "Ask a new \(h) session, or your agents…" }
         return "Search sessions, or ask your agents…"
     }
@@ -751,6 +797,7 @@ struct CommandBar: View {
             if let h = model.harness { token("/" + h, Tone.route) }
             if model.newForced { token("/new", Tone.done) }
             if model.sideForced { token("/btw", Tone.blocked) }
+            if model.resumeOnly { token("/resume", Tone.working) }
         }
     }
 
@@ -785,7 +832,7 @@ struct CommandBar: View {
         case .tab: model.move(press.modifiers.contains(.shift) ? -1 : 1); return .handled
         case .return where press.modifiers.contains(.command):
             // Send, then open the terminal (in search, ⏎ already opens it).
-            if model.mode == .search { model.submit() } else { model.sendAndOpen() }
+            if model.mode == .search { model.forkSelected() } else { model.sendAndOpen() }
             return .handled
         case .return where press.modifiers.contains(.option):
             // A new line in a long request.
@@ -886,6 +933,7 @@ struct CommandBar: View {
             case .ask: return "Ask"
             case .folder: return "Start in a folder"
             case .newFolder, .chooseFolder: return "Other"
+            case .resume: return "Resume"
             case .command: return "Commands"
             }
         }
@@ -944,6 +992,7 @@ struct CommandBar: View {
                 } else if model.mode == .search {
                     hint("⏎", "open")
                     if model.selected?.kind == .session { hint("⌘⌫", "close") }
+                    if model.selected?.kind == .resume { hint("⌘⏎", "fork instead") }
                     Text("type a request to send it").foregroundStyle(.tertiary)
                     hint("/", "commands")
                 } else {
@@ -974,6 +1023,9 @@ struct CommandBar: View {
         case .chooseFolder: return "Choose…"
         case .command: return "Use \(c.title)"
         case .ask: return "Ask Jev"
+        case .resume:
+            let how = c.past?.mode == "attach" ? "Attach" : (c.past?.mode == "fork" ? "Fork" : "Resume")
+            return model.mode == .ask ? "\(how) and send" : how
         }
     }
 }
@@ -1057,6 +1109,8 @@ private struct CandidateRow: View {
             Image(systemName: "slash.circle").foregroundStyle(Tone.route)
         case .ask:
             Image(systemName: "sparkle").foregroundStyle(Tone.route)
+        case .resume:
+            Image(systemName: candidate.past?.state == .running ? "moon.zzz.fill" : "clock.arrow.circlepath").foregroundStyle(Tone.working)
         }
     }
 }

@@ -24,6 +24,9 @@ struct ActionInfo: Codable, Hashable {
     var kind: String?
     var text: String?
     var key: String?
+    /// For "resume": the earlier session's id, and resume / fork / attach.
+    var session: String?
+    var mode: String?
 }
 
 struct OptionInfo: Codable, Hashable, Identifiable {

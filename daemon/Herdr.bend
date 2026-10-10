@@ -111,6 +111,17 @@ def p_keys(pane: String, key: String) -> String:
 def p_workspace(cwd: String, label: String) -> String:
   Js.obj([Js.kv("cwd", Js.str(cwd)), Js.kv("label", Js.str(label)), Js.kv("focus", "false")])
 
+def strs(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, t}:
+      Js.str(x) <> strs(t)
+
+# agent.start with arguments for the agent (e.g. --resume <id>).
+def p_start_args(name: String, kind: String, pane: String, args: List<&2, String>) -> String:
+  Js.obj([Js.kv("name", Js.str(name)), Js.kv("kind", Js.str(kind)), Js.kv("pane_id", Js.str(pane)), Js.kv("args", Js.arr(strs(args))), Js.kv("timeout_ms", "45000")])
+
 def p_start(name: String, kind: String, pane: String) -> String:
   Js.obj([Js.kv("name", Js.str(name)), Js.kv("kind", Js.str(kind)), Js.kv("pane_id", Js.str(pane)), Js.kv("timeout_ms", "45000")])
 
@@ -153,6 +164,9 @@ def new_workspace(sock: String, cwd: String, label: String) -> IO(Result<&1, &1,
   do IO<Result<&1, &1, U32 & String, String>>:
     r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "workspace.create", p_workspace(cwd, label), 10000)
     return root_pane(r)
+
+def start_agent_args(sock: String, name: String, kind: String, pane: String, args: List<&2, String>) -> IO(Result<&1, &1, U32 & String, J.JSON>):
+  call(sock, "agent.start", p_start_args(name, kind, pane, args), 50000)
 
 def start_agent(sock: String, name: String, kind: String, pane: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "agent.start", p_start(name, kind, pane), 50000)

@@ -2,6 +2,7 @@ import Base
 import ./Model.bend as M
 import ./Core.bend as Core
 import ./Route.bend as R
+import ./Past.bend as P
 import ./Index.bend as Ix
 
 # The laws reflexd's pure core must satisfy. PROOF.bend proves each one;
@@ -146,6 +147,23 @@ law unsure_folder_never_acts:
   for +target: Maybe<&2, R.Pick>
   for +folder: Maybe<&2, R.Pick>
   {R.is_go(R.decide.folder.pick(False{}, m, text, home, default, seen, folders, target, folder)) == False{} : Bool}
+
+# Jev's answer to "resume an earlier conversation?" only counts when it is
+# sure: unsure, the decision stays exactly what it was.
+law unsure_resume_changes_nothing:
+  for +key: String
+  for +pasts: List<&2, P.Past>
+  for +d: R.Decision
+  for +text: String
+  {R.with_past(False{}, key, pasts, d, text) == d : R.Decision}
+
+# ...and a request that already goes to a live session is never turned into
+# a resume, however sure Jev is.
+law live_session_beats_resume:
+  for +m: Maybe<&2, P.Past>
+  for +d: R.Decision
+  for +text: String
+  {R.promote.pick(True{}, m, d, text) == d : R.Decision}
 
 # A side question never types into a blocked agent's TUI, whatever the harness.
 law blocked_agent_gets_no_native_btw:

@@ -39,6 +39,32 @@ final class Recents: ObservableObject {
 }
 
 enum Sessions {
+    /// Bring an earlier session back; open its terminal once it has started
+    /// when `open` is set. Returns the dispatch, or throws.
+    @MainActor @discardableResult
+    static func resume(_ p: PastSession, mode: String? = nil, text: String = "", open: Bool) async throws -> PendingInfo {
+        let d = try await Client.local.resume(p, mode: mode ?? p.mode, text: text)
+        if open { openWhenStarted(d.id) }
+        return d
+    }
+
+    /// A new session's pane is known once it has started ("started rx1-42 in
+    /// w7:p1", "resumed … in w7:p1"): open its terminal then. Gives up quietly
+    /// after half a minute.
+    @MainActor static func openWhenStarted(_ id: Int) {
+        Task {
+            for _ in 0..<60 {
+                try? await Task.sleep(for: .milliseconds(500))
+                await Store.shared.refresh()
+                guard let r = Store.shared.state.receipts.first(where: { $0.id == id }) else { continue }
+                if r.ok, let range = r.detail.range(of: " in ", options: .backwards) {
+                    AppDelegate.current?.showPane(String(r.detail[range.upperBound...]).trimmingCharacters(in: .whitespaces))
+                }
+                return
+            }
+        }
+    }
+
     /// End a session: herdr closes its pane and the agent in it; an open
     /// terminal window for it closes too.
     @MainActor static func close(_ pane: String) {

@@ -2,6 +2,7 @@ import Base
 import ./Model.bend as M
 import ./Core.bend as Core
 import ./Route.bend as R
+import ./Past.bend as P
 import ./Index.bend as Ix
 import ./LAWS.bend as Laws
 
@@ -147,6 +148,12 @@ def Laws.unsure_target_never_acts(is_new, agent, text, home, default, threshold,
   {==}
 
 def Laws.unsure_folder_never_acts(m, text, home, default, seen, folders, target, folder):
+  {==}
+
+def Laws.unsure_resume_changes_nothing(key, pasts, d, text):
+  {==}
+
+def Laws.live_session_beats_resume(m, d, text):
   {==}
 
 def side_tag(s: R.Side) -> Type:

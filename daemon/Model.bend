@@ -45,6 +45,10 @@ type Action is Data:
   Prompt{pane: String, text: String}
   # open a workspace in cwd, start a harness there, then prompt it
   Spawn{cwd: String, kind: String, text: String}
+  # open a workspace in cwd and bring an earlier session back there — mode
+  # "resume" (continue it), "fork" (a copy: it is open elsewhere) or
+  # "attach" (a running background session) — then prompt it if text is set
+  Resume{cwd: String, kind: String, session: String, mode: String, text: String}
   # press one key in an agent's pane, e.g. "1" to answer a numbered question
   Press{pane: String, key: String}
   # the harness's own side-question command, typed into its TUI (/btw)
@@ -190,6 +194,8 @@ def Action.json(a: Action) -> String:
       Js.obj([Js.kv("type", Js.str("prompt")), Js.kv("pane", Js.str(pane)), Js.kv("text", Js.str(text))])
     case Spawn{cwd, kind, text}:
       Js.obj([Js.kv("type", Js.str("spawn")), Js.kv("cwd", Js.str(cwd)), Js.kv("kind", Js.str(kind)), Js.kv("text", Js.str(text))])
+    case Resume{cwd, kind, session, mode, text}:
+      Js.obj([Js.kv("type", Js.str("resume")), Js.kv("cwd", Js.str(cwd)), Js.kv("kind", Js.str(kind)), Js.kv("session", Js.str(session)), Js.kv("mode", Js.str(mode)), Js.kv("text", Js.str(text))])
     case Press{pane, key}:
       Js.obj([Js.kv("type", Js.str("press")), Js.kv("pane", Js.str(pane)), Js.kv("key", Js.str(key))])
     case SideNative{pane, text}:

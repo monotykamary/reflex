@@ -1,6 +1,7 @@
 import Base
 import ./Js.bend as Js
 import ./Model.bend as M
+import ./Past.bend as P
 import ./vendor/strict-json/json.bend as J
 
 # Route: turns a request plus what reflexd can see into one typed Jev call,
@@ -184,8 +185,21 @@ def section_pick(empty: Bool, title: String, body: String) -> String:
 def section_of(+title: String, +body: String) -> String:
   section_pick(String.is_empty(body), title, body)
 
-def state_text(text: String, +home: String, seen: List<&2, Seen>, folders: List<&2, M.Folder>) -> String:
-  "The user said: " ++ Js.str(text) ++ "\n" ++ section_of("Live coding-agent sessions (terminal panes):", agents_text(seen, home, 0n)) ++ section_of("Folders where a new session could be started:", folders_text(folders, home, 0n))
+# An earlier conversation, as Jev reads it.
+def past_line(+home: String, +i: Nat, p: P.Past) -> String:
+  match p:
+    case P.Past{agent, id, cwd, title, last, +age, state}:
+      idx("p", i) ++ ": " ++ agent ++ " conversation " ++ Js.str(title) ++ " in " ++ short(home, cwd) ++ "," ++ age_part(age) ++ " Last asked: " ++ Js.str(clip(last, 160n)) ++ "\n"
+
+def pasts_text(xs: List<&2, P.Past>, +home: String, +i: Nat) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{p, t}:
+      past_line(home, i, p) ++ pasts_text(t, home, 1n+i)
+
+def state_text(text: String, +home: String, seen: List<&2, Seen>, folders: List<&2, M.Folder>, pasts: List<&2, P.Past>) -> String:
+  "The user said: " ++ Js.str(text) ++ "\n" ++ section_of("Live coding-agent sessions (terminal panes):", agents_text(seen, home, 0n)) ++ section_of("Folders where a new session could be started:", folders_text(folders, home, 0n)) ++ section_of("Earlier conversations, not running, that could be resumed:", pasts_text(pasts, home, 0n))
 
 # Questions
 # ---------
@@ -234,6 +248,32 @@ def side_q() -> String:
     Js.kv("instructions", Js.str("Is this a quick side question about what an agent is doing or has done (like 'btw, why did you...?', 'what does X mean?'), to be answered without interrupting or redirecting the agent's work? Answer no for new instructions or tasks.")),
   ]))
 
+def past_choice(+home: String, +i: Nat, p: P.Past) -> String:
+  match p:
+    case P.Past{agent, id, cwd, title, last, age, state}:
+      Js.kv(idx("p", i), Js.str(agent ++ " conversation " ++ title ++ " (" ++ short(home, cwd) ++ ")"))
+
+def past_choices(xs: List<&2, P.Past>, +home: String, +i: Nat) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      [Js.kv("none", Js.str("none: this is new work, even if it is in the same project"))]
+    case Con{p, t}:
+      past_choice(home, i, p) <> past_choices(t, home, 1n+i)
+
+def resume_q(+home: String, pasts: List<&2, P.Past>) -> String:
+  Js.kv("resume", Js.obj([
+    Js.kv("type", Js.str("choice")),
+    Js.kv("instructions", Js.str("Does the user want to go back to one of these earlier conversations? Choose one only when the request clearly continues that specific earlier work — it says continue, resume, back to, finish, or names the same task and topic. A new task, even in the same project, is none. When unsure, choose none.")),
+    Js.kv("criteria", Js.obj(past_choices(pasts, home, 0n))),
+  ]))
+
+def questions.pasts(+home: String, pasts: List<&2, P.Past>) -> List<&2, String>:
+  match pasts:
+    case Nil{}:
+      []
+    case Con{p, t}:
+      [resume_q(home, p <> t)]
+
 def questions.agents(+home: String, seen: List<&2, Seen>) -> List<&2, String>:
   match seen:
     case Nil{}:
@@ -248,17 +288,17 @@ def questions.folders(+home: String, folders: List<&2, M.Folder>) -> List<&2, St
     case Con{f, t}:
       [folder_q(home, f <> t)]
 
-def questions(+home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>) -> List<&2, String>:
-  List.append(&2, String, questions.agents(home, seen), questions.folders(home, folders))
+def questions(+home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>) -> List<&2, String>:
+  List.append(&2, String, List.append(&2, String, questions.agents(home, seen), questions.folders(home, folders)), questions.pasts(home, pasts))
 
 # One `jev` request line for `jev-fabric -- serve`.
-def request(+text: String, +home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>) -> String:
+def request(+text: String, +home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>) -> String:
   Js.obj([
     Js.kv("id", "1"),
     Js.kv("op", Js.str("jev")),
     Js.kv("request", Js.obj([
-      Js.kv("state", Js.str(state_text(text, home, seen, folders))),
-      Js.kv("questions", Js.obj(questions(home, seen, folders))),
+      Js.kv("state", Js.str(state_text(text, home, seen, folders, pasts))),
+      Js.kv("questions", Js.obj(questions(home, seen, folders, pasts))),
     ])),
   ]) ++ "\n"
 
@@ -715,16 +755,138 @@ def decide(+text: String, +home: String, +default: String, +threshold: U32, +see
     case None{}:
       decide.folder(folder, text, home, default, threshold, seen, folders, target, folder)
 
+# Resuming an earlier conversation
+# --------------------------------
+
+def claude_args.pick(attach: Bool, fork: Bool, +id: String) -> List<&2, String>:
+  match attach fork:
+    case True{} _:
+      ["attach", id]
+    case False{} True{}:
+      ["--resume", id, "--fork-session"]
+    case False{} False{}:
+      ["--resume", id]
+
+def claude_args(+mode: String, +id: String) -> List<&2, String>:
+  claude_args.pick(String.eq(mode, "attach"), String.eq(mode, "fork"), id)
+
+def pi_args.pick(fork: Bool, +id: String) -> List<&2, String>:
+  match fork:
+    case True{}:
+      ["--fork", id]
+    case False{}:
+      ["--session", id]
+
+def resume_args.pick(claude: Bool, pi: Bool, codex: Bool, +mode: String, +id: String) -> List<&2, String>:
+  match claude pi codex:
+    case True{} _ _:
+      claude_args(mode, id)
+    case False{} True{} _:
+      pi_args.pick(String.eq(mode, "fork"), id)
+    case False{} False{} True{}:
+      ["resume", id]
+    case False{} False{} False{}:
+      ["--resume", id]
+
+# The agent's own arguments to bring a session back.
+def resume_args(+kind: String, +mode: String, +id: String) -> List<&2, String>:
+  resume_args.pick(String.eq(kind, "claude"), String.eq(kind, "pi"), String.eq(kind, "codex"), mode, id)
+
+# A separate question, defaulting to "none", and a step after the decision:
+# it may turn the decision into a resume only when Jev is sure, and never
+# when a live session already won (sending there is the stronger reading).
+
+def mode_of.pick(running: Bool, elsewhere: Bool) -> String:
+  match running elsewhere:
+    case True{} _:
+      "attach"
+    case False{} True{}:
+      "fork"
+    case False{} False{}:
+      "resume"
+
+def mode_of(+state: String) -> String:
+  mode_of.pick(String.eq(state, "running"), String.eq(state, "elsewhere"))
+
+def resume_action(p: P.Past, +text: String) -> M.Action:
+  match p:
+    case P.Past{+agent, +id, +cwd, title, last, age, +state}:
+      M.Resume{cwd, agent, id, mode_of(state), text}
+
+def resume_label(p: P.Past) -> String:
+  match p:
+    case P.Past{+agent, id, cwd, +title, last, age, state}:
+      "resume " ++ agent ++ " · " ++ clip(title, 48n)
+
+def nth_past.pick(hit: Bool, p: P.Past, rest: Maybe<&2, P.Past>) -> Maybe<&2, P.Past>:
+  match hit:
+    case True{}:
+      Some{p}
+    case False{}:
+      rest
+
+def nth_past(xs: List<&2, P.Past>, +key: String, +i: Nat) -> Maybe<&2, P.Past>:
+  match xs:
+    case Nil{}:
+      None{}
+    case Con{p, t}:
+      nth_past.pick(String.eq(key, idx("p", i)), p, nth_past(t, key, 1n+i))
+
+# A decision that already sends to a live session.
+def live_go(d: Decision) -> Bool:
+  match d:
+    case Go{M.Prompt{pane, t}, label, why}:
+      True{}
+    case Go{M.SideNative{pane, t}, label, why}:
+      True{}
+    case Go{M.SideFork{pane, kind, cwd, session, t}, label, why}:
+      True{}
+    case other:
+      False{}
+
+def promote.pick(live: Bool, m: Maybe<&2, P.Past>, d: Decision, +text: String) -> Decision:
+  match live m:
+    case True{} _:
+      d
+    case False{} None{}:
+      d
+    case False{} Some{+p}:
+      Go{resume_action(p, text), resume_label(p), "continues an earlier conversation"}
+
+def with_past(sure: Bool, +key: String, +pasts: List<&2, P.Past>, +d: Decision, +text: String) -> Decision:
+  match sure:
+    case False{}:
+      d
+    case True{}:
+      promote.pick(live_go(d), nth_past(pasts, key, 0n), d, text)
+
+def resume_key(m: Maybe<&2, Pick>) -> String:
+  match m:
+    case Some{Pick{key, bp, all}}:
+      key
+    case None{}:
+      "none"
+
+def resume_bp(m: Maybe<&2, Pick>) -> U32:
+  match m:
+    case Some{Pick{key, bp, all}}:
+      bp
+    case None{}:
+      0
+
+def decide_with_past(+resume: Maybe<&2, Pick>, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>, +target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +side: U32) -> Decision:
+  with_past(confident(resume_bp(resume), threshold), resume_key(resume), pasts, decide(text, home, default, threshold, seen, folders, target, folder, side), text)
+
 # The decision for a raw `jev-fabric -- serve` output.
-def decide_answers(r: Result<&1, &1, U32 & String, J.JSON>, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>) -> Decision:
+def decide_answers(r: Result<&1, &1, U32 & String, J.JSON>, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>) -> Decision:
   match r:
     case Fail{(code, msg)}:
       Broke{msg}
     case Done{+answers}:
-      decide(text, home, default, threshold, seen, folders, pick(answers, "target"), pick(answers, "folder"), noul_bp(answers))
+      decide_with_past(pick(answers, "resume"), text, home, default, threshold, seen, folders, pasts, pick(answers, "target"), pick(answers, "folder"), noul_bp(answers))
 
-def decide_output(+out: String, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>) -> Decision:
-  decide_answers(response(out), text, home, default, threshold, seen, folders)
+def decide_output(+out: String, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>) -> Decision:
+  decide_answers(response(out), text, home, default, threshold, seen, folders, pasts)
 
 # JSON of a decision, for the route response.
 def Decision.json(d: Decision) -> String:
@@ -770,26 +932,33 @@ def ranked_jsons(xs: List<&2, Ranked>) -> List<&2, String>:
     case Con{r, t}:
       ranked_json(r) <> ranked_jsons(t)
 
-def ranked_all(+target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +text: String, +home: String, +default: String) -> List<&2, Ranked>:
-  List.sort(~Ranked, ~ranked_le, List.append(&2, Ranked, seen_ranked(seen, all_of(target), text, home, 0n), folder_ranked(folders, all_of(folder), new_weight(target), text, home, default, 0n)))
+def past_ranked(xs: List<&2, P.Past>, +all: List<&2, Prob>, +text: String, +i: Nat) -> List<&2, Ranked>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+p, t}:
+      Ranked{lookup_bp(all, idx("p", i)), resume_label(p), resume_action(p, text)} <> past_ranked(t, all, text, 1n+i)
 
-def candidates.with(+target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +side: U32, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +ms: U32) -> String:
+def ranked_all(+target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +resume: Maybe<&2, Pick>, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>, +text: String, +home: String, +default: String) -> List<&2, Ranked>:
+  List.sort(~Ranked, ~ranked_le, List.append(&2, Ranked, List.append(&2, Ranked, seen_ranked(seen, all_of(target), text, home, 0n), folder_ranked(folders, all_of(folder), new_weight(target), text, home, default, 0n)), past_ranked(pasts, all_of(resume), text, 0n)))
+
+def candidates.with(+target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +resume: Maybe<&2, Pick>, +side: U32, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>, +ms: U32) -> String:
   Js.obj([
     Js.kv("ok", "true"),
     Js.kv("ms", Js.num(ms)),
     Js.kv("side", Js.num(side)),
     Js.kv("threshold", Js.num(threshold)),
     Js.kv("harness", Js.str(default)),
-    Js.kv("decision", Decision.json(decide(text, home, default, threshold, seen, folders, target, folder, side))),
-    Js.kv("ranked", Js.arr(ranked_jsons(ranked_all(target, folder, seen, folders, text, home, default)))),
+    Js.kv("decision", Decision.json(decide_with_past(resume, text, home, default, threshold, seen, folders, pasts, target, folder, side))),
+    Js.kv("ranked", Js.arr(ranked_jsons(ranked_all(target, folder, resume, seen, folders, pasts, text, home, default)))),
   ])
 
-def candidates_answers(r: Result<&1, &1, U32 & String, J.JSON>, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +ms: U32) -> String:
+def candidates_answers(r: Result<&1, &1, U32 & String, J.JSON>, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>, +ms: U32) -> String:
   match r:
     case Fail{(code, msg)}:
       Js.obj([Js.kv("ok", "false"), Js.kv("error", Js.str(msg)), Js.kv("ms", Js.num(ms))])
     case Done{+answers}:
-      candidates.with(pick(answers, "target"), pick(answers, "folder"), noul_bp(answers), text, home, default, threshold, seen, folders, ms)
+      candidates.with(pick(answers, "target"), pick(answers, "folder"), pick(answers, "resume"), noul_bp(answers), text, home, default, threshold, seen, folders, pasts, ms)
 
-def candidates_output(+out: String, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +ms: U32) -> String:
-  candidates_answers(response(out), text, home, default, threshold, seen, folders, ms)
+def candidates_output(+out: String, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>, +ms: U32) -> String:
+  candidates_answers(response(out), text, home, default, threshold, seen, folders, pasts, ms)

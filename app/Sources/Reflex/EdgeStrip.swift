@@ -387,6 +387,7 @@ struct Rail: View {
 /// or a hovered dot's pill. Only this animates when it changes.
 struct RailSide: View {
     @ObservedObject var store = Store.shared
+    @ObservedObject var archive = SessionArchive.shared
     @ObservedObject var rail = RailModel.shared
     @ObservedObject var inbox = InboxModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
@@ -429,6 +430,7 @@ struct RailSide: View {
             }
         case .agents:
             AgentList(agents: store.state.agents, pulses: store.pulses, waiting: questions.count,
+                      background: archive.backgroundSessions,
                       open: openAgent, ask: { openBar($0) }, reveal: reveal,
                       showQuestion: { rail.panel = .question })
                 .transition(.surface(reduce: reduce))
@@ -485,6 +487,8 @@ private struct AgentList: View {
     var agents: [AgentInfo]
     var pulses: [String: Int]
     var waiting: Int
+    /// `claude --bg` sessions, running or stopped: one click brings them here.
+    var background: [PastSession] = []
     var open: (AgentInfo) -> Void
     var ask: (AgentInfo) -> Void
     var reveal: (AgentInfo) -> Void
@@ -587,6 +591,13 @@ private struct AgentList: View {
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                     }
+                    if !background.isEmpty && query.isEmpty {
+                        Text("BACKGROUND")
+                            .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
+                            .foregroundStyle(Ink.dim.opacity(0.75))
+                            .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
+                        ForEach(background) { p in BackgroundRow(session: p) }
+                    }
                 }
                 .padding(.horizontal, 4).padding(.top, groups.count > 1 ? 0 : 3).padding(.bottom, 6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
@@ -598,6 +609,46 @@ private struct AgentList: View {
         }
         .frame(width: 340)
         .raySurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+}
+
+/// A `claude --bg` session: running ones attach, stopped ones resume, into a
+/// herdr workspace; its terminal opens once it is up.
+private struct BackgroundRow: View {
+    var session: PastSession
+    @State private var hover = false
+    @State private var busy = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: session.state == .running ? "moon.zzz.fill" : "moon.zzz")
+                .font(.system(size: 9.5)).foregroundStyle(session.state == .running ? Tone.working : Ink.dim).frame(width: 12)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(session.title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
+                Text("\(session.agent) · \(session.folder) · " + (session.state == .running ? "running" : "stopped") + " · \(session.ago)")
+                    .font(.system(size: 10.5)).foregroundStyle(Ink.dim).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if busy { ProgressView().controlSize(.mini) }
+            Text(session.state == .running ? "Attach" : "Resume")
+                .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.text)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Color.primary.opacity(hover ? 0.14 : 0.08), in: Capsule())
+                .opacity(hover ? 1 : 0.6)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(hover ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !busy else { return }
+            busy = true
+            Task {
+                _ = try? await Sessions.resume(session, open: true)
+                busy = false
+            }
+        }
+        .onHover { h in withAnimation(Motion.micro) { hover = h } }
+        .help(session.state == .running ? "Attach to it in herdr" : "Resume it in herdr")
     }
 }
 

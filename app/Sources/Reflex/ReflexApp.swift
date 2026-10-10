@@ -42,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         command.openPane = { [weak self] pane in self?.showPane(pane) }
         command.openSetup = { [weak self] step in self?.showSettings(pane: step == .jev ? .routing : .setup) }
         SetupState.shared.start()
+        SessionArchive.shared.start()
         hotkey = DoubleOption { [weak self] in
             if Onboarding.shared.consumeHotkey() { return }
             self?.toggleBar()

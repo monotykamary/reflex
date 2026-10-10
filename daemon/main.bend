@@ -6,6 +6,7 @@ import ./Core.bend as Core
 import ./Herdr.bend as Herdr
 import ./Index.bend as Ix
 import ./Route.bend as R
+import ./Past.bend as P
 import ./Http.bend as Http
 import ./Fs.bend as Fs
 import ./vendor/strict-json/json.bend as J
@@ -425,6 +426,32 @@ def spawn_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +text: String, w:
         st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent(Cfg.sock(cfg), name, kind, pane)
         spawned(cfg, cwd, name, pane, text, st)
 
+def resumed_result(+name: String, +pane: String, r: Result<&1, &1, U32 & String, J.JSON>) -> Result<&1, &1, U32 & String, String>:
+  match r:
+    case Done{v}:
+      Done{"resumed " ++ name ++ " in " ++ pane}
+    case Fail{e}:
+      Fail{e}
+
+# Started: prompt it when there is a request, else it is simply back.
+def resumed(empty: Bool, +cfg: Cfg, +cwd: String, +name: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
+  match empty:
+    case True{}:
+      IO.pure(Result<&1, &1, U32 & String, String>, resumed_result(name, pane, r))
+    case False{}:
+      spawned(cfg, cwd, name, pane, text, r)
+
+def resume_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +args: List<&2, String>, +text: String, w: Result<&1, &1, U32 & String, String>) -> IO(Result<&1, &1, U32 & String, String>):
+  match w:
+    case Fail{e}:
+      IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
+    case Done{+pane}:
+      do IO<Result<&1, &1, U32 & String, String>>:
+        r : Result<&1, &1, U32 & String, U32> <- IO.random_u32()
+        +name : String <- IO.pure(String, agent_name(id, r))
+        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent_args(Cfg.sock(cfg), name, kind, pane, args)
+        resumed(String.is_empty(text), cfg, cwd, name, pane, text, st)
+
 def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) -> IO(Result<&1, &1, U32 & String, String>):
   match a:
     case M.Prompt{pane, text}:
@@ -444,6 +471,10 @@ def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) 
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.fork(cfg), [kind, cwd, session, text], "", 4194304, 300000)
         post_fork_reply(chan, pane, label, stdout_of(r))
+    case M.Resume{+cwd, +kind, +session, +mode, +text}:
+      do IO<Result<&1, &1, U32 & String, String>>:
+        w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(Cfg.sock(cfg), cwd, Core.base_name(cwd))
+        resume_in(cfg, id, cwd, kind, R.resume_args(kind, mode, session), text, w)
     case M.Spawn{+cwd, +kind, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
         # A new project folder may not exist yet; mkdir -p is a no-op otherwise.
@@ -627,6 +658,15 @@ def take_agents(xs: List<&2, M.Agent>, n: Nat) -> List<&2, M.Agent>:
     case Con{h, t} 1n+p:
       h <> take_agents(t, p)
 
+# Earlier sessions the app found (sessions.tsv), the most relevant few.
+def pasts_file(+cfg: Cfg) -> String:
+  Cfg.data(cfg) ++ "/sessions.tsv"
+
+def read_pasts(+cfg: Cfg) -> IO(List<&2, P.Past>):
+  do IO<List<&2, P.Past>>:
+    r : Result<&1, &1, U32 & String, String> <- Fs.read(pasts_file(cfg), 8388608)
+    return P.parse(text_or(r, ""))
+
 def jev_args() -> List<String>:
   ["--", "serve", "--timeout-ms", "60000", "1", "60000"]
 
@@ -650,7 +690,7 @@ def act(dry: Bool, +chan: Chan(Env), +text: String, d: R.Decision) -> IO(String)
         r : String <- ask_text(chan, M.Post{M.INote{}, "", "reflex", "could not route", message, []})
         return route_json(R.Decision.json(R.Broke{message}), "")
 
-def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +line: String, +seen: List<&2, R.Seen>, +cands: List<&2, M.Folder>) -> IO(String):
+def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +line: String, +seen: List<&2, R.Seen>, +cands: List<&2, M.Folder>, +pasts: List<&2, P.Past>) -> IO(String):
   match again:
     case False{}:
       act(dry, chan, text, d)
@@ -658,7 +698,7 @@ def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +t
       do IO<String>:
         IO.sleep(300)
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
-        act(dry, chan, text, R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands))
+        act(dry, chan, text, R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts))
 
 def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, ctx: M.Reply) -> IO(String):
   match ctx:
@@ -666,10 +706,12 @@ def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: S
       do IO<String>:
         +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
-        +line : String = R.request(text, Cfg.home(cfg), seen, cands)
+        all : List<&2, P.Past> <- read_pasts(cfg)
+        +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
+        +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts)
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
-        +d : R.Decision = R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands)
-        retry(R.transient(d), d, dry, cfg, chan, text, harness, line, seen, cands)
+        +d : R.Decision = R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts)
+        retry(R.transient(d), d, dry, cfg, chan, text, harness, line, seen, cands, pasts)
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
@@ -685,11 +727,13 @@ def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, ctx: M.Reply) -> 
       do IO<String>:
         +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
-        +line : String = R.request(text, Cfg.home(cfg), seen, cands)
+        all : List<&2, P.Past> <- read_pasts(cfg)
+        +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
+        +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts)
         t0 : Nat <- IO.now()
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         t1 : Nat <- IO.now()
-        return R.candidates_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, U32.from_nat(Nat.sub(t1, t0)))
+        return R.candidates_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts, U32.from_nat(Nat.sub(t1, t0)))
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
@@ -700,7 +744,8 @@ def explain_ctx(+cfg: Cfg, +text: String, ctx: M.Reply) -> IO(String):
     case M.RContext{agents, folders}:
       do IO<String>:
         +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
-        return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, folders, 8n))) ++ "}"
+        all : List<&2, P.Past> <- read_pasts(cfg)
+        return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, folders, 8n), P.rank(text, all, 5n))) ++ "}"
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false}")
 
@@ -775,6 +820,8 @@ type Ep is Data:
   ESide{}
   EFocus{}
   EClose{}
+  ESessions{}
+  EResume{}
   EJevPing{}
   EStatic{}
   EMissing{}
@@ -800,6 +847,8 @@ def rows() -> List<&2, Row>:
     Row{"/api/side", ESide{}},
     Row{"/api/focus", EFocus{}},
     Row{"/api/close", EClose{}},
+    Row{"/api/sessions", ESessions{}},
+    Row{"/api/resume", EResume{}},
     Row{"/api/jev/ping", EJevPing{}},
   ]
 
@@ -973,6 +1022,14 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.close_pane(Cfg.sock(cfg), Js.text_at(body, "pane"))
         ok(pane_json(ok_detail(r, "closed")))
+    case ESessions{}:
+      do IO<String>:
+        all : List<&2, P.Past> <- read_pasts(cfg)
+        ok(Js.obj([Js.kv("ok", "true"), Js.kv("sessions", Js.arr(P.jsons(all)))]))
+    case EResume{}:
+      do IO<String>:
+        r : String <- ask_text(chan, M.Enqueue{M.Resume{Js.text_at(body, "cwd"), Js.or_else(Js.text_at(body, "kind"), "claude"), Js.text_at(body, "session"), Js.or_else(Js.text_at(body, "mode"), "resume"), Js.text_at(body, "text")}, "resume " ++ Js.or_else(Js.text_at(body, "label"), R.leaf(Js.text_at(body, "cwd"))), 0})
+        ok(r)
     case EStatic{}:
       serve_static(cfg, static_name(Http.Req.path(req)))
     case EMissing{}:
