@@ -306,12 +306,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         tw.orderFrontRegardless()
 
         edge.panel = { [weak self] in self?.strip }
-        edge.tab = { [weak self] in self?.tabWindow }
         edge.keys = { [weak self] in self?.railKeys }
-        edge.side = { [weak self] in
-            guard let w = self?.side, !w.ignoresMouseEvents else { return nil }
-            return w
+        edge.side = { [weak self] in self?.side }
+        edge.rects = { [weak self] in
+            guard let r = self?.railRects() else { return [] }
+            return [r.column, r.side].compactMap { $0 }
         }
+        edge.tabRect = { [weak self] in self?.tabRect() }
         edge.sliver = { [weak self] in self?.sliver }
         edge.tabShown = { [weak self] in self?.tabShown ?? false }
         edge.anchor = { [weak self] in
@@ -324,23 +325,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.placeStrip()
         }
         edge.keepOpen = { InboxModel.shared.shown }
+        // Quiet only while the bar or the inbox actually has the keys: one
+        // left up behind another window must not deaden the edge.
         edge.othersKey = { [weak self] in
-            (self?.bar?.isVisible ?? false) || (self?.inbox?.isVisible ?? false)
+            guard let self else { return false }
+            let bar = self.bar.map { $0.isVisible && $0.isKeyWindow && self.command.shown } ?? false
+            let inbox = self.inbox.map { $0.isVisible && $0.isKeyWindow && InboxModel.shared.shown } ?? false
+            return bar || inbox
         }
         edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
         edge.start()
+        Store.shared.watching = { [weak self] in
+            self?.popouts.first { $0.value.isKeyWindow }?.key
+        }
 
-        // Open: size up now. Closed: wait for the exit animation, then size down.
+        // Closed: the tab comes back where the rail was.
         RailModel.shared.$visible.removeDuplicates().sink { [weak self] open in
-            if !open {
-                self?.railClosingUntil = Date().addingTimeInterval(0.24)
-                // The tab comes back where the rail was.
-                self?.tabY = self?.railY
-            }
-            DispatchQueue.main.asyncAfter(deadline: .now() + (open ? 0 : 0.24)) {
-                guard RailModel.shared.visible == open else { return }
-                self?.placeStrip()
-            }
+            guard let self, !open else { return }
+            self.tabY = self.railY
+            self.tabScreen = self.railScreen
+            DispatchQueue.main.async { self.placeStrip() }
         }.store(in: &bag)
         Store.shared.$state.map { Rail.active($0.agents).map(\.status) + [$0.agents.count.description] }
             .removeDuplicates().sink { [weak self] _ in
@@ -349,18 +353,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.placeStrip()
                 }
             }.store(in: &bag)
-        // Each window follows what it shows, so no transparent part of either
-        // covers the inbox or the apps beside the rail.
-        let r = RailModel.shared
-        Publishers.MergeMany(r.$panel.map { _ in () }.eraseToAnyPublisher(),
-                             r.$hoverDot.map { _ in () }.eraseToAnyPublisher(),
-                             r.$cardIndex.map { _ in () }.eraseToAnyPublisher(),
-                             r.$columnSize.map { _ in () }.eraseToAnyPublisher(),
-                             r.$sideSize.map { _ in () }.eraseToAnyPublisher())
-            .sink { [weak self] in self?.schedulePlace() }.store(in: &bag)
-        InboxModel.shared.$shown.sink { [weak self] _ in self?.schedulePlace() }.store(in: &bag)
-        Store.shared.$state.map { Rail.questions($0.inbox).map(\.id) }.removeDuplicates()
-            .sink { [weak self] _ in self?.schedulePlace() }.store(in: &bag)
         Settings.shared.$showStrip.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeStrip() }
         }.store(in: &bag)
@@ -369,15 +361,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.edge.surface() }
         }.store(in: &bag)
         setupClickAway()
-        InboxModel.shared.$size.removeDuplicates().sink { [weak self] _ in
-            DispatchQueue.main.async { self?.placeInbox() }
-        }.store(in: &bag)
-        // The bar's window never resizes while open (growing it downward made
-        // macOS draw the old content bottom-anchored for a frame, and the bar
-        // dropped then slid back). Instead the clear part below the bar lets
-        // clicks through: the window only takes the mouse over the bar itself.
-        barMouse = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.updateBarMouse() }
+        NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
+            Task { @MainActor in self?.placeStrip() }
+        }
+        // No surface's window resizes or moves while it shows (macOS draws
+        // the old content shifted for a frame when it does — the jumps).
+        // Each is as large as it can need and clear; the window takes the
+        // mouse only over what it shows, and clicks elsewhere go through.
+        mouseGate = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateMouse() }
         }
     }
 
@@ -403,7 +395,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func clickAway(at p: NSPoint, in window: NSWindow?) {
         let mine = [strip, side, railKeys, inbox].compactMap { $0 }
         if let window, mine.contains(where: { $0 === window }) { return }
-        if InboxModel.shared.shown, let ib = inbox, !ib.frame.contains(p) {
+        if InboxModel.shared.shown, !(inboxRect()?.contains(p) ?? false) {
             hideInbox()
         }
         // (Dev launches that pin the rail open for a screenshot keep it open.)
@@ -419,11 +411,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// rail opens elsewhere; it settles where the rail last was once closed).
     private var tabWindow: KeyPanel?
     private var tabY: CGFloat?
-    /// Until when the rail's exit animation is still playing.
-    private var railClosingUntil = Date.distantPast
+    private var tabScreen: NSScreen?
     private var railKeys: KeyPanel?
     private var placeQueued = false
-    private var sideFit = 0
 
     /// Coalesce: many changes in one turn of the run loop, one placement.
     private func schedulePlace() {
@@ -435,80 +425,85 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
-    /// The column window sits at the edge; the side window, sized to its
-    /// content, sits just left of it. Windows grow at once and shrink only
-    /// after the old content has faded out.
+    /// The rail's windows: each spans its screen's height at the right edge
+    /// and stays put while shown — the column's, the side's just left of it,
+    /// the tab's. What they show is placed inside them (see `Anchored`).
+    static let columnWindowWidth: CGFloat = 80
+    static let sideWindowWidth: CGFloat = 560
+
     private func placeStrip() {
         guard let p = strip else { return }
         let s = (railScreen ?? NSScreen.main)?.visibleFrame ?? Panels.screen
-        let y0 = railY ?? s.midY
-        func centred(_ size: NSSize, right: CGFloat) -> NSRect {
-            let y = min(max(y0 - size.height / 2, s.minY), s.maxY - size.height)
-            return NSRect(x: right - size.width, y: y, width: size.width, height: size.height)
-        }
-
         let rail = RailModel.shared
-        // The tab: its own window, where it was — never moved while it shows.
+        let anchor = (s.maxY - (railY ?? s.midY)).rounded()
+        if rail.anchor != anchor { rail.anchor = anchor }
+        let column = NSRect(x: s.maxX - AppDelegate.columnWindowWidth, y: s.minY, width: AppDelegate.columnWindowWidth, height: s.height)
+        if p.frame != column { p.setFrame(column, display: true) }
+        if let sp = side {
+            let f = NSRect(x: s.maxX - Rail.columnWidth - AppDelegate.sideWindowWidth, y: s.minY,
+                           width: AppDelegate.sideWindowWidth, height: s.height)
+            if sp.frame != f { sp.setFrame(f, display: true) }
+        }
         if let tw = tabWindow {
-            if tabY == nil { tabY = y0 }
-            let ty = tabY ?? y0
-            let h = Rail.tabHeight(Store.shared.state.agents)
-            let y = min(max(ty - h / 2, s.minY), s.maxY - h)
-            let f = NSRect(x: s.maxX - 30, y: y, width: 30, height: h)
+            let ts = (tabScreen ?? railScreen ?? NSScreen.main)?.visibleFrame ?? s
+            let ty = tabY ?? railY ?? ts.midY
+            let ta = (ts.maxY - ty).rounded()
+            if rail.tabAnchor != ta { rail.tabAnchor = ta }
+            let f = NSRect(x: ts.maxX - 30, y: ts.minY, width: 30, height: ts.height)
             if tw.frame != f { tw.setFrame(f, display: true) }
         }
-        let column: NSRect
-        if rail.visible {
-            let c = rail.columnSize
-            let size = c == .zero ? NSSize(width: Rail.columnWidth, height: 300) : NSSize(width: ceil(c.width), height: min(s.height, ceil(c.height)))
-            column = centred(size, right: s.maxX)
-        } else {
-            // Closed: the column's window is out of the way (the tab has its own).
-            column = centred(NSSize(width: 1, height: 1), right: s.maxX)
-        }
-        // Closing: the column fades out in its own window, so that window
-        // keeps its size until the fade is done (the visible sink places it
-        // then). Shrinking it at once clipped the column away in one frame.
-        let closing = !rail.visible && Date() < railClosingUntil && p.frame.width > column.width
-        if p.frame != column && !closing { p.setFrame(column, display: true) }
+    }
 
-        guard let sp = side else { return }
-        let mode = Rail.side(rail, Store.shared, inboxShown: InboxModel.shared.shown)
-        sideFit += 1
-        let ticket = sideFit
-        if mode == .none {
-            // Let the content fade, then get out of the way entirely.
-            sp.ignoresMouseEvents = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
-                guard self?.sideFit == ticket else { return }
-                sp.setFrame(NSRect(x: column.minX - 1, y: column.midY, width: 1, height: 1), display: false)
-            }
-            return
-        }
-        // A pill only labels a dot; it never takes clicks.
-        if case .pill = mode { sp.ignoresMouseEvents = true } else { sp.ignoresMouseEvents = false }
-        let m = rail.sideSize
-        let want = m == .zero ? NSSize(width: 420, height: min(s.height, 640)) : NSSize(width: ceil(m.width), height: min(s.height, ceil(m.height)))
-        let target = centred(want, right: column.minX)
-        let cur = sp.frame
-        if cur.width >= target.width - 1 && cur.height >= target.height - 1 && cur.maxX == target.maxX && cur.width > 1 {
-            // Shrinking: wait for the old content's exit, keep the right edge put.
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
-                guard self?.sideFit == ticket else { return }
-                sp.setFrame(target, display: true)
-            }
-        } else {
-            let grow = cur.width > 1 && cur.maxX == target.maxX
-                ? centred(NSSize(width: max(cur.width, target.width), height: max(cur.height, target.height)), right: column.minX)
-                : target
-            sp.setFrame(grow, display: true)
-            if grow != target {
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
-                    guard self?.sideFit == ticket else { return }
-                    sp.setFrame(target, display: true)
-                }
+    /// Where `size` sits, anchored at `y` from the top, at the right of `f`.
+    private func anchored(_ size: CGSize, at y: CGFloat, in f: NSRect) -> NSRect? {
+        guard size.width > 0, size.height > 0 else { return nil }
+        let top = Anchored.top(y, height: size.height, in: f.height)
+        return NSRect(x: f.maxX - size.width, y: f.maxY - top - size.height, width: size.width, height: size.height)
+    }
+
+    /// Where the open rail's content is on screen: the column, and what is
+    /// beside it when that takes clicks (a dot's pill never does).
+    private func railRects() -> (column: NSRect?, side: NSRect?) {
+        let rail = RailModel.shared
+        guard rail.visible, let p = strip else { return (nil, nil) }
+        let column = anchored(rail.columnSize, at: rail.anchor, in: p.frame)
+        var beside: NSRect?
+        if let sp = side {
+            switch Rail.side(rail, Store.shared, inboxShown: InboxModel.shared.shown) {
+            case .none, .pill: break
+            default: beside = anchored(rail.sideSize, at: rail.anchor, in: sp.frame)
             }
         }
+        return (column, beside)
+    }
+
+    private func tabRect() -> NSRect? {
+        guard let tw = tabWindow, tabShown, !RailModel.shared.visible else { return nil }
+        return anchored(CGSize(width: 30, height: Rail.tabHeight(Store.shared.state.agents)),
+                        at: RailModel.shared.tabAnchor, in: tw.frame)
+    }
+
+    /// The inbox's cards, at the top of its window.
+    private func inboxRect() -> NSRect? {
+        guard let w = inbox, w.isVisible else { return nil }
+        let m = InboxModel.shared.size
+        guard m.height > 0 else { return nil }
+        let h = min(m.height, w.frame.height)
+        return NSRect(x: w.frame.maxX - m.width, y: w.frame.maxY - h, width: m.width, height: h)
+    }
+
+    private func updateMouse() {
+        let m = NSEvent.mouseLocation
+        updateBarMouse()
+        func gate(_ w: NSWindow?, _ r: NSRect?) {
+            guard let w else { return }
+            let take = r?.contains(m) ?? false
+            if w.ignoresMouseEvents == take { w.ignoresMouseEvents = !take }
+        }
+        let r = railRects()
+        gate(strip, r.column)
+        gate(side, r.side)
+        if let ib = inbox, ib.isVisible { gate(ib, inboxRect()) }
     }
 
     // MARK: Command bar — shown instantly (used all day; no entrance animation)
@@ -546,7 +541,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Tall enough for the longest list; the bar sits at its top.
     static let barHeight: CGFloat = 600
 
-    private var barMouse: Timer?
+    private var mouseGate: Timer?
 
     private func placeBar() {
         guard let b = bar else { return }
@@ -575,7 +570,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideBar() {
-        guard let b = bar, b.isVisible, command.shown else { return }
+        guard let b = bar, b.isVisible else { return }
+        guard command.shown else { b.orderOut(nil); return }
         command.shown = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in
             guard let self, !self.command.shown else { return }
@@ -590,13 +586,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inbox == nil {
             let view = InboxView(openPane: { [weak self] p in self?.showPane(p) },
                                  close: { [weak self] in self?.hideInbox() })
-            let p = Panels.floating(view, size: NSSize(width: 520, height: 320), key: true)
+            let p = Panels.floating(view, size: NSSize(width: InboxView.width, height: 320), key: true)
             p.onEscape = { [weak self] in self?.hideInbox() }
             inbox = p
         }
         if inbox!.isVisible && InboxModel.shared.shown { hideInbox(); return }
-        let h = inboxMaxHeight
-        InboxModel.shared.maxList = h - 150
+        edge.hide(returnFocus: false)
+        InboxModel.shared.maxList = inboxMaxHeight - 120
         placeInbox()
         inbox!.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async { InboxModel.shared.shown = true }
@@ -604,14 +600,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var inboxMaxHeight: CGFloat { min(760, Panels.screen.height * 0.86) }
 
-    /// Beside the rail, top fixed, as tall as its cards.
+    /// Beside the rail: a window as tall as the inbox may grow, placed once
+    /// as it opens; the cards sit at its top and it never resizes under them.
     private func placeInbox() {
         guard let w = inbox else { return }
         let s = Panels.screen
-        let m = InboxModel.shared.size
-        // Open at the content's own width, so nothing re-lays out as it fits.
-        let size = m == .zero ? NSSize(width: 520, height: 320) : NSSize(width: m.width, height: min(m.height, inboxMaxHeight))
-        Panels.fit(w, to: size, top: s.midY + inboxMaxHeight / 2, midX: s.maxX - Rail.columnWidth - 276)
+        let h = inboxMaxHeight
+        let f = NSRect(x: (s.maxX - Rail.columnWidth - 16 - InboxView.width).rounded(), y: (s.midY - h / 2).rounded(),
+                       width: InboxView.width, height: h.rounded())
+        if w.frame != f { w.setFrame(f, display: true) }
     }
 
     private func hideInbox() {
@@ -671,7 +668,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showPane(_ pane: String) {
         Recents.shared.touch(pane)
+        Store.shared.seen(pane)
         edge.hide(returnFocus: false)
+        if InboxModel.shared.shown { hideInbox() }
         // The bar goes first, at once: left to fade while still key, it would
         // hand focus back to the app it came from as it left.
         if let b = bar, b.isVisible {
@@ -711,7 +710,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         // Clicking between terminals counts as switching, for the bar's order.
         NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: w, queue: .main) { _ in
-            Task { @MainActor in Recents.shared.touch(pane) }
+            Task { @MainActor in Recents.shared.touch(pane); Store.shared.seen(pane) }
         }
         popouts[pane] = w
         AppDelegate.activateSelf()

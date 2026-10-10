@@ -36,6 +36,42 @@ final class RailModel: ObservableObject {
     /// window is made to fit its own.
     @Published var columnSize: CGSize = .zero
     @Published var sideSize: CGSize = .zero
+    /// Where the rail is centred, in points from the top of its windows
+    /// (which span the screen's height and never move while shown).
+    @Published var anchor: CGFloat = 400
+    /// The same for the edge tab, which stays where the rail last was.
+    @Published var tabAnchor: CGFloat = 400
+}
+
+/// Puts each child at the trailing edge with its centre `y` points from the
+/// top, kept within the bounds. The rail's windows span the screen and never
+/// resize or move while shown: content is placed inside them in the same
+/// layout pass that sizes it, so no frame is ever drawn in the wrong place
+/// (a window resized under its content showed the old content shifted for a
+/// frame — the jump).
+struct Anchored: Layout {
+    var y: CGFloat
+
+    var animatableData: CGFloat {
+        get { y }
+        set { y = newValue }
+    }
+
+    static func top(_ y: CGFloat, height h: CGFloat, in H: CGFloat) -> CGFloat {
+        min(max(y - h / 2, 0), max(0, H - h))
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        proposal.replacingUnspecifiedDimensions()
+    }
+
+    func placeSubviews(in b: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        for v in subviews {
+            let s = v.sizeThatFits(.unspecified)
+            let top = Anchored.top(y, height: s.height, in: b.height)
+            v.place(at: CGPoint(x: b.maxX - s.width, y: b.minY + top), anchor: .topLeading, proposal: ProposedViewSize(s))
+        }
+    }
 }
 
 // MARK: - Shared pieces
@@ -303,7 +339,8 @@ struct Rail: View {
 
     var body: some View {
         GlassEffectContainer(spacing: 14) {
-            ZStack(alignment: .trailing) {
+            Anchored(y: rail.anchor) {
+              ZStack(alignment: .trailing) {
                 if rail.visible {
                     column
                         .padding(.trailing, 10)
@@ -315,9 +352,10 @@ struct Rail: View {
                                 .combined(with: .offset(x: reduce ? 0 : 18)),
                             removal: .opacity.combined(with: .offset(x: reduce ? 0 : 12))))
                 }
+              }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .animation(rail.visible ? Motion.enter : Motion.exit, value: rail.visible)
         .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
         // One look whether or not the rail has the keys: it takes them while the
@@ -459,12 +497,14 @@ struct RailTab: View {
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            if !rail.visible && !Rail.active(store.state.agents).isEmpty && settings.showStrip {
-                tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
+        Anchored(y: rail.tabAnchor) {
+            ZStack(alignment: .trailing) {
+                if !rail.visible && !Rail.active(store.state.agents).isEmpty && settings.showStrip {
+                    tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
+                }
             }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(rail.visible ? Motion.exit : Motion.enter, value: rail.visible)
         .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
     }
@@ -512,15 +552,17 @@ struct RailSide: View {
     private var questions: [ItemInfo] { Rail.questions(store.state.inbox) }
 
     var body: some View {
-        ZStack(alignment: .trailing) {
-            content
-                // 12 pt to the column; the same vertical margins as the column.
-                .padding(.trailing, 12)
-                .padding(.vertical, 12)
-                .fixedSize()
-                .onGeometryChange(for: CGSize.self) { $0.size } action: { rail.sideSize = $0 }
+        Anchored(y: rail.anchor) {
+            ZStack(alignment: .trailing) {
+                content
+                    // 12 pt to the column; the same vertical margins as the column.
+                    .padding(.trailing, 12)
+                    .padding(.vertical, 12)
+                    .fixedSize()
+                    .onGeometryChange(for: CGSize.self) { $0.size } action: { rail.sideSize = $0 }
+            }
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .animation(Motion.enter, value: mode)
         .focusable()
         .focusEffectDisabled()

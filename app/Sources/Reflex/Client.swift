@@ -102,6 +102,7 @@ final class Store: ObservableObject {
     private var lastPending: [PendingInfo] = []
     private var seenItems: Set<Int>?
     private var peekClear: Task<Void, Never>?
+    private var clearing: Set<Int> = []
 
     func start() {
         loop?.cancel()
@@ -117,9 +118,14 @@ final class Store: ObservableObject {
 
     func refresh() async {
         do {
-            let next = try await Client.local.state()
+            var next = try await Client.local.state()
+            // Being cleared: gone at once, not back for a poll or two.
+            clearing.formIntersection(next.inbox.map(\.id))
+            next.inbox.removeAll { clearing.contains($0.id) }
             observe(next)
             state = next
+            // Whatever arrives for the session you are looking at, you have seen.
+            if let pane = watching() { seen(pane) }
             connected = true
         } catch {
             connected = false
@@ -148,5 +154,27 @@ final class Store: ObservableObject {
             seenItems = ids
         }
         if let p = peek, !ids.contains(p.id) { peek = nil }
+    }
+
+    /// The session whose terminal has the keys, if any (set by the app).
+    var watching: () -> String? = { nil }
+
+    private func clears(_ item: ItemInfo, _ pane: String) -> Bool {
+        !pane.isEmpty && item.pane == pane && item.kind != "route"
+    }
+
+    /// You opened this session: its notifications are read. (Jev's routing
+    /// questions are not the session's, and stay.)
+    func seen(_ pane: String) {
+        let ids = state.inbox.filter { clears($0, pane) }.map(\.id)
+        guard !ids.isEmpty else { return }
+        clearing.formUnion(ids)
+        var s = state
+        s.inbox.removeAll { ids.contains($0.id) }
+        state = s
+        Task {
+            for id in ids { await Client.local.dismiss(id) }
+            await refresh()
+        }
     }
 }

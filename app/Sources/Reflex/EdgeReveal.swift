@@ -20,8 +20,7 @@ final class EdgeReveal {
 
     /// Whether a point is on the open rail or within its dead zone.
     func near(_ p: NSPoint) -> Bool {
-        [panel(), side()].compactMap { $0 }
-            .contains { $0.frame.insetBy(dx: -deadzone.width, dy: -deadzone.height).contains(p) }
+        rects().contains { $0.insetBy(dx: -deadzone.width, dy: -deadzone.height).contains(p) }
     }
     let grace: TimeInterval = 0.5
     let tolerance: CGFloat = 6
@@ -29,10 +28,13 @@ final class EdgeReveal {
     /// Anchor the rail at a height on a screen.
     var place: (_ screen: NSScreen, _ y: CGFloat) -> Void = { _, _ in }
     var panel: () -> NSWindow? = { nil }
-    /// The edge tab's own window.
-    var tab: () -> NSWindow? = { nil }
-    /// The window beside the column (question card, agent list), when it takes clicks.
+    /// The window beside the column (question card, agent list).
     var side: () -> NSWindow? = { nil }
+    /// Where the open rail's content is on screen — the column, and what sits
+    /// beside it when that takes clicks. (Its windows are larger, and clear.)
+    var rects: () -> [NSRect] = { [] }
+    /// Where the edge tab is on screen.
+    var tabRect: () -> NSRect? = { nil }
     /// The invisible window that takes the keys while the pointer is on the rail.
     var keys: () -> NSWindow? = { nil }
     var sliver: () -> NSWindow? = { nil }
@@ -74,13 +76,11 @@ final class EdgeReveal {
             return
         }
         if rail.visible {
-            let windows = [panel(), side()].compactMap { $0 }
-            let under = windows.first { $0.frame.contains(p) }
-            let near = windows.contains { $0.frame.insetBy(dx: -deadzone.width, dy: -deadzone.height).contains(p) }
-            if under != nil || near || keepOpen() {
+            let under = rects().contains { $0.contains(p) }
+            if under || near(p) || keepOpen() {
                 holdUntil = max(holdUntil, now + grace)
             }
-            let hovering = under != nil || debugHover
+            let hovering = under || debugHover
             if rail.hovering != hovering { rail.hovering = hovering }
             takeKeys(under)
             if now > holdUntil { hide() }
@@ -93,7 +93,7 @@ final class EdgeReveal {
             return
         }
         // Hovering the tab opens the rail where the tab is.
-        if tabShown(), let f = tab()?.frame, f.insetBy(dx: -2, dy: -4).contains(p) {
+        if tabShown(), let f = tabRect(), f.insetBy(dx: -2, dy: -4).contains(p) {
             if let t = tabHoverAt {
                 if now - t >= tabIntent, let s = screen(at: p) ?? NSScreen.main { show(on: s, y: f.midY) }
             } else {
@@ -121,9 +121,9 @@ final class EdgeReveal {
 
     /// Over the rail: the window under the pointer takes the keys. Off it:
     /// the app you were in gets them back.
-    private func takeKeys(_ under: NSWindow?) {
+    private func takeKeys(_ under: Bool) {
         if othersKey() { lent = nil; return }
-        if under != nil {
+        if under {
             guard !ours.contains(where: \.isKeyWindow) else { return }
             let front = NSWorkspace.shared.frontmostApplication
             lent = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
@@ -157,7 +157,6 @@ final class EdgeReveal {
         dwellStart = nil
         tabHoverAt = nil
         RailModel.shared.dwell = 0
-        panel()?.ignoresMouseEvents = false
         holdUntil = now + max(grace, hold)
         if !RailModel.shared.visible {
             RailModel.shared.visible = true
@@ -174,7 +173,6 @@ final class EdgeReveal {
         if returnFocus { returnKeys() } else { lent = nil }
         rail.hovering = false
         rail.visible = false
-        panel()?.ignoresMouseEvents = true
     }
 
     /// A new question: open the rail where it is anchored, like a notification.
