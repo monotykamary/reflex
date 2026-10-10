@@ -346,7 +346,7 @@ struct CommandBar: View {
                                     Text("\(a.kind) · \(a.folder)").font(Type.meta).lineLimit(1)
                                 }
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(on ? Tone.of(a.status).opacity(0.22) : Color.primary.opacity(0.05),
+                                .background(on ? Tone.of(a.status).opacity(0.22) : GlassTone.raised,
                                             in: Capsule())
                                 .overlay(Capsule().strokeBorder(on ? Tone.of(a.status).opacity(0.55) : .clear, lineWidth: 1))
                             }

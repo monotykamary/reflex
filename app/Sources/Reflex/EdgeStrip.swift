@@ -119,7 +119,7 @@ private struct RoundButton<Label: View>: View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
-                .glassTone(Circle())
+                .glassTone(Circle(), raised: true)
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
@@ -290,6 +290,7 @@ struct Rail: View {
         .padding(.vertical, 9 + 12)
         .padding(.leading, 8)
         .padding(.trailing, 7)
+        .glassTone(EdgeTabShape(), raised: true)
         .glassEffect(.rail, in: EdgeTabShape())
         .glassEffectID("agents", in: glass)
     }
@@ -360,7 +361,7 @@ struct Rail: View {
                     }
                 }
                 .padding(.vertical, 6)
-                .glassTone(Capsule())
+                .glassTone(Capsule(), raised: true)
                 .glassEffect(.rail, in: Capsule())
                 .glassEffectID("agents", in: glass)
                 .help(side == .agents ? "Hide agents" : "Show agents")
@@ -371,7 +372,7 @@ struct Rail: View {
                 PillButton(symbol: "gearshape", help: "Settings", action: openSettings)
             }
             .padding(.vertical, 4)
-            .glassTone(Capsule())
+            .glassTone(Capsule(), raised: true)
             .glassEffect(.rail, in: Capsule())
 
             Menu {
@@ -382,7 +383,7 @@ struct Rail: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.dim)
                     .frame(width: 40, height: 40)
-                    .glassTone(Circle())
+                    .glassTone(Circle(), raised: true)
                     .contentShape(Circle())
             }
             .menuStyle(.button)
@@ -487,7 +488,7 @@ private struct StatusPill: View {
         .font(.system(size: 12, weight: .medium))
         .lineLimit(1)
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .glassTone(Capsule())
+        .glassTone(Capsule(), raised: true)
         .glassEffect(.rail, in: Capsule())
     }
 }
@@ -821,7 +822,7 @@ private struct KeyHint: View {
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .glassTone(Capsule())
+        .glassTone(Capsule(), raised: true)
         .glassEffect(.rail, in: Capsule())
     }
 }

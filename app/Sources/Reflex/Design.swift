@@ -220,16 +220,21 @@ struct ThinkingLine: View {
 
 // MARK: Glass tone
 
-/// Reflex's glass, the way Raycast's window reads: a near-solid neutral dark
-/// grey with only a hint of what is behind it. One look — it does not change
-/// with hover or focus.
+/// Reflex's glass in Raycast's two tones: a near-black, faintly blue surface
+/// with just a hint of what is behind it, and a lighter blue-grey for the
+/// pills and buttons that sit on it. One look — no hover or focus change.
 enum GlassTone {
-    static let fill = Color(red: 0.2, green: 0.2, blue: 0.21).opacity(0.84)
+    /// Cards, lists, the Ask bar, the inbox, window backgrounds.
+    static let surface = Color(red: 0.07, green: 0.075, blue: 0.098).opacity(0.93)
+    /// Round buttons, capsules, pills, the edge tab.
+    static let raised = Color(red: 0.23, green: 0.238, blue: 0.272).opacity(0.93)
+    static let fill = surface
 }
 
 extension View {
-    /// Lay Reflex's dark grey over the glass behind this view's content.
-    func glassTone<S: Shape>(_ shape: S) -> some View {
-        background(GlassTone.fill, in: shape)
+    /// Lay one of Reflex's tones over the glass behind this view's content.
+    func glassTone<S: Shape>(_ shape: S, raised: Bool = false) -> some View {
+        background(raised ? GlassTone.raised : GlassTone.surface, in: shape)
+            .overlay(shape.stroke(Color.white.opacity(raised ? 0.08 : 0.06), lineWidth: 0.5))
     }
 }
