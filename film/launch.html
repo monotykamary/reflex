@@ -4,88 +4,105 @@
 <meta charset="utf-8">
 <title>Reflex — launch film</title>
 <!-- The launch film: "Say what. Reflex finds where." Every frame is
-     film.render(t) — a pure function of time — so film/render.mjs can step
-     it frame by frame into an MP4. Open it in a browser to watch it play, or
-     ?t=17.5 for one moment. 1920×1080. -->
+     film.render(t), a pure function of time on the clock in grid.js, which
+     the score (audio/score.mjs) is sequenced on too. film/render.mjs steps it
+     frame by frame into an MP4. Open it to watch it loop (?play and a click
+     adds the score, once rendered), or ?t=19.2 for one moment. 1920×1080. -->
+<script src="grid.js"></script>
 <style>
   :root {
-    --ink: #ededef; --ink2: rgba(237,237,239,.62); --ink3: rgba(237,237,239,.36);
+    --bg: #08090c; --ink: #ededef; --ink2: rgba(237,237,239,.62); --ink3: rgba(237,237,239,.36);
     --blue: #6e94ff; --amber: #ffb224; --green: #3dd68c; --violet: #a58bff;
-    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
-    --mono: ui-monospace, "SF Mono", "Geist Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, monospace;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; background: #000; overflow: hidden; }
   #film { position: relative; width: 1920px; height: 1080px; overflow: hidden; color: var(--ink); font-family: var(--sans);
-    -webkit-font-smoothing: antialiased; background: #08090c; }
-  .glow { position: absolute; inset: 0; background: radial-gradient(1200px 700px at 50% 40%, rgba(110,148,255,.15), transparent 65%),
-    radial-gradient(900px 600px at 85% 95%, rgba(165,139,255,.09), transparent 60%); }
+    -webkit-font-smoothing: antialiased; background: var(--bg); }
   .abs { position: absolute; }
-  .words { position: absolute; left: 0; right: 0; text-align: center; font-weight: 700; letter-spacing: -.035em; }
-  .say { font-size: 66px; }
-  .huge { font-size: 300px; letter-spacing: -.06em; line-height: 1; }
-  .cap { font-size: 40px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
-  .sub { font-size: 26px; font-weight: 500; letter-spacing: 0; color: var(--ink2); }
-  #paths { position: absolute; inset: 0; font: 22px/1.5 var(--mono); color: rgba(192,202,245,.22); }
-  #paths div { position: absolute; white-space: nowrap; }
-  .panel { position: absolute; top: 300px; width: 760px; height: 440px; border-radius: 22px; background: rgba(16,17,21,.94);
-    border: 1px solid rgba(255,255,255,.08); box-shadow: 0 30px 90px rgba(0,0,0,.5); padding: 56px 34px 30px; overflow: visible; }
+
+  /* Lines rise from behind a mask, word by word. */
+  .line { position: absolute; left: 0; right: 0; text-align: center; font-weight: 700; letter-spacing: -.035em; white-space: nowrap; visibility: hidden; }
+  .line .m { display: inline-block; overflow: hidden; vertical-align: top; padding: .3em .08em; margin: -.3em -.08em; }
+  .line .w { display: inline-block; }
+  .say { font-size: 64px; }
+  .huge { font-size: 250px; letter-spacing: -.055em; line-height: 1; }
+  .cap { font-size: 38px; font-weight: 600; letter-spacing: -.02em; }
+  .end { font-size: 112px; letter-spacing: -.045em; line-height: 1.05; }
+  .small { font-size: 32px; font-weight: 600; letter-spacing: -.01em; color: var(--ink2); }
+  .fine { font-size: 24px; font-weight: 500; letter-spacing: 0; color: var(--ink3); }
+
+  /* The world: the folder tree, under a camera. */
+  #world { position: absolute; left: 0; top: 0; width: 1920px; height: 1080px; transform-origin: 0 0; }
+  #tree { position: absolute; left: 0; top: 0; overflow: visible; }
+  #tree .br { fill: none; stroke-linecap: round; }
+  #tree text { font-family: var(--mono); }
+  #flock { position: absolute; left: 0; top: 0; }
+
+  /* The two extremes. */
+  .panel { position: absolute; top: 280px; width: 760px; height: 420px; border-radius: 22px; background: #101115;
+    border: 1px solid rgba(255,255,255,.08); padding: 58px 34px 30px; visibility: hidden; }
   .panel::before { content: ""; position: absolute; left: 22px; top: 20px; width: 64px; height: 14px;
     background: radial-gradient(circle at 7px 7px, #ff5f57 6px, transparent 6.5px), radial-gradient(circle at 32px 7px, #febc2e 6px, transparent 6.5px), radial-gradient(circle at 57px 7px, #28c840 6px, transparent 6.5px); }
-  .panel .title { position: absolute; left: 0; right: 0; top: -66px; text-align: center; font-size: 30px; font-weight: 650; color: var(--ink2); }
-  .term { font: 26px/1.7 var(--mono); color: rgba(192,202,245,.85); }
+  .ptitle { position: absolute; top: 200px; width: 760px; text-align: center; font-size: 30px; font-weight: 650; color: var(--ink2); letter-spacing: -.01em; visibility: hidden; }
+  .term { font: 25px/1.75 var(--mono); color: rgba(192,202,245,.86); }
   .term .dim { color: rgba(192,202,245,.4); }
   .chat { display: flex; flex-direction: column; gap: 18px; font-size: 25px; }
-  .msg { max-width: 82%; padding: 16px 20px; border-radius: 20px; }
+  .msg { max-width: 84%; padding: 15px 20px; border-radius: 20px; }
   .msg.me { align-self: flex-end; background: #2c5bd6; }
   .msg.it { align-self: flex-start; background: rgba(255,255,255,.08); }
-  .bar { position: absolute; left: 50%; width: 1100px; border-radius: 28px; background: rgba(26,27,32,.97); border: 1px solid rgba(255,255,255,.09);
-    box-shadow: 0 40px 120px rgba(0,0,0,.6); overflow: hidden; }
-  .bar .field { display: flex; align-items: center; gap: 18px; padding: 26px 30px; font-size: 32px; border-bottom: 1px solid rgba(255,255,255,.06); }
-  .caret { display: inline-block; width: 3px; height: 36px; background: var(--blue); vertical-align: -6px; margin-left: 2px; }
-  .bar .rows { padding: 10px; font-size: 22px; min-height: 60px; }
-  .bar .h { font-size: 15px; font-weight: 650; color: var(--ink3); padding: 8px 16px 4px; letter-spacing: .02em; }
-  .row { display: flex; align-items: center; gap: 16px; padding: 13px 16px; border-radius: 15px; }
+
+  /* The bar. */
+  .bar { position: absolute; left: 410px; top: 56px; width: 1100px; border-radius: 26px; background: #18191e; border: 1px solid rgba(255,255,255,.09); overflow: hidden; visibility: hidden; }
+  .bar .field { display: flex; align-items: center; gap: 18px; padding: 22px 28px; font-size: 30px; border-bottom: 1px solid rgba(255,255,255,.06); height: 78px; }
+  .caret { display: inline-block; width: 3px; height: 34px; background: var(--blue); vertical-align: -6px; margin-left: 2px; }
+  .bar .rows { padding: 8px 10px 10px; font-size: 21px; height: 206px; }
+  .bar .h { font-size: 14px; font-weight: 650; color: var(--ink3); padding: 8px 16px 6px; letter-spacing: .06em; text-transform: uppercase; }
+  .row { display: flex; align-items: center; gap: 15px; padding: 10px 16px; border-radius: 14px; }
   .row.sel { background: rgba(255,255,255,.085); }
   .row .t { font-weight: 600; }
-  .row .d { color: var(--ink3); font-size: 19px; }
-  .row .w { margin-left: auto; font: 20px var(--mono); color: var(--ink3); }
-  .row .pick { margin-left: 12px; font-size: 14px; font-weight: 700; color: var(--amber); background: rgba(255,178,36,.14); padding: 3px 10px; border-radius: 99px; }
-  .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; font-size: 17px; }
-  .ic.folder { background: rgba(110,148,255,.22); color: #b9c8ff; }
-  .ic.session { background: transparent; }
+  .row .d { color: var(--ink3); font-size: 18px; }
+  .row .w { margin-left: auto; font: 19px var(--mono); color: var(--ink3); }
+  .row .pick { margin-left: 12px; font-size: 13px; font-weight: 700; color: var(--amber); background: rgba(255,178,36,.14); padding: 3px 10px; border-radius: 99px; text-transform: uppercase; letter-spacing: .04em; }
+  .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; flex: none; font-size: 15px; font-weight: 700; }
+  .ic.folder { background: rgba(110,148,255,.2); color: #b9c8ff; }
   .ic.resume { background: rgba(165,139,255,.2); color: #d2c4ff; }
   .ic.new { background: rgba(61,214,140,.18); color: var(--green); }
-  .ring { width: 18px; height: 18px; border-radius: 50%; border: 3px solid rgba(110,148,255,.22); border-top-color: var(--blue); }
-  .bar .foot { display: flex; gap: 14px; padding: 12px 22px; border-top: 1px solid rgba(255,255,255,.06); font-size: 17px; color: var(--ink3); }
-  .reading { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--blue), transparent); }
-  .key { position: absolute; min-width: 92px; height: 92px; padding: 0 24px; border-radius: 22px; display: grid; place-items: center; font: 600 40px var(--sans);
-    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 0 rgba(0,0,0,.45); }
-  .tab { position: absolute; right: 0; width: 44px; padding: 22px 0 22px 11px; border-radius: 18px 0 0 18px; background: rgba(12,13,16,.94);
-    border: 1px solid rgba(255,255,255,.07); border-right: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; }
+  .reading { position: absolute; bottom: 0; height: 2px; width: 30%; background: var(--blue); }
+  .key { position: absolute; top: 364px; min-width: 64px; height: 64px; padding: 0 18px; border-radius: 16px; display: grid; place-items: center; font: 600 28px var(--sans);
+    background: #222329; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 3px 0 rgba(0,0,0,.6); visibility: hidden; }
+
+  /* The reach. */
+  .tab { position: absolute; right: 0; top: 400px; width: 44px; padding: 22px 0 22px 11px; border-radius: 18px 0 0 18px; background: #0f1013;
+    border: 1px solid rgba(255,255,255,.08); border-right: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; visibility: hidden; }
   .g { width: 17px; height: 17px; border-radius: 50%; display: inline-block; flex: none; }
   .g.work { border: 3px solid rgba(110,148,255,.22); border-top-color: var(--blue); }
-  .g.wait { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,178,36,.22); }
+  .g.wait { background: var(--amber); }
   .g.done { background: var(--green); }
-  .card { position: absolute; right: 100px; width: 470px; padding: 22px 22px 14px; border-radius: 22px; background: rgba(26,27,32,.96);
-    border: 1px solid rgba(255,255,255,.09); box-shadow: 0 30px 80px rgba(0,0,0,.5); font-size: 20px; }
+  .card { position: absolute; right: 96px; top: 372px; width: 480px; padding: 22px 22px 14px; border-radius: 22px; background: #18191e;
+    border: 1px solid rgba(255,255,255,.09); font-size: 21px; visibility: hidden; }
   .card .who { font-weight: 650; }
-  .card .what { color: var(--ink2); font-size: 18px; margin: 4px 0 12px; }
+  .card .what { color: var(--ink2); font-size: 19px; margin: 4px 0 12px; }
   .opt { display: flex; gap: 14px; align-items: center; padding: 8px 6px; border-radius: 12px; }
   .opt .k { min-width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font: 650 16px var(--sans); background: rgba(255,178,36,.18); color: var(--amber); }
   .opt.hit { background: rgba(255,255,255,.09); }
-  .phone { position: absolute; width: 360px; height: 740px; border-radius: 58px; background: #0c0c0d; border: 10px solid #1d1e22;
-    box-shadow: 0 50px 140px rgba(0,0,0,.6), 0 0 0 2px #2a2b30; overflow: hidden; padding: 66px 20px 20px; }
-  .phone::before { content: ""; position: absolute; left: 50%; top: 16px; width: 110px; height: 32px; border-radius: 18px; background: #000; transform: translateX(-50%); }
-  .phone h4 { margin: 0 0 16px; font-size: 30px; letter-spacing: -.02em; }
-  .pq { background: #171719; border-radius: 22px; padding: 18px; border: 1px solid rgba(255,255,255,.06); font-size: 18px; }
-  .flyer { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 28px var(--blue), 0 0 6px #fff; }
+  .phone { position: absolute; left: 560px; top: 250px; width: 370px; height: 760px; border-radius: 60px; background: #0c0c0d; border: 10px solid #1d1e22;
+    outline: 2px solid #2a2b30; overflow: hidden; padding: 70px 20px 20px; visibility: hidden; }
+  .phone::before { content: ""; position: absolute; left: 50%; top: 16px; width: 112px; height: 32px; border-radius: 18px; background: #000; transform: translateX(-50%); }
+  .phone h4 { margin: 0 0 6px; font-size: 32px; letter-spacing: -.02em; }
+  .phone .meta { color: var(--ink3); font-size: 15px; margin-bottom: 18px; }
+  .pq { background: #17171a; border-radius: 22px; padding: 18px; border: 1px solid rgba(255,255,255,.06); font-size: 18px; margin-bottom: 12px; }
+  .ps { display: flex; gap: 12px; align-items: center; padding: 14px 4px; border-bottom: 1px solid rgba(255,255,255,.06); font-size: 17px; }
+  .ps span { color: var(--ink3); margin-left: auto; font-size: 14px; }
 </style>
 </head>
 <body>
 <div id="film">
-  <div class="glow" id="glow"></div>
-  <div id="paths"></div>
+  <div id="world"><svg id="tree" width="1920" height="1080" viewBox="0 0 1920 1080">
+    <g id="branches"></g><g id="glows"></g><g id="nodes"></g><g id="labels"></g><g id="marks"></g>
+  </svg></div>
+  <canvas id="flock" width="1920" height="1080"></canvas>
 
   <svg id="bot" viewBox="0 0 1024 1024" class="abs">
     <defs>
@@ -103,200 +120,402 @@
     <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
   </svg>
 
-  <div class="words huge" id="where">Where?</div>
-
   <!-- the two extremes -->
-  <div class="panel" id="left"><div class="title">Choose it yourself</div><div class="term" id="leftTerm"></div></div>
-  <div class="panel" id="right"><div class="title">Or hide it</div><div class="chat">
-    <div class="msg me">Add a webmcp adapter to the form builder</div>
-    <div class="msg it" id="hideReply">Sure! I’ll do that in my workspace.</div>
-    <div class="msg me" id="hideAsk">…which repo is that?</div>
+  <div class="ptitle" id="lt" style="left:140px">Choose it yourself</div>
+  <div class="panel" id="left" style="left:140px"><div class="term" id="leftTerm"></div></div>
+  <div class="ptitle" id="rt" style="left:1020px">Or have it hidden</div>
+  <div class="panel" id="right" style="left:1020px"><div class="chat">
+    <div class="msg me" id="m1">Add a webmcp adapter to the form builder</div>
+    <div class="msg it" id="m2">Done! I made it in my workspace.</div>
+    <div class="msg me" id="m3">…which repo is that in?</div>
   </div></div>
 
-  <!-- the search -->
+  <!-- the bar -->
   <div class="bar" id="bar">
     <div class="field"><span style="color:var(--ink3)">✦</span><span id="typed"></span><span class="caret" id="caret"></span></div>
     <div class="rows" id="rows"></div>
-    <div class="foot"><span id="foot"></span></div>
     <div class="reading" id="reading"></div>
   </div>
-  <div class="flyer" id="flyer"></div>
+  <div class="key" id="kOpt1">⌥</div><div class="key" id="kOpt2">⌥</div><div class="key" id="kEnter">⏎</div><div class="key" id="kDown">↓</div>
 
   <!-- the reach -->
-  <div class="tab" id="tab"><i class="g work"></i><i class="g work"></i><i class="g wait"></i><i class="g done"></i><i class="g work"></i></div>
+  <div class="tab" id="tab"><i class="g work"></i><i class="g work"></i><i class="g wait" id="tabWait"></i><i class="g done"></i><i class="g work"></i></div>
   <div class="card" id="card">
     <div class="who">claude · form-builder</div>
     <div class="what">Run the adapter tests now?</div>
     <div class="opt" id="o1"><span class="k">1</span>Yes, run them</div>
     <div class="opt"><span class="k">2</span>Not yet</div>
   </div>
-  <div class="phone" id="phone"><h4>Reflex</h4><div class="pq"><b>claude · form-builder</b><div style="color:var(--ink2);margin:4px 0 10px">Run the adapter tests now?</div>
-    <div class="opt" id="po1"><span class="k">1</span>Yes, run them</div><div class="opt"><span class="k">2</span>Not yet</div></div></div>
+  <div class="key" id="kOne" style="top:640px">1</div>
+  <div class="phone" id="phone">
+    <h4>Reflex</h4><div class="meta">5 agents · on your Mac</div>
+    <div class="pq"><b>codex · pipeline</b><div style="color:var(--ink2);margin:4px 0 10px">Allow network access for the ingest test?</div>
+      <div class="opt"><span class="k">1</span>Allow once</div><div class="opt"><span class="k">2</span>Deny</div></div>
+    <div class="ps"><i class="g work"></i>form-builder<span>running tests</span></div>
+    <div class="ps"><i class="g work"></i>shared-ui<span>editing</span></div>
+    <div class="ps"><i class="g done"></i>pitch-deck<span>done</span></div>
+  </div>
 
-  <div class="key" id="kA1">⌥</div><div class="key" id="kA2">⌥</div><div class="key" id="kEnter">⏎</div><div class="key" id="kDown">↓</div><div class="key" id="kOne">1</div>
-
-  <div class="words say" id="say"></div>
-  <div class="words cap" id="cap"></div>
-  <div class="words sub" id="sub"></div>
+  <div class="line say" id="Lfolder" style="top:110px">Every agent starts in a folder.</div>
+  <div class="line huge" id="Lwhere" style="top:400px">Where?</div>
+  <div class="line say" id="Lbetween" style="top:800px">Reflex is in between.</div>
+  <div class="line cap" id="Lcap" style="top:1004px"></div>
+  <div class="line say" id="Lreach" style="top:110px">Then it keeps every agent in reach.</div>
+  <div class="line end" id="Lsay" style="top:470px">Say what.</div>
+  <div class="line end" id="Lfinds" style="top:600px">Reflex finds where.</div>
+  <div class="line small" id="Lfarm" style="top:812px">reflex.farm</div>
+  <div class="line fine" id="Lfree" style="top:866px">Free and open source · for the Mac</div>
 </div>
 
 <script>
 (() => {
+  const G = window.GRID, at = G.at, B = G.beat;
   const $ = (id) => document.getElementById(id);
+  const NS = "http://www.w3.org/2000/svg";
+  const WOOD = "226,222,212";  // the tree: warm ink, like roots drawn on paper
   const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
   const seg = (t, a, b) => clamp((t - a) / (b - a));
-  const out = (x) => 1 - Math.pow(1 - x, 3);
-  const inOut = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  const lerp = (a, b, k) => a + (b - a) * k;
+  // The vocabulary: expo out for arrivals, power4 in-out for travel, power3 in
+  // for exits, back out for the few things that pop.
+  const expo = (x) => x >= 1 ? 1 : 1 - Math.pow(2, -10 * x);
+  const p4 = (x) => x < .5 ? 8 * x ** 4 : 1 - Math.pow(-2 * x + 2, 4) / 2;
+  const p3in = (x) => x ** 3;
+  const back = (x, s = 2.4) => x <= 0 ? 0 : x >= 1 ? 1 : 1 + (s + 1) * Math.pow(x - 1, 3) + s * Math.pow(x - 1, 2);
   const S = (el, o) => Object.assign((typeof el === "string" ? $(el) : el).style, o);
-  const show = (el, v, extra = {}) => S(el, { opacity: v, visibility: v > 0.001 ? "visible" : "hidden", ...extra });
-  const fade = (t, a, b, inn = .45, outt = .35) => out(seg(t, a, a + inn)) * (1 - out(seg(t, b - outt, b)));
-  const LEN = 44;
+  const vis = (el, on) => S(el, { visibility: on ? "visible" : "hidden" });
+  const out = (t, b) => 1 - p3in(seg(t, b, b + .3));
+  let seed = 7;
+  const rand = () => { seed = (seed * 16807) % 2147483647; return (seed - 1) / 2147483646; };
 
-  // ── the haystack: repo paths drifting behind "Where?" ──
-  const roots = ["~/VCS/work/acme", "~/VCS/work/acme/studio", "~/VCS/oss", "~/VCS/clients/northwind", "~/VCS/work/acme/platform", "~/code", "~/VCS/oss/forks", "~/VCS/work/acme/mobile"];
-  const leaves = ["web", "mobile", "form-builder", "api", "design-system", "infra", "billing", "docs", "webmcp-sdk", "pipeline", "admin", "auth", "cli", "sdk-js", "landing", "analytics", "ios", "android", "shared-ui", "edge"];
-  const paths = [];
-  for (let i = 0; i < 44; i++) {
-    const d = document.createElement("div");
-    d.textContent = `${roots[i % roots.length]}/${leaves[(i * 7) % leaves.length]}${i % 5 === 0 ? "/packages/" + leaves[(i * 3) % leaves.length] : ""}`;
-    $("paths").appendChild(d);
-    paths.push({ d, x: (i * 397) % 1820 - 120, y: 40 + (i * 233) % 1000, v: 18 + (i % 7) * 6 });
+  // ── lines that rise through a mask, word by word ─────────────────────────
+  const lines = {};
+  function setLine(id, text) {
+    const el = $(id);
+    if (el.dataset.text === text) return;
+    el.dataset.text = text;
+    el.innerHTML = text.split(" ").map((w) => `<span class="m"><span class="w">${w}</span></span>`).join(" ");
+    lines[id] = [...el.querySelectorAll(".w")];
   }
-
-  // ── the requests, and where Reflex sends them ──
-  const examples = [
-    { at: 14.6, req: "add a webmcp adapter to the form builder", cap: "A repo nested deep in your tree.",
-      rows: [["folder", "form-builder", "~/VCS/work/acme/studio/form-builder", 91, true], ["folder", "studio", "~/VCS/work/acme/studio", 5],
-             ["session", "Landing page copy", "pi · landing", 2], ["folder", "webmcp-sdk", "~/VCS/oss/webmcp-sdk", 2]] },
-    { at: 18.8, req: "update the shared button across web and mobile", cap: "The parent, when the work spans repos.",
-      rows: [["folder", "acme", "~/VCS/work/acme · holds web and mobile", 88, true], ["folder", "web", "~/VCS/work/acme/web", 6],
-             ["folder", "mobile", "~/VCS/work/acme/mobile", 4], ["folder", "shared-ui", "~/VCS/work/acme/shared-ui", 2]] },
-    { at: 23.0, req: "continue the logo exploration", cap: "The conversation you already had.",
-      rows: [["resume", "Logo exploration", "claude · brand · 2 days ago — resume", 94, true], ["folder", "brand", "~/VCS/work/acme/brand", 4],
-             ["session", "Design tokens", "claude · design-system", 2]] },
-    { at: 27.2, req: "start a new project for the pitch deck", cap: "A new folder — only when you say so.",
-      rows: [["new", "New folder “pitch-deck”", "~/VCS/pitch-deck · you said “new project”", 97, true], ["folder", "landing", "~/VCS/work/acme/landing", 2],
-             ["folder", "docs", "~/VCS/work/acme/docs", 1]] },
-  ];
-  const icon = (k) => k === "session" ? `<span class="ic session"><i class="ring"></i></span>` : `<span class="ic ${k}">${{ folder: "▰", resume: "↺", new: "+" }[k]}</span>`;
-  let shown = -1;
-  function rows(i, ranked, sel) {
-    const key = `${i}|${ranked}|${sel}`;
-    if (shown === key) return;
-    shown = key;
-    const ex = examples[i];
-    if (!ranked) {
-      $("rows").innerHTML = `<div class="h">Searching your projects, sessions and conversations</div>`;
-      return;
-    }
-    $("rows").innerHTML = `<div class="h">${sel === 0 ? "JEV’S PICK" : "YOUR PICK"}</div>` + ex.rows.map(([k, title, detail, w, pick], j) =>
-      `<div class="row${j === sel ? " sel" : ""}">${icon(k)}<span class="t">${title}</span><span class="d">${detail}</span><span class="w" data-w="${w}">${w}%</span>${pick ? `<span class="pick">${sel === 0 ? "pick" : "guess"}</span>` : ""}</div>`).join("");
-  }
-
-  function words(id, text, v, top) {
-    if ($(id).textContent !== text) $(id).textContent = text;
-    show(id, v, { top: `${top}px`, transform: `translateY(${(1 - v) * 14}px)`, filter: `blur(${(1 - v) * 6}px)` });
-  }
-  function key(id, t, at, x, y) {
-    const k = seg(t, at, at + .09) * (1 - seg(t, at + .26, at + .5));
-    show(id, k, { left: `${x}px`, top: `${y}px`, transform: `translateY(${(1 - k) * 10}px) scale(${.94 + .06 * k})` });
-  }
-  function bot(t, x, y, size, v) {
-    show("bot", v, { left: `${x - size / 2}px`, top: `${y - size / 2}px`, width: `${size}px`, height: `${size}px`, filter: `blur(${(1 - v) * 14}px)` });
-    const bob = Math.sin(t * 1.7) * 7, b = t % 4.4, close = b > 4.05 ? Math.sin((b - 4.05) / .35 * Math.PI) : 0;
-    const glance = t > 40.5 ? -1 * out(seg(t, 40.5, 40.8)) : 0;
-    $("bbody").setAttribute("transform", `translate(${glance * 8} ${bob})`);
-    const sy = 1 - .85 * close, gx = glance * 30;
-    $("e1").setAttribute("transform", `translate(${530 + gx} 476) rotate(-13.75) scale(1 ${sy})`);
-    $("e2").setAttribute("transform", `translate(${718 + gx} 430) rotate(-13.75) scale(1 ${sy})`);
-  }
-
-  function render(t) {
-    document.querySelectorAll(".ring, .g.work").forEach((g, i) => { g.style.transform = `rotate(${(t * 400 + i * 47) % 360}deg)`; });
-    S("glow", { opacity: .6 + .4 * Math.sin(t * .4) });
-
-    // 1 · the bot (0–3) and the end card (39–44)
-    const endV = out(seg(t, 39.3, 40.2));
-    if (endV > 0) bot(t, 960, 380, 300, endV);
-    else bot(t, 960, 470, 360, fade(t, .1, 3.0, 1.0, .5));
-
-    // 2 · the problem (3–8.5): "Where?" in a haystack of repos
-    const hay = fade(t, 3.2, 8.6, .8, .6);
-    S("paths", { opacity: hay * .9 });
-    if (hay > 0) paths.forEach((p, i) => { p.d.style.transform = `translate(${p.x + (t - 3) * p.v}px, ${p.y}px)`; });
-    const w = fade(t, 5.0, 8.4, .5, .4);
-    show("where", w, { top: "330px", transform: `scale(${.94 + .06 * w})`, filter: `blur(${(1 - w) * 10}px)` });
-
-    // 3 · the two extremes (8.6–14.4)
-    const ext = fade(t, 8.7, 14.3, .5, .5);
-    show("left", ext, { left: `${150 - (1 - ext) * 40}px` });
-    show("right", ext, { left: `${1010 + (1 - ext) * 40}px` });
-    const cmd = "cd ~/VCS/work/acme/studio/form-builder";
-    const n = Math.round(cmd.length * clamp((t - 9.2) / 2.2));
-    $("leftTerm").innerHTML = `<span class="dim">~ </span>❯ ${cmd.slice(0, n)}${t > 11.6 ? `<br><span class="dim">form-builder </span>❯ claude` : ""}${t > 12.2 ? `<br><span class="dim">  …and the parent, for work across repos?</span>` : ""}`;
-    S("hideReply", { opacity: seg(t, 10.0, 10.4) }); S("hideAsk", { opacity: seg(t, 11.8, 12.2) });
-
-    // 4 · the search (14.4–31)
-    const barV = fade(t, 14.4, 35.0, .35, .4);
-    show("bar", barV, { top: "150px", transform: `translateX(-50%) translateY(${(1 - barV) * -16}px) scale(${.98 + .02 * barV})` });
-    key("kA1", t, 14.0, 860, 820); key("kA2", t, 14.2, 970, 820);
-    let i = examples.length - 1;
-    for (let j = 0; j < examples.length; j++) if (t < examples[j].at + 4.2) { i = j; break; }
-    if (t >= 31.0) i = 0;  // the override replays the first request
-    const ex = examples[i];
-    const at = t >= 31.0 ? 31.0 : ex.at;
-    const typeEnd = at + (t >= 31.0 ? .01 : 1.3);
-    const shownReq = ex.req.slice(0, Math.round(ex.req.length * clamp((t - at) / Math.max(.01, typeEnd - at))));
-    $("typed").textContent = t >= 14.4 ? shownReq : "";
-    S("caret", { opacity: t < typeEnd + .1 || (t * 2) % 1 < .55 ? 1 : 0 });
-    const ranked = t >= typeEnd + .55;
-    const sel = t >= 31.0 && t > 32.3 ? 1 : 0;
-    rows(i, ranked, sel);
-    S("reading", { opacity: t > typeEnd && !ranked ? 1 : 0, transform: `translateX(${((t * 1.4) % 1 - .5) * 100}%)` });
-    document.querySelectorAll("#rows .row").forEach((r, j) => {
-      const v = out(seg(t, typeEnd + .55 + j * .06, typeEnd + .85 + j * .06));
-      S(r, { opacity: v, transform: `translateY(${(1 - v) * 8}px)` });
-      const wEl = r.querySelector(".w"); const wv = +wEl.dataset.w;
-      wEl.textContent = Math.round(wv * inOut(seg(t, typeEnd + .55, typeEnd + 1.15))) + "%";
+  document.querySelectorAll(".line").forEach((el) => setLine(el.id, el.textContent));
+  function line(id, t, a, b, stagger = .06) {
+    const on = t >= a && t < b + .3 + stagger * lines[id].length;
+    vis(id, on);
+    if (!on) return;
+    lines[id].forEach((w, i) => {
+      const k = 1 - expo(seg(t, a + i * stagger, a + i * stagger + .6));
+      const q = p3in(seg(t, b + i * stagger * .5, b + i * stagger * .5 + .3));
+      w.style.transform = `translateY(calc(${(k - q) * 100}% + ${(k - q) * .45}em))`;
     });
-    $("foot").textContent = !ranked ? "Jev is reading…" : (t >= 31 ? "Jev isn’t sure — ↑↓ to choose · ⏎ send · it remembers what you pick" : "Jev · about a second   ⏎ send   ⌘⏎ send & open");
-    if (t < 31) key("kEnter", t, ex.at + 3.55, 914, 820);
-    const capV = t < 31 ? fade(t, typeEnd + .7, ex.at + 4.15, .35, .3) : 0;
-    words("cap", ex.cap, capV, 760);
-    // the override (31–34.6)
-    key("kDown", t, 32.2, 860, 820); key("kEnter", t, t >= 31 ? 33.4 : -9, 970, 820);
-    const fly = seg(t, 33.6, 34.4), f = inOut(fly);
-    show("flyer", fly > 0 && fly < 1 ? 1 : 0, { left: `${900 + (1890 - 900) * f}px`, top: `${400 + (440 - 400) * f - Math.sin(f * Math.PI) * 140}px` });
-
-    // 5 · the reach (34.6–39.2): the edge, a question, the phone
-    const tabV = fade(t, 34.4, 39.3, .4, .4);
-    show("tab", tabV, { top: "380px", transform: `translateX(${(1 - tabV) * 30}px)` });
-    const cardV = fade(t, 35.0, 39.2, .4, .4);
-    show("card", cardV, { top: "330px", transform: `translateX(${(1 - cardV) * 20}px)` });
-    $("o1").classList.toggle("hit", t > 36.2 && t < 39.2);
-    key("kOne", t, 36.0, 1300, 820);
-    const ph = fade(t, 36.6, 39.2, .5, .4);
-    show("phone", ph, { left: "520px", top: `${190 + (1 - ph) * 70}px`, transform: `rotate(${(1 - ph) * 4}deg)` });
-    $("po1").classList.toggle("hit", t > 37.6 && t < 39.2);
-
-    // headlines, one per scene
-    const scenes = [[3.2, 5.2, "Every agent starts with a question.", 200], [8.7, 14.3, "", 0], [14.4, 31.0, "Say what you want.", 60],
-      [31.0, 34.6, "Not sure? It shows its guess.", 60], [34.6, 39.2, "Then it keeps every agent in reach.", 120], [40.0, 99, "Say what. Reflex finds where.", 600]];
-    const scn = scenes.find(([a, b]) => t >= a && t < b);
-    words("say", scn ? scn[2] : "", scn ? fade(t, scn[0], scn[1], .45, .35) : 0, scn ? scn[3] : 0);
-    const subs = [[12.8, 14.3, "Reflex is in between.", 820], [41.0, 99, "reflex.farm · free and open source · for the Mac", 720]];
-    const sb = subs.find(([a, b]) => t >= a && t < b);
-    words("sub", sb ? sb[2] : "", sb ? fade(t, sb[0], sb[1], .45, .3) : 0, sb ? sb[3] : 0);
-    if (sb && sb[2] === "Reflex is in between.") S("sub", { fontSize: "54px", fontWeight: 700, color: "var(--ink)", letterSpacing: "-.03em" });
-    else S("sub", { fontSize: "", fontWeight: "", color: "", letterSpacing: "" });
   }
 
-  window.film = { render, length: LEN, fps: 30 };
+  // ── the tree: your folders, drawn like roots ─────────────────────────────
+  const T = ["~", [
+    ["VCS", [
+      ["work", [["acme", [["web"], ["mobile"], ["shared-ui"], ["brand"], ["landing"],
+        ["platform", [["api"], ["billing"], ["auth"]]], ["studio", [["form-builder"], ["admin"]]]]]]],
+      ["pitch-deck", null, "future"],
+      ["oss", [["webmcp-sdk"], ["cli"], ["forks"]]],
+      ["clients", [["northwind", [["portal"], ["data"]]]]],
+    ]],
+    ["code", [["scratch"], ["dotfiles"]]],
+    ["notes"],
+  ]];
+  const X0 = 270, DX = 230, Y0 = 404, DY = 31.5;
+  const nodes = [], byName = {};
+  let leafY = Y0;
+  function build([name, kids, flag], depth, parent) {
+    const n = { name, depth, parent, x: X0 + depth * DX, future: flag === "future" };
+    nodes.push(n); byName[name] = n;
+    if (kids) { n.kids = kids.map((k) => build(k, depth + 1, n)); n.y = (n.kids[0].y + n.kids[n.kids.length - 1].y) / 2; n.leaves = n.kids.reduce((s, k) => s + k.leaves, 0); }
+    else { n.y = leafY; leafY += DY; n.leaves = 1; n.leaf = true; }
+    return n;
+  }
+  const root = build(T, 0, null);
+  // Twigs: the subfolders nobody names, so the tree looks like a real disk.
+  const twigs = [];
+  nodes.filter((n) => n.leaf && !n.future && n.name !== "brand").forEach((n) => {
+    const k = 2 + Math.floor(rand() * 3);
+    for (let i = 0; i < k; i++) twigs.push({ parent: n, depth: n.depth + 1, twig: true, x: n.x + 64 + rand() * 54, y: n.y + (i - (k - 1) / 2) * 8.5 + (rand() - .5) * 3 });
+  });
+  const all = nodes.concat(twigs);
+  const curve = (p, c) => {
+    const dx = c.x - p.x, w = (rand() - .5) * 10;
+    return `M${p.x} ${p.y} C${p.x + dx * .52} ${p.y + w} ${c.x - dx * .5} ${c.y - w} ${c.x} ${c.y}`;
+  };
+  const el = (tag, attrs, parent) => { const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); parent && parent.appendChild(e); return e; };
+  all.forEach((n) => {
+    if (n.parent) {
+      n.d = curve(n.parent, n);
+      n.width = n.twig ? .9 : .9 + 2.8 * Math.sqrt(n.leaves / 19);
+      n.path = el("path", { class: "br", d: n.d, "stroke-width": n.width, stroke: n.future ? "#3dd68c" : `rgba(${WOOD},${n.twig ? .2 : .42})`, pathLength: 1, "stroke-dasharray": 1 }, $("branches"));
+      n.len = n.path.getTotalLength();
+      // The light that runs along it, root to folder.
+      n.lit = el("path", { class: "br", d: n.d, "stroke-width": Math.max(2.6, n.width + 1), stroke: "#6e94ff", pathLength: 1, "stroke-dasharray": 1, "stroke-dashoffset": 1 }, $("glows"));
+    }
+    n.dot = el("circle", { cx: n.x, cy: n.y, r: n.twig ? 1.7 : n.depth === 0 ? 7 : 3.6, fill: n.future ? "#3dd68c" : `rgba(${WOOD},${n.twig ? .45 : .8})` }, $("nodes"));
+    if (!n.twig && n.depth > 0) {
+      const inner = !n.leaf;
+      n.label = el("text", { x: inner ? n.x + 10 : n.x + 19, y: inner ? n.y - 11 : n.y + 5.5, "font-size": inner ? 15 : 17, fill: n.future ? "#3dd68c" : `rgb(${WOOD})` }, $("labels"));
+      n.label.textContent = n.name;
+    }
+    n.grow = n.depth * .36 + (n.twig ? .1 : 0) + rand() * .12;   // seconds after the tree starts
+  });
+  // The conversation you already had: a ghost off brand.
+  const brand = byName.brand;
+  const ghost = { x: brand.x + 196, y: brand.y };
+  ghost.path = el("path", { class: "br", d: `M${brand.x} ${brand.y} C${brand.x + 90} ${brand.y - 26} ${ghost.x - 90} ${ghost.y - 26} ${ghost.x} ${ghost.y}`, "stroke-width": 1.8, stroke: "#a58bff", "stroke-dasharray": "5 7" }, $("marks"));
+  ghost.ring = el("circle", { cx: ghost.x, cy: ghost.y, r: 9, fill: "none", stroke: "#a58bff", "stroke-width": 2.4 }, $("marks"));
+  ghost.label = el("text", { x: ghost.x + 20, y: ghost.y + 6, "font-size": 17, fill: "#d2c4ff" }, $("marks"));
+  ghost.label.textContent = "↺ Logo exploration · 2 days ago";
+  const head = el("circle", { r: 7, fill: "#fff", stroke: "#6e94ff", "stroke-width": 4 }, $("marks"));
+  const rings = [0, 1, 2].map(() => el("circle", { r: 0, fill: "none", stroke: "#6e94ff", "stroke-width": 3 }, $("marks")));
+  const chain = (n) => { const c = []; for (let k = n; k && k.parent; k = k.parent) c.unshift(k); return c; };
+  const futureNode = byName["pitch-deck"];
+
+  // ── the requests ─────────────────────────────────────────────────────────
+  const examples = [
+    { req: "add a webmcp adapter to the form builder", cap: "A repo nested deep in your tree.", to: "form-builder",
+      rows: [["folder", "form-builder", "~/VCS/work/acme/studio/form-builder", 91], ["folder", "studio", "~/VCS/work/acme/studio", 5], ["folder", "webmcp-sdk", "~/VCS/oss/webmcp-sdk", 3]] },
+    { req: "update the shared button across web and mobile", cap: "The parent, when the work spans repos.", to: "acme", then: ["web", "mobile", "shared-ui"],
+      rows: [["folder", "acme", "~/VCS/work/acme · holds web and mobile", 88], ["folder", "web", "~/VCS/work/acme/web", 7], ["folder", "mobile", "~/VCS/work/acme/mobile", 4]] },
+    { req: "continue the logo exploration", cap: "The conversation you already had.", to: "brand", ghost: true,
+      rows: [["resume", "Logo exploration", "claude · brand · 2 days ago", 94], ["folder", "brand", "~/VCS/work/acme/brand", 4], ["folder", "landing", "~/VCS/work/acme/landing", 1]] },
+    { req: "start a new project for the pitch deck", cap: "A new folder, only when you say so.", to: "pitch-deck", grow: true,
+      rows: [["new", "New folder “pitch-deck”", "~/VCS/pitch-deck · you said “new project”", 97], ["folder", "landing", "~/VCS/work/acme/landing", 2], ["folder", "notes", "~/notes", 1]] },
+  ];
+  const override = { req: "make the buttons rounder", cap: "Not sure? It asks, then remembers.", to: "shared-ui", guess: ["web", "shared-ui"],
+    rows: [["folder", "web", "~/VCS/work/acme/web", 48], ["folder", "shared-ui", "~/VCS/work/acme/shared-ui", 44], ["folder", "mobile", "~/VCS/work/acme/mobile", 6]] };
+  const steps = G.searches.map((s, i) => ({ ...s, ex: examples[i] })).concat([{ ...G.override, ex: override }]);
+  const icon = (k) => `<span class="ic ${k}">${{ folder: "▰", resume: "↺", new: "+" }[k]}</span>`;
+  let shownRows = "";
+  function rows(ex, ranked, sel) {
+    const key = `${ex.req}|${ranked}|${sel}`;
+    if (shownRows === key) return;
+    shownRows = key;
+    const unsure = !!ex.guess;
+    $("rows").innerHTML = !ranked ? `<div class="h">Searching your projects, sessions and conversations</div>`
+      : `<div class="h">${unsure ? (sel ? "Your pick" : "Jev isn’t sure — its guess") : "Jev’s pick"}</div>` + ex.rows.map(([k, title, detail, w], j) =>
+        `<div class="row${j === sel ? " sel" : ""}">${icon(k)}<span class="t">${title}</span><span class="d">${detail}</span><span class="w" data-w="${w}">${w}%</span>${j === 0 ? `<span class="pick">${unsure ? "guess" : "pick"}</span>` : ""}</div>`).join("");
+  }
+  function key(id, t, when, x) {
+    const k = seg(t, when - .04, when + .04) * (1 - seg(t, when + .22, when + .45));
+    vis(id, k > 0);
+    S(id, { left: `${x}px`, opacity: k, transform: `translateY(${(1 - k) * 8}px)` });
+  }
+
+  // ── the bot ───────────────────────────────────────────────────────────────
+  function bot(t, x, y, size, v) {
+    vis("bot", v > 0);
+    S("bot", { left: `${x - size / 2}px`, top: `${y - size / 2}px`, width: `${size}px`, height: `${size}px`, opacity: Math.min(1, v * 1.5), transform: `scale(${.6 + .4 * v})` });
+    const bob = Math.sin(t * 1.6) * 7;
+    // Lazy blinks, on the music.
+    const lid = (c) => { const x = seg(t, c - .12, c + .28); return x > 0 && x < 1 ? Math.sin(x * Math.PI) : 0; };
+    const close = Math.max(lid(G.blink), lid(G.blink + B), lid(at(20, 2)), lid(at(20, 3)));
+    $("bbody").setAttribute("transform", `translate(0 ${bob})`);
+    const sy = 1 - .86 * close;
+    $("e1").setAttribute("transform", `translate(530 476) rotate(-13.75) scale(1 ${sy})`);
+    $("e2").setAttribute("transform", `translate(718 430) rotate(-13.75) scale(1 ${sy})`);
+  }
+
+  // ── the murmuration: the tree lifts off and streams into the edge ────────
+  const birds = [];
+  all.forEach((n) => { for (let j = 0; j < (n.twig ? 2 : 5); j++) birds.push({ n, ox: (rand() - .5) * 10, oy: (rand() - .5) * 10, lag: rand(), u: (rand() + rand() + rand() - 1.5) * 1.15, v: (rand() + rand() + rand() - 1.5) * .7, ph: rand() * 6.28 }); });
+  const flockPts = [[880, 690], [560, 420], [930, 210], [1460, 300], [1760, 470], [1902, 476]];
+  function catmull(s) {
+    const n = flockPts.length - 1, f = clamp(s) * n, i = Math.min(n - 1, Math.floor(f)), u = f - i;
+    const p0 = flockPts[Math.max(0, i - 1)], p1 = flockPts[i], p2 = flockPts[i + 1], p3 = flockPts[Math.min(n, i + 2)];
+    const c = (a, b, c2, d) => .5 * (2 * b + (-a + c2) * u + (2 * a - 5 * b + 4 * c2 - d) * u * u + (-a + 3 * b - 3 * c2 + d) * u * u * u);
+    return [c(p0[0], p1[0], p2[0], p3[0]), c(p0[1], p1[1], p2[1], p3[1])];
+  }
+  const ctx = $("flock").getContext("2d");
+  function flock(t) {
+    ctx.clearRect(0, 0, 1920, 1080);
+    const t0 = G.reach, t1 = at(17, 4);
+    if (t < t0 || t > t1 + .6) return;
+    ctx.fillStyle = `rgb(${WOOD})`;
+    for (const b of birds) {
+      const x0 = seg(t, t0 + b.lag * .3, t1 + b.lag * .12), s = .5 - .5 * Math.cos(Math.PI * x0);
+      if (s >= 1) continue;
+      const [cx, cy] = catmull(s), [nx, ny] = catmull(Math.min(1, s + .01));
+      const ang = Math.atan2(ny - cy, nx - cx), spread = 105 * Math.pow(Math.sin(Math.PI * Math.min(1, s * 1.15)), .8) * (1 + .22 * Math.sin(t * 2.6 + s * 4));
+      const u = b.u * spread, v = b.v * spread * (.7 + .3 * Math.sin(t * 1.9 + b.ph));
+      const fx = cx + u * Math.cos(ang) - v * Math.sin(ang), fy = cy + u * Math.sin(ang) + v * Math.cos(ang);
+      const w = Math.min(1, s / .18), lift = w * w * (3 - 2 * w);
+      const x = lerp(b.n.x + b.ox, fx, lift), y = lerp(b.n.y + b.oy, fy, lift);
+      ctx.globalAlpha = .92 * (1 - seg(s, .97, 1));
+      ctx.beginPath(); ctx.arc(x, y, (b.n.twig ? 1.8 : 2.4) * (1 - .5 * seg(s, .8, 1)), 0, 6.283); ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // ── the film ─────────────────────────────────────────────────────────────
+  // The camera: framed big while the tree grows, then lower, under the bar.
+  const camAt = (t) => {
+    const k = p4(seg(t, at(4, 4.25), G.extremes));
+    return { s: lerp(1.1, 1, k), x: lerp(960 - 960 * 1.1, 0, k), y: lerp(585 - 690 * 1.1, 0, k) };
+  };
+  function render(t) {
+    document.querySelectorAll(".g.work").forEach((g, i) => { g.style.transform = `rotate(${(t * 380 + i * 47) % 360}deg)`; });
+    const cam = camAt(t);
+    S("world", { transform: `translate(${cam.x}px, ${cam.y}px) scale(${cam.s})` });
+    const cur = steps.find((s) => t >= s.start && t < s.out + .5) ?? null;
+
+    // 1 · the bot alone (bars 0–1), then it settles where the tree will root.
+    const rx = root.x * cam.s + cam.x, ry = root.y * cam.s + cam.y;
+    const toRoot = p4(seg(t, at(1, 4), G.folder));
+    if (t >= G.say - .1) bot(t, 960, 330, 210, back(seg(t, G.say, G.say + .55), 2.2));
+    else bot(t, lerp(960, rx - 30, toRoot), lerp(470, ry, toRoot), lerp(330, 64, toRoot), back(seg(t, G.bot, G.bot + .55), 2.2) * out(t, G.extremes - .3));
+
+    // 2 · the tree grows from it (bar 2), its names come in (bar 3), "Where?" (4).
+    const lift = p3in(seg(t, G.reach, G.reach + .45));             // it takes flight at the reach
+    vis("world", t >= G.folder && t < G.reach + .6);
+    const dim = t < G.where ? 1 : t < G.extremes ? lerp(1, .3, expo(seg(t, G.where, G.where + .4)))
+      : t < at(7) ? lerp(.3, .1, expo(seg(t, G.extremes, G.extremes + .4))) : lerp(.1, 1, expo(seg(t, at(7), at(7) + .6)));
+    const growT = t - G.folder;
+    const reading = cur && t >= cur.typed && t < cur.ranked + .25 ? seg(t, cur.typed, cur.ranked + .25) : -1;
+    for (const n of all) {
+      const g = n.future ? 0 : expo(seg(growT, n.grow, n.grow + .7));
+      const fall = p3in(seg(t, G.reach + (6 - n.depth) * .04, G.reach + (6 - n.depth) * .04 + .35));
+      // (A round cap still draws a dot at zero length: hide what hasn't started.)
+      if (n.path) { n.path.setAttribute("stroke-dashoffset", 1 - g * (1 - fall)); n.path.setAttribute("opacity", g * (1 - fall) > .001 ? 1 : 0); }
+      if (n.lit) { n.lit.setAttribute("stroke-dashoffset", 1); n.lit.setAttribute("opacity", 0); }
+      n.dot.setAttribute("opacity", n.future ? 0 : expo(seg(growT, n.grow + .45, n.grow + .9)) * (1 - lift) * dim);
+      if (n.label) {
+        // Names come in on bar 3, left to right; Jev's read sweeps across them.
+        const name = n.future ? 0 : expo(seg(t, at(3) + n.x / 1920 * .9, at(3) + n.x / 1920 * .9 + .6)) * (1 - lift);
+        const sweep = reading >= 0 ? Math.max(0, 1 - Math.abs(X0 + reading * 1400 - n.x) / 150) : 0;
+        n.label.setAttribute("opacity", name * (.5 + .5 * sweep) * dim);
+      }
+    }
+    $("branches").setAttribute("opacity", dim);
+    futureNode.dot.setAttribute("r", 3.6);
+
+    // The light: from ⏎ it runs root to folder, landing on the downbeat.
+    head.setAttribute("opacity", 0);
+    rings.forEach((r) => { r.setAttribute("r", 0); r.setAttribute("stroke-dasharray", ""); });
+    let ghostV = 0, ghostLit = 0;
+    if (cur) {
+      const ex = cur.ex, target = byName[ex.to], path = chain(target), fade = out(t, cur.out);
+      const total = path.reduce((s, n) => s + n.len, 0);
+      const k = p4(seg(t, cur.enter, cur.arrive));
+      let d = k * total;
+      for (const n of path) {
+        const part = clamp(d / n.len);
+        n.lit.setAttribute("stroke-dashoffset", 1 - part);
+        n.lit.setAttribute("opacity", part > 0 ? fade : 0);
+        if (part > 0 && part < 1) { const p = n.path.getPointAtLength(part * n.len); head.setAttribute("cx", p.x); head.setAttribute("cy", p.y); head.setAttribute("opacity", 1); }
+        d -= n.len;
+      }
+      const bloom = back(seg(t, cur.arrive, cur.arrive + .5), 2.4) * fade;
+      if (ex.grow) { // the new folder's branch grows with the light, green
+        const grown = clamp((k * total - (total - target.len)) / target.len);
+        target.path.setAttribute("stroke-dashoffset", 1 - grown);
+        target.path.setAttribute("opacity", grown > 0 ? fade : 0);
+        target.lit.setAttribute("opacity", 0);
+        target.dot.setAttribute("opacity", Math.min(1, bloom)); target.dot.setAttribute("r", 3.6 + 2.4 * bloom);
+        target.label.setAttribute("opacity", Math.min(1, bloom));
+      }
+      rings[0].setAttribute("cx", target.x); rings[0].setAttribute("cy", target.y); rings[0].setAttribute("r", 11 * bloom);
+      rings[0].setAttribute("stroke", ex.grow ? "#3dd68c" : "#6e94ff"); rings[0].setAttribute("opacity", fade);
+      if (bloom > 0) target.label.setAttribute("opacity", fade);
+      // The parent lights its children.
+      (ex.then ?? []).forEach((name, j) => {
+        const c = byName[name], v = expo(seg(t, cur.arrive + .05 + j * .07, cur.arrive + .45 + j * .07)) * fade;
+        c.lit.setAttribute("stroke-dashoffset", 1 - v); c.lit.setAttribute("opacity", v > 0 ? fade : 0);
+        c.label.setAttribute("opacity", Math.max(+c.label.getAttribute("opacity"), v));
+      });
+      // The conversation surfaces when Jev answers, and lights when the light lands.
+      if (ex.ghost) { ghostV = expo(seg(t, cur.ranked, cur.ranked + .6)) * fade; ghostLit = back(seg(t, cur.arrive, cur.arrive + .5), 2.4) * fade; }
+      // Not sure: two dashed amber rings, then your pick goes solid.
+      if (ex.guess) ex.guess.forEach((name, j) => {
+        const c = byName[name], r = rings[j + 1], v = back(seg(t, cur.ranked + j * .06, cur.ranked + .45 + j * .06), 2.2) * fade;
+        const chosen = t >= cur.down ? j === 1 : j === 0;
+        r.setAttribute("cx", c.x); r.setAttribute("cy", c.y); r.setAttribute("r", 10 * v);
+        r.setAttribute("stroke", "#ffb224"); r.setAttribute("stroke-dasharray", chosen ? "" : "4 5");
+        r.setAttribute("opacity", (chosen ? 1 : .45) * (1 - expo(seg(t, cur.arrive, cur.arrive + .3))));
+        c.label.setAttribute("opacity", Math.max(+c.label.getAttribute("opacity"), Math.min(1, v)));
+      });
+    }
+    ghost.path.setAttribute("opacity", ghostV * (.5 + .5 * ghostLit)); ghost.ring.setAttribute("opacity", ghostV);
+    ghost.ring.setAttribute("r", 9 + 4 * ghostLit); ghost.ring.setAttribute("fill", ghostLit > .5 ? "#a58bff" : "none");
+    ghost.label.setAttribute("opacity", ghostV * (.55 + .45 * Math.min(1, ghostLit)));
+
+    line("Lfolder", t, G.folder, at(3, 3));
+    line("Lwhere", t, G.where, at(4, 4.25), 0);
+
+    // 3 · the two extremes (bars 5–6)
+    const gone = at(6, 4.25);
+    const wipe = (id, a) => { const k = p4(seg(t, a, a + .5)), q = p3in(seg(t, gone, gone + .3)); vis(id, k > 0 && q < 1); S(id, { clipPath: `inset(0 0 ${(1 - k) * 100}% 0 round 22px)`, opacity: 1 - q, transform: `translateY(${q * -24}px)` }); };
+    wipe("left", G.extremes); wipe("right", at(5, 2));
+    const title = (id, a) => { const v = expo(seg(t, a, a + .6)) * out(t, gone); vis(id, v > 0); S(id, { opacity: v, transform: `translateY(${(1 - v) * 16}px)` }); };
+    title("lt", G.extremes); title("rt", at(5, 2));
+    const cmd = "cd ~/VCS/work/acme/studio/form-builder";
+    const n = Math.round(cmd.length * seg(t, at(5, 1.5), at(5, 3.6)));
+    $("leftTerm").innerHTML = `<span class="dim">~ </span>❯ ${cmd.slice(0, n)}${t > at(5, 4) ? `<br><span class="dim">form-builder </span>❯ claude` : ""}${t > at(6, 1) ? `<br><span class="dim">…and the parent, for work across repos?</span>` : ""}`;
+    S("m1", { opacity: expo(seg(t, at(5, 2.5), at(5, 3))) }); S("m2", { opacity: expo(seg(t, at(5, 4), at(5, 4.5))) }); S("m3", { opacity: expo(seg(t, at(6, 1.5), at(6, 2))) });
+    line("Lbetween", t, G.between, gone);
+
+    // 4 · the bar (bars 7–16)
+    key("kOpt1", t, G.option[0], 880); key("kOpt2", t, G.option[1], 976);
+    const bv = expo(seg(t, G.searches[0].start, G.searches[0].start + .55)) * out(t, G.override.out);
+    vis("bar", bv > 0);
+    S("bar", { opacity: bv, transform: `translateY(${(1 - bv) * -18}px)` });
+    if (cur) {
+      const ex = cur.ex;
+      const typed = ex.req.slice(0, Math.round(ex.req.length * seg(t, cur.start + .05, cur.typed)));
+      if ($("typed").textContent !== typed) $("typed").textContent = typed;
+      S("caret", { opacity: t < cur.typed + .1 || (t * 2) % 1 < .55 ? 1 : 0 });
+      const ranked = t >= cur.ranked;
+      rows(ex, ranked, ex.guess && t >= cur.down ? 1 : 0);
+      S("reading", { opacity: t >= cur.typed && !ranked ? 1 : 0, left: `${(seg(t, cur.typed, cur.ranked) * 1.3 - .3) * 100}%` });
+      document.querySelectorAll("#rows .row").forEach((r, j) => {
+        const v = expo(seg(t, cur.ranked + j * .05, cur.ranked + .5 + j * .05));
+        S(r, { opacity: v, transform: `translateY(${(1 - v) * 10}px)` });
+        const w = r.querySelector(".w"); w.textContent = Math.round(+w.dataset.w * expo(seg(t, cur.ranked, cur.ranked + .7))) + "%";
+      });
+      key("kEnter", t, cur.enter, ex.guess ? 976 : 928);
+      if (ex.guess) key("kDown", t, cur.down, 880); else vis("kDown", false);
+      setLine("Lcap", ex.cap);
+      line("Lcap", t, cur.arrive, cur.out);
+    } else { vis("Lcap", false); vis("kEnter", false); vis("kDown", false); }
+
+    // 5 · the reach (bars 17–18): the tree takes flight into the edge.
+    flock(t);
+    const leave = at(18, 4.25);
+    line("Lreach", t, G.reach, leave);
+    const tabV = expo(seg(t, at(17, 3.5), at(17, 4.1))) * out(t, leave);
+    vis("tab", tabV > 0); S("tab", { transform: `translateX(${(1 - tabV) * 60}px)` });
+    S("tabWait", { transform: `scale(${t > at(17, 4) && t < G.card ? 1 + .3 * Math.sin((t - at(17, 4)) * 14) : 1})` });
+    const cardV = back(seg(t, G.card, G.card + .5), 2.2) * out(t, leave);
+    vis("card", cardV > 0); S("card", { opacity: Math.min(1, cardV * 1.4), transform: `translateX(${(1 - cardV) * 40}px)` });
+    $("o1").classList.toggle("hit", t >= G.one);
+    key("kOne", t, G.one, 1500);
+    const ph = expo(seg(t, G.phone, G.phone + .6)) * out(t, leave);
+    vis("phone", ph > 0); S("phone", { transform: `translateY(${(1 - ph) * 860}px)` });
+
+    // 6 · the end card (bars 19–21)
+    line("Lsay", t, G.say, 999); line("Lfinds", t, G.finds, 999);
+    line("Lfarm", t, G.farm, 999); line("Lfree", t, G.farm + B / 2, 999);
+    S("film", { opacity: 1 - seg(t, G.length - 1.2, G.length) });
+  }
+
+  window.film = { render, length: G.length };
   const q = new URLSearchParams(location.search);
-  if (q.has("t")) { render(+q.get("t")); return; }
+  if (q.has("embed")) S(document.body, { background: "transparent" });
+  if (q.has("t")) { render(+q.get("t")); if (q.has("embed")) S("film", { transform: `scale(${innerWidth / 1920})`, transformOrigin: "0 0" }); return; }
   if (q.has("still")) { render(0); return; }
-  const start = performance.now();
-  (function loop(now) { render(((now - start) / 1000) % LEN); requestAnimationFrame(loop); })(start);
+  // ?embed scales the frame to the window (the website plays it this way);
+  // ?loop=a,b plays only that stretch, over and over.
+  if (q.has("embed")) {
+    const fit = () => S("film", { transform: `scale(${innerWidth / 1920})`, transformOrigin: "0 0" });
+    fit(); addEventListener("resize", fit);
+  }
+  const [a, b] = q.has("loop") ? q.get("loop").split(",").map(Number) : [0, G.length];
+  const audio = q.has("play") ? new Audio("audio/score.wav") : null;
+  let start = performance.now();
+  if (audio) addEventListener("click", () => { audio.currentTime = 0; audio.play(); }, { once: true });
+  (function loop(now) { render(audio && !audio.paused ? audio.currentTime : a + ((now - start) / 1000) % (b - a)); requestAnimationFrame(loop); })(start);
 })();
 </script>
 </body>

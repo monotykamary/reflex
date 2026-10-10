@@ -3,244 +3,227 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Reflex — one reflex to every coding agent</title>
-<meta name="description" content="Reflex watches the coding agents you run in herdr — Claude Code, Codex, pi — brings their questions to the edge of your screen, and sends what you ask to the right one. Free and open source, for the Mac.">
-<meta name="theme-color" content="#0b0c0f">
-<meta property="og:title" content="Reflex — one reflex to every coding agent">
-<meta property="og:description" content="Your agents' questions at the edge of your screen, and every request sent to the right one. Free and open source, for the Mac.">
+<title>Reflex — Say what. Reflex finds where.</title>
+<meta name="description" content="Every coding agent starts in a folder. Reflex is in between cd-ing there yourself and having it hidden: say what you want, and it finds the repo, the parent, the conversation you already had, or a new folder. Free and open source, for the Mac.">
+<meta name="theme-color" content="#08090c">
+<meta property="og:title" content="Reflex — Say what. Reflex finds where.">
+<meta property="og:description" content="Say what you want. Reflex finds the folder for your coding agent — the nested repo, the parent, the conversation you already had. Free and open source, for the Mac.">
 <meta property="og:image" content="https://reflex.farm/assets/icon-512.png">
 <link rel="icon" href="assets/favicon.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="alternate" type="application/rss+xml" title="Reflex updates" href="appcast.xml">
 <style>
   :root {
-    --bg: #0b0c0f; --bg2: #111216; --surface: rgba(255,255,255,.045); --raise: rgba(255,255,255,.07);
+    --bg: #08090c; --surface: #101115; --raise: #17181d;
     --line: rgba(255,255,255,.08); --hair: rgba(255,255,255,.06);
     --ink: #ededef; --ink2: rgba(237,237,239,.62); --ink3: rgba(237,237,239,.38);
     --blue: #6e94ff; --amber: #ffb224; --green: #3dd68c; --violet: #a58bff;
     --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif;
     --mono: ui-monospace, "SF Mono", "Geist Mono", Menlo, monospace;
-    --out: cubic-bezier(0.23, 1, 0.32, 1);
+    --expo: cubic-bezier(0.16, 1, 0.3, 1);
   }
   * { box-sizing: border-box; }
   html { background: var(--bg); color-scheme: dark; }
   body { margin: 0; color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
   a { color: inherit; text-decoration: none; }
-  .wrap { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 24px; }
 
-  /* nav */
+  /* Lines rise through a mask, word by word — the film's one entrance. */
+  .rise .m { display: inline-block; overflow: hidden; vertical-align: top; padding: .3em .06em; margin: -.3em -.06em; }
+  .rise .w { display: inline-block; transform: translateY(calc(100% + .45em)); transition: transform .7s var(--expo); transition-delay: calc(var(--i) * 60ms); }
+  .rise.in .w { transform: none; }
+  .fade { opacity: 0; transform: translateY(14px); transition: opacity .6s var(--expo), transform .7s var(--expo); transition-delay: calc(var(--d, 0) * 1ms); }
+  .fade.in { opacity: 1; transform: none; }
+  @media (prefers-reduced-motion: reduce) { .rise .w, .fade { transform: none !important; opacity: 1 !important; transition: none; } }
+
   nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(16px) saturate(1.4); -webkit-backdrop-filter: blur(16px) saturate(1.4);
-    background: color-mix(in srgb, var(--bg) 78%, transparent); border-bottom: 1px solid var(--hair); }
+    background: color-mix(in srgb, var(--bg) 80%, transparent); border-bottom: 1px solid var(--hair); }
   nav .wrap { display: flex; align-items: center; gap: 12px; height: 60px; }
   nav img { width: 28px; height: 28px; }
   nav b { font-size: 16px; letter-spacing: -.01em; }
   nav .links { margin-left: auto; display: flex; gap: 22px; font-size: 14px; color: var(--ink2); }
   nav .links a:hover { color: var(--ink); }
+  @media (max-width: 560px) { nav .links a:not(:last-child) { display: none; } }
 
-  /* hero */
-  .hero { padding: 88px 0 40px; text-align: center; position: relative; }
-  .hero::before { content: ""; position: absolute; inset: -120px 0 auto; height: 620px; pointer-events: none;
-    background: radial-gradient(600px 300px at 50% 30%, rgba(110,148,255,.13), transparent 70%); }
-  .bot { width: 168px; height: 168px; margin: 0 auto 28px; display: block; filter: drop-shadow(0 24px 48px rgba(0,0,0,.5)); }
-  h1 { font-size: clamp(40px, 6.4vw, 72px); line-height: 1.04; letter-spacing: -.035em; margin: 0 auto; max-width: 13ch; font-weight: 700; }
-  .lede { max-width: 620px; margin: 22px auto 0; font-size: 19px; color: var(--ink2); }
+  .hero { padding: 84px 0 0; text-align: center; }
+  .hero .icon { width: 92px; height: 92px; display: block; margin: 0 auto 30px; }
+  h1 { font-size: clamp(46px, 8.4vw, 104px); line-height: 1.02; letter-spacing: -.05em; margin: 0; font-weight: 700; }
+  h1 .l, .end h2 .l { display: block; }
+  .lede { max-width: 640px; margin: 28px auto 0; font-size: clamp(17px, 2.1vw, 20px); color: var(--ink2); }
+  .lede b { color: var(--ink); font-weight: 600; }
   .ctas { display: flex; gap: 12px; justify-content: center; margin-top: 34px; flex-wrap: wrap; }
   .btn { display: inline-flex; align-items: center; gap: 10px; height: 48px; padding: 0 22px; border-radius: 14px; font-weight: 600; font-size: 15px;
-    transition: transform .15s var(--out), background-color .2s var(--out); }
+    transition: transform .15s var(--expo), background-color .2s var(--expo); }
   .btn:active { transform: scale(.97); }
   .btn.primary { background: var(--ink); color: var(--bg); }
   .btn.primary:hover { background: #fff; }
   .btn.ghost { background: var(--raise); border: 1px solid var(--line); }
-  .btn.ghost:hover { background: rgba(255,255,255,.11); }
+  .btn.ghost:hover { background: #1e1f25; }
   .fine { margin-top: 14px; font-size: 13px; color: var(--ink3); }
 
-  /* the demo: a screen's right half */
-  .stage { text-align: left; margin: 64px auto 0; max-width: 980px; aspect-ratio: 16 / 9; border-radius: 22px; position: relative; overflow: hidden;
-    border: 1px solid var(--line); box-shadow: 0 40px 120px rgba(0,0,0,.55), inset 0 1px 0 rgba(255,255,255,.04);
-    background: radial-gradient(900px 500px at 15% 10%, #26324f 0%, transparent 60%), radial-gradient(800px 600px at 90% 100%, #2a1f45 0%, transparent 55%), #14161c; }
-  .stage .win { position: absolute; left: 6%; top: 12%; width: 54%; height: 70%; border-radius: 14px; background: rgba(14,15,19,.82);
-    border: 1px solid var(--hair); box-shadow: 0 20px 60px rgba(0,0,0,.4); font: 12px/1.6 var(--mono); color: rgba(192,202,245,.75); padding: 34px 18px 18px; overflow: hidden; }
-  .stage .win::before { content: ""; position: absolute; left: 14px; top: 13px; width: 52px; height: 10px;
-    background: radial-gradient(circle at 5px 5px, #ff5f57 4.5px, transparent 5px), radial-gradient(circle at 24px 5px, #febc2e 4.5px, transparent 5px), radial-gradient(circle at 43px 5px, #28c840 4.5px, transparent 5px); }
-  .stage .win .dim { color: rgba(192,202,245,.4); }
-  .stage .win .ok { color: #9ece6a; }
-  /* the edge tab, the rail, the question card */
-  .tab, .rail, .card, .bar, .flyer { position: absolute; }
-  .tab { right: 0; width: 26px; padding: 14px 0 14px 7px; border-radius: 12px 0 0 12px; background: rgba(10,11,14,.92);
-    border: 1px solid var(--hair); border-right: 0; display: flex; flex-direction: column; gap: 10px; align-items: center; }
-  .g { width: 11px; height: 11px; border-radius: 50%; }
-  .g.work { border: 2px solid rgba(110,148,255,.25); border-top-color: var(--blue); animation: spin .9s linear infinite; }
-  .g.wait { background: var(--amber); box-shadow: 0 0 0 3px rgba(255,178,36,.22); }
-  .g.done { background: var(--green); }
-  @keyframes spin { to { transform: rotate(360deg); } }
-  .rail { right: 10px; display: flex; flex-direction: column; gap: 9px; align-items: center; }
-  .rb { width: 36px; height: 36px; border-radius: 50%; background: rgba(28,29,34,.92); border: 1px solid var(--line); display: grid; place-items: center; }
-  .rb svg { width: 15px; height: 15px; opacity: .85; }
-  .dots { padding: 9px 0; width: 36px; border-radius: 18px; background: rgba(28,29,34,.92); border: 1px solid var(--line); display: flex; flex-direction: column; gap: 11px; align-items: center; }
-  .card { right: 62px; width: 300px; padding: 14px 14px 10px; border-radius: 16px; background: rgba(26,27,32,.94); border: 1px solid var(--line);
-    box-shadow: 0 18px 50px rgba(0,0,0,.45); font-size: 13px; }
-  .card .who { font-weight: 650; }
-  .card .what { color: var(--ink2); font-size: 12px; margin: 2px 0 8px; }
-  .card .opt { display: flex; gap: 9px; align-items: center; padding: 5px 4px; border-radius: 8px; }
-  .card .k { min-width: 19px; height: 19px; border-radius: 6px; display: grid; place-items: center; font: 600 11px/1 var(--sans);
-    background: rgba(255,178,36,.18); color: var(--amber); }
-  .card .opt.hit { background: rgba(255,255,255,.08); }
-  .card .sent { display: flex; gap: 8px; align-items: center; color: var(--ink2); padding: 6px 4px; }
-  /* the Ask bar */
-  .bar { left: 50%; top: 16%; width: 58%; transform: translateX(-50%); border-radius: 18px; background: rgba(26,27,32,.95);
-    border: 1px solid var(--line); box-shadow: 0 30px 80px rgba(0,0,0,.55); overflow: hidden; }
-  .bar .field { display: flex; align-items: center; gap: 12px; padding: 15px 18px; font-size: 17px; border-bottom: 1px solid var(--hair); }
-  .bar .field .spark { color: var(--ink3); }
-  .bar .caret { display: inline-block; width: 2px; height: 19px; background: var(--blue); vertical-align: -3px; margin-left: 1px; }
-  .bar .rows { padding: 6px; font-size: 13.5px; }
-  .bar .h { font-size: 11px; font-weight: 650; color: var(--ink3); padding: 6px 10px 3px; }
-  .bar .row { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 10px; position: relative; }
-  .bar .row.sel { background: rgba(255,255,255,.08); }
-  .bar .row .t { font-weight: 600; }
-  .bar .row .d { color: var(--ink3); font-size: 12px; }
-  .bar .row .w { margin-left: auto; font: 12px var(--mono); color: var(--ink3); }
-  .bar .row .pick { margin-left: auto; font-size: 11px; font-weight: 650; color: var(--amber); background: rgba(255,178,36,.14); padding: 2px 8px; border-radius: 99px; }
-  .bar .foot { display: flex; gap: 12px; padding: 8px 16px; border-top: 1px solid var(--hair); font-size: 11.5px; color: var(--ink3); }
-  .keys { position: absolute; left: 50%; bottom: 9%; transform: translateX(-50%); display: flex; gap: 8px; }
-  .keys span { min-width: 44px; height: 44px; padding: 0 12px; border-radius: 11px; display: grid; place-items: center; font: 600 18px var(--sans);
-    background: rgba(255,255,255,.1); border: 1px solid var(--line); box-shadow: 0 2px 0 rgba(0,0,0,.4); }
-  .flyer { width: 10px; height: 10px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 16px var(--blue); }
-  .caption { position: absolute; left: 6%; bottom: 7%; font-size: 14px; color: var(--ink2); font-weight: 500; }
+  /* The film, playing live: the same page that renders the launch video. */
+  .stage { margin: 64px auto 0; max-width: 1080px; aspect-ratio: 16 / 9; border-radius: 22px; overflow: hidden; position: relative;
+    border: 1px solid var(--line); background: var(--bg); }
+  .stage iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; display: block; pointer-events: none; }
+  .stage-note { margin-top: 14px; font-size: 13px; color: var(--ink3); text-align: center; }
 
-  /* sections */
-  section { padding: 96px 0 0; }
-  .kicker { font-size: 13px; font-weight: 650; letter-spacing: .06em; text-transform: uppercase; color: var(--ink3); }
-  h2 { font-size: clamp(28px, 4vw, 42px); letter-spacing: -.025em; line-height: 1.12; margin: 10px 0 0; max-width: 22ch; }
-  .sub { color: var(--ink2); max-width: 640px; margin-top: 14px; font-size: 17px; }
-  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; margin-top: 40px; }
-  .f { padding: 22px; border-radius: 18px; background: var(--surface); border: 1px solid var(--hair); }
+  section { padding: 128px 0 0; }
+  .kicker { font-size: 13px; font-weight: 650; letter-spacing: .08em; text-transform: uppercase; color: var(--ink3); }
+  h2 { font-size: clamp(32px, 4.8vw, 56px); letter-spacing: -.04em; line-height: 1.06; margin: 12px 0 0; max-width: 18ch; font-weight: 700; }
+  .sub { color: var(--ink2); max-width: 660px; margin-top: 18px; font-size: 18px; }
+  code { font: 13px var(--mono); }
+
+  /* The two extremes, and the middle. */
+  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; }
+  @media (max-width: 880px) { .three { grid-template-columns: 1fr; } }
+  .way { padding: 24px; border-radius: 20px; background: var(--surface); border: 1px solid var(--hair); display: flex; flex-direction: column; gap: 14px; }
+  .way h3 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  .way p { margin: 0; color: var(--ink2); font-size: 15px; }
+  .way .shot { border-radius: 12px; background: #0b0c0f; border: 1px solid var(--hair); padding: 14px 16px; font: 13px/1.7 var(--mono); color: rgba(192,202,245,.86); min-height: 112px; overflow-wrap: anywhere; }
+  .shot .dim { color: rgba(192,202,245,.4); }
+  .bubble { display: block; width: fit-content; max-width: 90%; padding: 7px 12px; border-radius: 14px; font: 13px/1.4 var(--sans); margin-bottom: 7px; }
+  .bubble.me { margin-left: auto; background: #2c5bd6; color: #fff; }
+  .bubble.it { background: rgba(255,255,255,.08); color: var(--ink); }
+  .way.mid { border-color: rgba(110,148,255,.35); }
+  .bar-mini { border-radius: 12px; background: #18191e; border: 1px solid var(--line); overflow: hidden; font: 13px/1.4 var(--sans); min-height: 112px; }
+  .bar-mini .f { padding: 10px 12px; border-bottom: 1px solid var(--hair); }
+  .bar-mini .f::before { content: "✦ "; color: var(--ink3); }
+  .bar-mini .r { display: flex; align-items: center; gap: 8px; padding: 8px 12px; }
+  .bar-mini .r.sel { background: rgba(255,255,255,.07); }
+  .bar-mini .r .p { margin-left: auto; font: 11px var(--mono); color: var(--ink3); }
+
+  /* Say what → where. */
+  .finds { margin-top: 48px; border-top: 1px solid var(--hair); }
+  .find { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.15fr); gap: 12px 40px; padding: 26px 0; border-bottom: 1px solid var(--hair); align-items: start; }
+  @media (max-width: 760px) { .find { grid-template-columns: 1fr; } }
+  .find .said { font-size: clamp(18px, 2.2vw, 22px); font-weight: 600; letter-spacing: -.015em; }
+  .find .said::before { content: "“"; color: var(--ink3); }
+  .find .said::after { content: "”"; color: var(--ink3); }
+  .find .why { color: var(--ink2); font-size: 15px; margin-top: 6px; }
+  .path { font: 14px/1.9 var(--mono); color: var(--ink3); display: flex; flex-wrap: wrap; align-items: center; gap: 2px 0; padding-top: 4px; }
+  .path i { font-style: normal; color: rgba(226,222,212,.28); padding: 0 6px; }
+  .path .hit { color: var(--ink); background: rgba(110,148,255,.16); border: 1px solid rgba(110,148,255,.45); padding: 1px 9px; border-radius: 8px; }
+  .path .kid { color: #b9c8ff; border: 1px solid rgba(110,148,255,.3); padding: 0 8px; border-radius: 8px; margin: 2px 6px 2px 0; }
+  .path .ghost { color: #d2c4ff; background: rgba(165,139,255,.12); border: 1px dashed rgba(165,139,255,.6); padding: 1px 9px; border-radius: 8px; }
+  .path .bud { color: var(--green); background: rgba(61,214,140,.1); border: 1px solid rgba(61,214,140,.45); padding: 1px 9px; border-radius: 8px; }
+  .path .guess { color: var(--amber); border: 1px dashed rgba(255,178,36,.55); padding: 1px 9px; border-radius: 8px; margin-right: 6px; }
+  .path .guess.on { border-style: solid; background: rgba(255,178,36,.1); }
+  .path .note { width: 100%; font: 13px/1.5 var(--sans); color: var(--ink3); margin-top: 6px; }
+  kbd { font: 600 12px var(--sans); padding: 2px 6px; border-radius: 6px; background: var(--raise); border: 1px solid var(--line); color: var(--ink); }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 14px; margin-top: 48px; }
+  .f { padding: 24px; border-radius: 20px; background: var(--surface); border: 1px solid var(--hair); }
   .f h3 { margin: 0; font-size: 17px; letter-spacing: -.01em; display: flex; gap: 10px; align-items: center; }
   .f p { margin: 8px 0 0; color: var(--ink2); font-size: 15px; }
-  .f .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--raise); font-size: 14px; }
-  kbd { font: 600 12px var(--sans); padding: 2px 6px; border-radius: 6px; background: var(--raise); border: 1px solid var(--line); }
-  .steps { counter-reset: s; display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 40px; }
-  .step { padding: 22px; border-radius: 18px; border: 1px solid var(--hair); position: relative; }
-  .step::before { counter-increment: s; content: counter(s); position: absolute; right: 18px; top: 14px; font: 700 34px var(--sans); color: rgba(255,255,255,.07); }
+  .f .ic { width: 28px; height: 28px; border-radius: 8px; display: grid; place-items: center; background: var(--raise); font-size: 14px; flex: none; }
+  .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px; margin-top: 48px; counter-reset: s; }
+  .step { padding: 24px; border-radius: 20px; border: 1px solid var(--hair); position: relative; }
+  .step::before { counter-increment: s; content: counter(s); position: absolute; right: 20px; top: 14px; font: 700 34px var(--sans); color: rgba(255,255,255,.07); }
   .step h3 { margin: 0; font-size: 17px; }
   .step p { margin: 8px 0 0; color: var(--ink2); font-size: 15px; }
-  code { font: 13.5px var(--mono); background: var(--raise); padding: 1px 6px; border-radius: 6px; }
-  .req { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 28px; margin-top: 28px; color: var(--ink2); font-size: 15px; }
+  .req { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 10px 28px; margin-top: 32px; color: var(--ink2); font-size: 15px; }
   .req div::before { content: "—"; color: var(--ink3); margin-right: 8px; }
-  .end { margin: 110px 0 0; padding: 72px 0 60px; text-align: center; border-top: 1px solid var(--hair); }
-  .end img { width: 72px; height: 72px; }
-  .end h2 { margin: 18px auto 0; }
+  .u { text-decoration: underline; text-decoration-color: var(--ink3); text-underline-offset: 3px; }
+
+  .end { margin: 140px 0 0; padding: 88px 0 64px; text-align: center; border-top: 1px solid var(--hair); }
+  .end img { width: 76px; height: 76px; }
+  .end h2 { margin: 24px auto 0; max-width: none; font-size: clamp(36px, 6vw, 72px); }
   footer { padding: 28px 0 48px; color: var(--ink3); font-size: 13px; display: flex; gap: 18px; flex-wrap: wrap; justify-content: center; }
   footer a:hover { color: var(--ink2); }
-  @media (max-width: 700px) {
-    .card { width: 220px; font-size: 12px; } .bar { width: 86%; } .stage .win { width: 70%; } .keys span { min-width: 34px; height: 34px; font-size: 14px; }
-  }
-  @media (prefers-reduced-motion: reduce) { .g.work { animation: none; border-color: var(--blue); } }
 </style>
 </head>
 <body>
 <nav><div class="wrap">
   <img src="assets/icon-512.png" alt=""><b>Reflex</b>
-  <div class="links"><a href="#features">Features</a><a href="#routing">How it routes</a><a href="https://github.com/monotykamary/reflex">GitHub</a></div>
+  <div class="links"><a href="#where">How it finds where</a><a href="#reach">Features</a><a href="#routing">Routing</a><a href="https://github.com/monotykamary/reflex">GitHub</a></div>
 </div></nav>
 
 <header class="hero"><div class="wrap">
-  <svg class="bot" id="bot" viewBox="0 0 1024 1024" aria-label="Reflex">
-    <defs>
-      <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#23252b"/><stop offset="1" stop-color="#0b0c0f"/></linearGradient>
-      <radialGradient id="peb" cx="590" cy="380" r="520" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset=".72" stop-color="#d9dadd"/><stop offset="1" stop-color="#8e9097"/></radialGradient>
-      <clipPath id="sq"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
-      <filter id="ps" x="-30%" y="-30%" width="160%" height="170%"><feDropShadow dx="0" dy="24" stdDeviation="30" flood-opacity=".5"/></filter>
-    </defs>
-    <rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
-    <g clip-path="url(#sq)"><g id="body">
-      <path filter="url(#ps)" fill="url(#peb)" transform="translate(500 544) rotate(-10)"
-        d="M0 -300 C256 -300 320 -168 320 0 C320 204 217.6 300 0 300 C-217.6 300 -320 204 -320 0 C-320 -168 -256 -300 0 -300 Z"/>
-      <g id="eyes" fill="#141519">
-        <rect id="e1" x="-76.5" y="-26" width="153" height="52" rx="26" transform="translate(530 476) rotate(-13.75)"/>
-        <rect id="e2" x="-63" y="-22.5" width="126" height="45" rx="22.5" transform="translate(718 430) rotate(-13.75)"/>
-      </g>
-    </g></g>
-    <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
-  </svg>
-  <h1>One reflex to every coding agent.</h1>
-  <p class="lede">Reflex watches the agents you run in herdr — Claude Code, Codex, pi — brings their questions to the edge of your screen, and sends what you ask to the right one. Your words, as you wrote them.</p>
-  <div class="ctas">
+  <img class="icon fade" src="assets/icon-512.png" alt="Reflex">
+  <h1 class="rise"><span class="l">Say what.</span><span class="l">Reflex finds where.</span></h1>
+  <p class="lede fade" style="--d:350">Every coding agent starts in a folder. Reflex is the bar you say it to — and it finds <b>the repo nested four deep</b>, <b>the parent</b> when the work spans repos, <b>the conversation you already had</b>, or a new folder, only when you ask.</p>
+  <div class="ctas fade" style="--d:480">
     <a class="btn primary" href="https://github.com/monotykamary/reflex/releases/latest">
-      <svg width="16" height="18" viewBox="0 0 16 18" fill="currentColor"><path d="M13.3 9.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.3-.1-2.6.8-3.3.8-.7 0-1.7-.8-2.8-.8C4.4 4.5 3 5.4 2.2 6.8.7 9.5 1.8 13.4 3.3 15.5c.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2.1.8-1.2 1.1-2.3 1.1-2.4 0 0-2.1-.8-2.1-3.4zM11.2 3.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1 1.6-.9 2.6 1 .1 1.9-.5 2.5-1.2z"/></svg>
+      <svg width="16" height="18" viewBox="0 0 16 18" fill="currentColor" aria-hidden="true"><path d="M13.3 9.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.3-.1-2.6.8-3.3.8-.7 0-1.7-.8-2.8-.8C4.4 4.5 3 5.4 2.2 6.8.7 9.5 1.8 13.4 3.3 15.5c.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2.1.8-1.2 1.1-2.3 1.1-2.4 0 0-2.1-.8-2.1-3.4zM11.2 3.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1 1.6-.9 2.6 1 .1 1.9-.5 2.5-1.2z"/></svg>
       Download for Mac</a>
     <a class="btn ghost" href="https://github.com/monotykamary/reflex">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.6 0 0 3.6 0 8c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3s1.4.1 2 .3c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.7-3.7 3.9.3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4C13.7 14.5 16 11.5 16 8c0-4.4-3.6-8-8-8z"/></svg>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.6 0 0 3.6 0 8c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3s1.4.1 2 .3c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.7-3.7 3.9.3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4C13.7 14.5 16 11.5 16 8c0-4.4-3.6-8-8-8z"/></svg>
       View on GitHub</a>
   </div>
-  <div class="fine">Free and open source · macOS 26 · Apple Silicon</div>
-
-  <div class="stage" id="stage" aria-hidden="true">
-    <div class="win">
-      <div class="dim">~/payments-api</div>
-      <div>❯ the login test flakes on CI again</div>
-      <div class="dim">  Reading tests/auth/login.spec.ts</div>
-      <div class="dim">  Found a race: the session cookie is read before it is set.</div>
-      <div class="ok">  ✓ 214 passed</div>
-      <div>❯ <span class="dim">run the migration?</span></div>
-    </div>
-    <div class="tab" id="tab"><i class="g work"></i><i class="g work"></i><i class="g wait" id="tabWait"></i><i class="g done"></i></div>
-    <div class="rail" id="rail">
-      <div class="rb"><svg viewBox="0 0 16 16" fill="none" stroke="#ededef" stroke-width="1.4"><path d="M2 9.5V13h12V9.5M2 9.5 4 3h8l2 6.5M2 9.5h3.5l1 2h3l1-2H14"/></svg></div>
-      <div class="dots"><i class="g work"></i><i class="g work"></i><i class="g wait" id="railWait"></i><i class="g done"></i></div>
-      <div class="rb"><svg viewBox="0 0 16 16" fill="#ededef"><path d="M8 1.5 9.4 6.6 14.5 8 9.4 9.4 8 14.5 6.6 9.4 1.5 8 6.6 6.6Z"/></svg></div>
-    </div>
-    <div class="card" id="card">
-      <div class="who">claude · payments-api</div>
-      <div class="what">Run the migration now?</div>
-      <div id="opts">
-        <div class="opt" id="o1"><span class="k">1</span>Yes, run it</div>
-        <div class="opt"><span class="k">2</span>Not yet</div>
-        <div class="opt"><span class="k">3</span>Show me the SQL first</div>
-      </div>
-      <div class="sent" id="sent"><i class="g work"></i>Sent “1” — running the migration</div>
-    </div>
-    <div class="keys" id="keys"><span id="k1">⌥</span><span id="k2">⌥</span><span id="kEnter">⏎</span><span id="kOne">1</span></div>
-    <div class="bar" id="bar">
-      <div class="field"><span class="spark">✦</span><span id="typed"></span><span class="caret" id="caret"></span></div>
-      <div class="rows" id="rows">
-        <div class="h" id="hPick">Sessions</div>
-        <div class="row" id="r1"><i class="g work"></i><span class="t">Fix the flaky login test</span><span class="d">claude · payments-api</span><span class="w" id="w1">—</span></div>
-        <div class="row" id="r2"><i class="g done"></i><span class="t">Landing page copy</span><span class="d">pi · marketing</span><span class="w" id="w2">—</span></div>
-        <div class="row" id="r3"><i class="g work"></i><span class="t">Refactor the ingest worker</span><span class="d">codex · pipeline</span><span class="w" id="w3">—</span></div>
-      </div>
-      <div class="foot"><span id="footText">Search sessions, or ask your agents…</span></div>
-    </div>
-    <div class="flyer" id="flyer"></div>
-    <div class="caption" id="caption"></div>
-  </div>
+  <div class="fine fade" style="--d:560">Free and open source · macOS 26 · Apple Silicon</div>
+  <div class="stage fade" style="--d:650"><iframe id="film" title="Reflex finding where four requests should go" tabindex="-1" aria-hidden="true"></iframe></div>
+  <div class="stage-note fade" style="--d:700">Not a video: the launch film’s own page, drawn live in your browser.</div>
 </div></header>
 
-<section id="features"><div class="wrap">
-  <div class="kicker">What it does</div>
-  <h2>Your agents keep their terminals. You keep one reflex.</h2>
-  <p class="sub">Reflex never wraps your agents in an SDK or a chat API. They run in their own TUIs inside herdr, on the plans you already pay for. Reflex just knows where they are.</p>
+<section id="problem"><div class="wrap">
+  <div class="kicker fade">The folder problem</div>
+  <h2 class="rise">Every agent starts in a folder.</h2>
+  <p class="sub fade">Some work lives in one repo, some in the parent of three, some in a conversation you had on Tuesday. Today you either do the finding yourself, or you never get to see where the work went.</p>
+  <div class="three">
+    <div class="way fade">
+      <div class="shot"><span class="dim">~ </span>❯ cd ~/VCS/work/acme/studio/form-builder<br><span class="dim">form-builder </span>❯ claude<br><span class="dim">…and the parent, for work across repos?</span></div>
+      <h3>Choose it yourself</h3>
+      <p>Every harness waits for you to <code>cd</code> first. Fine for one repo; slow for the parent, the sibling, the one whose name you forgot.</p>
+    </div>
+    <div class="way fade" style="--d:80">
+      <div class="shot"><span class="bubble me">Add a webmcp adapter to the form builder</span><span class="bubble it">Done! I made it in my workspace.</span><span class="bubble me">…which repo is that in?</span></div>
+      <h3>Or have it hidden</h3>
+      <p>Chat-first bots skip the question with a workspace of their own. Easy to start; hard to find your work, your branches and your history afterwards.</p>
+    </div>
+    <div class="way mid fade" style="--d:160">
+      <div class="bar-mini"><div class="f">add a webmcp adapter to the form builder</div>
+        <div class="r sel">▰ <b>form-builder</b><span class="p">91%</span></div>
+        <div class="r">▰ studio<span class="p">5%</span></div><div class="r">▰ webmcp-sdk<span class="p">3%</span></div></div>
+      <h3>Reflex is in between</h3>
+      <p>Say what you want. Reflex finds where in about a second, and shows you before it sends. Your agent starts in a real folder, on your git, where you can find it.</p>
+    </div>
+  </div>
+</div></section>
+
+<section id="where"><div class="wrap">
+  <div class="kicker fade">How it finds where</div>
+  <h2 class="rise">Say what. Reflex finds where.</h2>
+  <p class="sub fade">Double-tap <kbd>⌥</kbd> and type. Reflex builds the candidates itself — every git repo under your roots, their parents, your live sessions and your earlier conversations — and Jev, a System 1 model, picks among them.</p>
+  <div class="finds">
+    <div class="find fade"><div><div class="said">add a webmcp adapter to the form builder</div><div class="why">A repo nested deep in your tree.</div></div>
+      <div class="path">~<i>/</i>VCS<i>/</i>work<i>/</i>acme<i>/</i>studio<i>/</i><span class="hit">form-builder</span></div></div>
+    <div class="find fade"><div><div class="said">update the shared button across web and mobile</div><div class="why">The parent, when the work spans repos.</div></div>
+      <div class="path">~<i>/</i>VCS<i>/</i>work<i>/</i><span class="hit">acme</span><i>→</i><span class="kid">web</span><span class="kid">mobile</span><span class="kid">shared-ui</span></div></div>
+    <div class="find fade"><div><div class="said">continue the logo exploration</div><div class="why">The conversation you already had: resumed, not restarted.</div></div>
+      <div class="path">~<i>/</i>VCS<i>/</i>work<i>/</i>acme<i>/</i>brand<i>→</i><span class="ghost">↺ Logo exploration · claude · 2 days ago</span></div></div>
+    <div class="find fade"><div><div class="said">start a new project for the pitch deck</div><div class="why">A new folder, only when you say so.</div></div>
+      <div class="path">~<i>/</i>VCS<i>/</i><span class="bud">+ pitch-deck</span></div></div>
+    <div class="find fade"><div><div class="said">make the buttons rounder</div><div class="why">Not sure? It asks, then remembers.</div></div>
+      <div class="path"><span class="guess">web</span><span class="guess on">shared-ui</span><span class="note">Jev’s guess is highlighted; <kbd>↓</kbd> <kbd>⏎</kbd> picks another, and your correction shapes the next pick.</span></div></div>
+  </div>
+</div></section>
+
+<section id="reach"><div class="wrap">
+  <div class="kicker fade">Once they’re running</div>
+  <h2 class="rise">Then it keeps every agent in reach.</h2>
+  <p class="sub fade">Reflex never wraps your agents in an SDK or a chat API. They run in their own TUIs inside herdr, on the plans you already pay for. Reflex just knows where they are.</p>
   <div class="grid">
-    <div class="f"><h3><span class="ic">◐</span>The edge of your screen</h3><p>A small tab grows from the right edge while agents work — a spinning ring for each, amber when one is waiting on you, green when done. Hover it for the rail.</p></div>
-    <div class="f"><h3><span class="ic">✦</span><kbd>⌥</kbd><kbd>⌥</kbd> to ask</h3><p>Double-tap Option and type. A few words find a session; a sentence becomes a request, and Jev ranks where it should go — a live session, a folder, an earlier conversation.</p></div>
-    <div class="f"><h3><span class="ic">1</span>Questions, answered anywhere</h3><p>Every question an agent stops on — numbered options, multi-select, “trust this folder?” — becomes a card you answer with 1, 2, 3, from the rail, the inbox or your phone.</p></div>
-    <div class="f"><h3><span class="ic">▯</span>Take it with you</h3><p>Scan a code that works once. Your phone gets your agents, their questions and a live terminal you can type into — over Tailscale, private and from anywhere.</p></div>
-    <div class="f"><h3><span class="ic">↺</span>Nothing is lost</h3><p>Earlier Claude, pi and Codex sessions come back with a keystroke. Background sessions and background shells count as work until they are really done.</p></div>
-    <div class="f"><h3><span class="ic">☕</span>Awake while they work</h3><p>Your Mac doesn't idle-sleep while an agent is working — and lets go on battery before it runs low.</p></div>
+    <div class="f fade"><h3><span class="ic">◐</span>The edge of your screen</h3><p>A small tab grows from the right edge while agents work: a ring for each, amber when one waits on you, green when done. Hover it for the rail.</p></div>
+    <div class="f fade" style="--d:60"><h3><span class="ic">1</span>Questions, answered anywhere</h3><p>Every question an agent stops on — numbered options, multi-select, “trust this folder?” — becomes a card you answer with 1, 2, 3.</p></div>
+    <div class="f fade" style="--d:120"><h3><span class="ic">▯</span>Take it with you</h3><p>Scan a code that works once. Your phone gets your agents, their questions and a live terminal you can type into, over Tailscale, private and from anywhere.</p></div>
+    <div class="f fade"><h3><span class="ic">↺</span>Nothing is lost</h3><p>Earlier Claude, pi and Codex sessions come back with a keystroke. Background sessions and shells count as work until they’re really done.</p></div>
+    <div class="f fade" style="--d:60"><h3><span class="ic">⌘</span>Your words, verbatim</h3><p>No model rewrites what you typed, and pasted images go along too. ⏎ sends; ⌘⏎ sends and opens the terminal.</p></div>
+    <div class="f fade" style="--d:120"><h3><span class="ic">☕</span>Awake while they work</h3><p>Your Mac doesn’t idle-sleep while an agent is working, and lets go on battery before it runs low.</p></div>
   </div>
 </div></section>
 
 <section id="routing"><div class="wrap">
-  <div class="kicker">How it routes</div>
-  <h2>A System 1 model, not a chat agent at the helm.</h2>
-  <p class="sub">No LLM rewrites your words. Reflex asks <a href="https://typesafe.ai/blog/introducing-system-one-models-and-jev" style="text-decoration:underline;text-decoration-color:var(--ink3)">Jev</a> typed questions over candidates it built itself, and gets back keys and probabilities in about a second.</p>
+  <div class="kicker fade">Under the hood</div>
+  <h2 class="rise">A System 1 model, not a chat agent at the helm.</h2>
+  <p class="sub fade">Reflex asks <a class="u" href="https://typesafe.ai/blog/introducing-system-one-models-and-jev">Jev</a> typed questions over candidates it built itself, and gets back keys and probabilities in about a second.</p>
   <div class="steps">
-    <div class="step"><h3>Candidates, built deterministically</h3><p>Your live sessions (their folder, state and last lines), the git repos under your roots, and your earlier conversations — ranked so Jev only ever chooses among a few.</p></div>
-    <div class="step"><h3>One typed call</h3><p>Which session? Which folder? Is this a side question? Does it continue earlier work? Plus where your last requests went, so “also add tests for that” lands right.</p></div>
-    <div class="step"><h3>Sure, or it asks</h3><p>When Jev is sure, your words go — verbatim. When it isn't, its best guess is highlighted for you to confirm. Those rules are laws, machine-checked in Bend.</p></div>
+    <div class="step fade"><h3>Candidates, built deterministically</h3><p>Your live sessions (folder, state, last lines), the git repos under your roots and their parents, and your earlier conversations, ranked so Jev only ever chooses among a few.</p></div>
+    <div class="step fade" style="--d:60"><h3>One typed call</h3><p>Which session? Which folder? A side question? Earlier work? Plus where your last requests went, so “also add tests for that” lands right.</p></div>
+    <div class="step fade" style="--d:120"><h3>Sure, or it asks</h3><p>When Jev is sure, your words go. When it isn’t, its guess is highlighted for you to confirm. Those rules are laws, machine-checked in Bend.</p></div>
   </div>
-  <div class="req">
+  <div class="req fade">
     <div>macOS 26, Apple Silicon</div>
-    <div><a href="https://herdr.dev" style="text-decoration:underline;text-decoration-color:var(--ink3)">herdr</a> 0.9 with its agent integrations</div>
+    <div><a class="u" href="https://herdr.dev">herdr</a> 0.9 with its agent integrations</div>
     <div>Claude Code, Codex or pi</div>
     <div>For routing: jev-fabric and a Jev key</div>
     <div>For your phone: Tailscale</div>
@@ -249,93 +232,28 @@
 </div></section>
 
 <div class="end"><div class="wrap">
-  <img src="assets/icon-512.png" alt="">
-  <h2>Let your agents work. Answer with a reflex.</h2>
-  <div class="ctas"><a class="btn primary" href="https://github.com/monotykamary/reflex/releases/latest">Download for Mac</a><a class="btn ghost" href="https://github.com/monotykamary/reflex">Build from source</a></div>
+  <img class="fade" src="assets/icon-512.png" alt="">
+  <h2 class="rise"><span class="l">Say what.</span><span class="l">Reflex finds where.</span></h2>
+  <div class="ctas fade" style="--d:300"><a class="btn primary" href="https://github.com/monotykamary/reflex/releases/latest">Download for Mac</a><a class="btn ghost" href="https://github.com/monotykamary/reflex">Build from source</a></div>
 </div></div>
 <footer><span>Reflex · MIT</span><a href="https://github.com/monotykamary/reflex">GitHub</a><a href="https://github.com/monotykamary/reflex/releases">Releases</a><a href="appcast.xml">Updates feed</a></footer>
 
 <script>
 (() => {
-  // ---------- the lazy bot: an idle bob, a slow blink, a glance ----------
-  const body = document.getElementById("body"), e1 = document.getElementById("e1"), e2 = document.getElementById("e2");
+  // Split each headline into masked words; reveal them, and everything that
+  // fades, as it scrolls into view, once.
+  document.querySelectorAll(".rise").forEach((h) => {
+    let i = 0;
+    const split = (node) => node.textContent.split(" ").map((w) => `<span class="m"><span class="w" style="--i:${i++}">${w}</span></span>`).join(" ");
+    const parts = h.querySelectorAll(".l");
+    if (parts.length) parts.forEach((l) => { l.innerHTML = split(l); }); else h.innerHTML = split(h);
+  });
+  const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { rootMargin: "0px 0px -8% 0px" });
+  document.querySelectorAll(".rise, .fade").forEach((el) => io.observe(el));
+
+  // The film's search, looping (bars 7–17); one still frame for reduced motion.
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  function bot(t) {
-    const bob = Math.sin(t * 1.6) * 6;
-    const blinkAt = t % 5.2, closing = blinkAt > 4.9 ? Math.sin((blinkAt - 4.9) / 0.3 * Math.PI) : 0;
-    const glance = (t % 11) > 7 && (t % 11) < 9.5 ? -1 : 0, gx = glance * 26 * Math.min(1, Math.min((t % 11) - 7, 9.5 - (t % 11)) * 4);
-    body.setAttribute("transform", `translate(${gx * .25} ${bob})`);
-    const sy = 1 - closing * 0.82;
-    e1.setAttribute("transform", `translate(${530 + gx} 476) rotate(-13.75) scale(1 ${sy})`);
-    e2.setAttribute("transform", `translate(${718 + gx} 430) rotate(-13.75) scale(1 ${sy})`);
-  }
-
-  // ---------- the demo, as a function of time (0…14 s, looping) ----------
-  const $ = (id) => document.getElementById(id);
-  const clamp = (x, a = 0, b = 1) => Math.min(b, Math.max(a, x));
-  const seg = (t, a, b) => clamp((t - a) / (b - a));
-  const out = (x) => 1 - Math.pow(1 - x, 3);
-  const inOut = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-  const S = (el, o) => Object.assign($(el).style, o);
-  const REQ = "fix the flaky login test in payments";
-  const LEN = 14;
-
-  function demo(t) {
-    const st = $("stage"), H = st.clientHeight, W = st.clientWidth;
-    // 0–1.6: the tab, a question arrives (amber pulses)
-    const railIn = out(seg(t, 1.6, 2.1)), railOut = out(seg(t, 4.3, 4.65));
-    const railV = railIn * (1 - railOut);
-    S("tab", { top: `${H * .36}px`, opacity: 1 - railV, transform: `translateX(${railV * 14}px)` });
-    const pulse = t > .6 && t < 1.6 ? 1 + .35 * Math.sin((t - .6) * 9) : 1;
-    S("tabWait", { transform: `scale(${pulse})` });
-    S("rail", { top: `${H * .30}px`, opacity: railV, transform: `translateX(${(1 - railV) * 18}px)` });
-    S("card", { top: `${H * .30}px`, opacity: railV, transform: `translateX(${(1 - railV) * 14}px) scale(${.97 + .03 * railV})` });
-    // 3.0: "1" pressed → sent
-    const hit = t > 3.0 && t < 4.6;
-    $("o1").classList.toggle("hit", hit);
-    const sent = seg(t, 3.25, 3.5);
-    S("opts", { opacity: 1 - sent, height: sent > .99 ? "0px" : "", overflow: "hidden" });
-    S("sent", { opacity: sent, display: sent > 0 ? "flex" : "none" });
-    S("railWait", { background: t > 3.3 ? "transparent" : "", border: t > 3.3 ? "2px solid rgba(110,148,255,.25)" : "", borderTopColor: t > 3.3 ? "#6e94ff" : "" });
-    // keys: 1 at 2.9, ⌥⌥ at 4.9/5.05, ⏎ at 9.3
-    const key = (id, at) => { const k = seg(t, at, at + .09) * (1 - seg(t, at + .22, at + .5)); S(id, { opacity: k, transform: `translateY(${(1 - k) * 6}px) scale(${.96 + .04 * k})`, display: k > 0 ? "grid" : "none" }); };
-    key("kOne", 2.9); key("k1", 4.9); key("k2", 5.06); key("kEnter", 9.3);
-    // 5.2: the Ask bar
-    const barV = out(seg(t, 5.2, 5.45)) * (1 - out(seg(t, 9.55, 9.85)));
-    S("bar", { opacity: barV, transform: `translateX(-50%) translateY(${(1 - barV) * -8}px) scale(${.98 + .02 * barV})` });
-    // typing 5.6–7.2
-    const n = Math.round(REQ.length * clamp((t - 5.6) / 1.6));
-    $("typed").textContent = REQ.slice(0, n);
-    S("caret", { opacity: (t * 2 % 1) < .55 || (t > 5.6 && t < 7.3) ? 1 : 0 });
-    // 7.5: Jev ranks — weights count up, the pick rises to the top
-    const rank = inOut(seg(t, 7.5, 8.3));
-    const w = (id, v) => { $(id).textContent = t < 7.5 ? "—" : Math.round(v * rank) + "%"; };
-    w("w1", 92); w("w2", 4); w("w3", 3);
-    $("hPick").textContent = t >= 7.9 ? "Jev’s pick" : "Sessions";
-    $("r1").classList.toggle("sel", t >= 7.9);
-    $("footText").textContent = t < 5.6 ? "Search sessions, or ask your agents…" : t < 7.5 ? "Jev is reading…" : "Jev · 780 ms   ⏎ send   ⌘⏎ send & open";
-    // 9.4: the request flies to its session's ring at the edge
-    const fly = seg(t, 9.4, 10.2), f = inOut(fly);
-    const x0 = W * .3, y0 = H * .36, x1 = W - 14, y1 = H * .36 + 24;
-    S("flyer", { opacity: fly > 0 && fly < 1 ? 1 : 0, left: `${x0 + (x1 - x0) * f}px`, top: `${y0 + (y1 - y0) * f - Math.sin(f * Math.PI) * H * .12}px` });
-    // captions
-    const cap = t < 4.6 ? "A question waits at the edge. Answer with 1." : t < 9.6 ? "⌥⌥ — say what you want. Jev knows where it goes." : "Sent, verbatim, to the right agent.";
-    if ($("caption").textContent !== cap) $("caption").textContent = cap;
-  }
-
-  // The same frames anywhere: the site loops them; the launch film seeks them.
-  window.reflexDemo = { render: (t) => { demo(t); bot(t); }, length: LEN };
-  // ?t=8.4 freezes one moment (screenshots); ?still waits to be driven (the film).
-  const q = new URLSearchParams(location.search);
-  if (q.has("t")) { demo(+q.get("t")); bot(+q.get("t")); return; }
-  if (q.has("still")) return;
-  if (reduce) { demo(8.4); bot(0); return; }
-  const start = performance.now();
-  (function loop(now) {
-    const t = (now - start) / 1000;
-    demo(t % LEN); bot(t);
-    requestAnimationFrame(loop);
-  })(start);
+  document.getElementById("film").src = reduce ? "film/launch.html?embed&t=19.6" : "film/launch.html?embed&loop=16.8,40.8";
 })();
 </script>
 </body>

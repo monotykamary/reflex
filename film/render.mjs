@@ -1,5 +1,6 @@
-// Render film/launch.html to an MP4, frame by frame, in headless Chrome.
-//   node film/render.mjs [out.mp4] [--fps 30] [--at t1,t2,…  (stills only)]
+// Render film/launch.html to an MP4, frame by frame, in headless Chrome, with
+// the score (film/audio/score.wav, from audio/score.mjs) muxed in when present.
+//   node film/render.mjs [out.mp4] [--fps 60] [--at t1,t2,…  (stills only)]
 // Every frame is film.render(t): the page is a pure function of time, so the
 // render is exact and repeatable. Needs Google Chrome and ffmpeg.
 import { spawn, execFileSync } from "node:child_process";
@@ -12,7 +13,7 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const opt = (name, d) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : d; };
 const out = args.find((a) => a.endsWith(".mp4")) ?? path.join(here, "reflex-launch.mp4");
-const fps = +opt("--fps", 30);
+const fps = +opt("--fps", 60);
 const stills = opt("--at", null);
 const chromeBin = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "reflex-film-"));
@@ -42,7 +43,7 @@ const times = stills ? stills.split(",").map(Number) : Array.from({ length: Math
 let n = 0;
 for (const t of times) {
   await call("Runtime.evaluate", { expression: `film.render(${t})` });
-  const shot = await call("Page.captureScreenshot", { format: stills ? "png" : "jpeg", quality: 94, captureBeyondViewport: false });
+  const shot = await call("Page.captureScreenshot", { format: stills ? "png" : "jpeg", quality: 95, captureBeyondViewport: false });
   const name = stills ? `still-${t}.png` : `f${String(n).padStart(5, "0")}.jpg`;
   fs.writeFileSync(path.join(stills ? path.dirname(out) : frames, name), Buffer.from(shot.result.data, "base64"));
   if (++n % 60 === 0) process.stdout.write(`\r${n}/${times.length} frames`);
@@ -51,9 +52,14 @@ ws.close();
 chrome.kill();
 await new Promise((r) => (chrome.exitCode !== null ? r() : chrome.once("exit", r)));
 if (!stills) {
+  const score = path.join(here, "audio", "score.wav");
+  const picture = fs.existsSync(score) ? path.join(frames, "picture.mp4") : out;
   execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-framerate", String(fps), "-i", path.join(frames, "f%05d.jpg"),
-    "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-movflags", "+faststart", out]);
-  console.log(`\nwrote ${out}`);
+    "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-movflags", "+faststart", picture]);
+  // The mastered score goes in as it is: no re-levelling, just AAC.
+  if (picture !== out) execFileSync("ffmpeg", ["-loglevel", "error", "-y", "-i", picture, "-i", score,
+    "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "256k", "-shortest", "-movflags", "+faststart", out]);
+  console.log(`\nwrote ${out}${picture !== out ? " (with the score)" : " (no score: run node film/audio/score.mjs)"}`);
 }
 for (const dir of [frames, profile]) {
   try { fs.rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 }); } catch { /* the OS cleans tmp */ }
