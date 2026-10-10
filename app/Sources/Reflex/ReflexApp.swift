@@ -255,6 +255,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.placeStrip()
                 }
             }.store(in: &bag)
+        // The open rail's window follows what it shows, so its transparent
+        // part never covers the inbox or the apps beside it.
+        RailModel.shared.$footprint.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.placeStrip() }
+        }.store(in: &bag)
         Settings.shared.$showStrip.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeStrip() }
         }.store(in: &bag)
@@ -265,13 +270,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// The tab is a sliver of panel at the edge; the open rail is a wider one.
+    private var shrinkTask: DispatchWorkItem?
+
     private func placeStrip() {
         guard let p = strip else { return }
         let s = (railScreen ?? NSScreen.main)?.visibleFrame ?? Panels.screen
         let y0 = railY ?? s.midY
-        let size: NSSize
+        var size: NSSize
         if RailModel.shared.visible {
-            size = NSSize(width: 430, height: min(s.height, 640))
+            // Fit what the rail shows (plus room for a hovered dot's pill).
+            // Grow at once; shrink only after the old content has faded out.
+            let f = RailModel.shared.footprint
+            size = f == .zero ? NSSize(width: 430, height: min(s.height, 640))
+                : NSSize(width: ceil(f.width), height: min(s.height, ceil(f.height)))
+            let cur = p.frame.size
+            if p.isVisible && (size.width < cur.width - 1 || size.height < cur.height - 1) && cur.width > 31 {
+                let target = size
+                shrinkTask?.cancel()
+                shrinkTask = DispatchWorkItem { [weak self] in
+                    guard let self, RailModel.shared.visible, RailModel.shared.footprint == f else { return }
+                    let y = min(max(y0 - target.height / 2, s.minY), s.maxY - target.height)
+                    p.setFrame(NSRect(x: s.maxX - target.width, y: y, width: target.width, height: target.height), display: true)
+                }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: shrinkTask!)
+                // Keep growing in the other dimension, if any.
+                size = NSSize(width: max(size.width, cur.width), height: max(size.height, cur.height))
+                if size == cur { return }
+            }
         } else {
             let n = CGFloat(max(1, min(8, Rail.active(Store.shared.state.agents).count)))
             size = NSSize(width: 30, height: 42 + 22 * n - 11)
@@ -329,7 +354,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inbox!.isVisible && InboxModel.shared.shown { hideInbox(); return }
         let s = Panels.screen
         let h = min(760, s.height * 0.86)
-        inbox!.setFrame(NSRect(x: s.maxX - 60 - 552, y: s.midY - h / 2, width: 552, height: h), display: true)
+        inbox!.setFrame(NSRect(x: s.maxX - Rail.columnWidth - 552, y: s.midY - h / 2, width: 552, height: h), display: true)
         inbox!.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async { InboxModel.shared.shown = true }
     }

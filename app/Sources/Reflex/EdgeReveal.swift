@@ -15,7 +15,8 @@ import AppKit
 final class EdgeReveal {
     var delay: TimeInterval { Settings.shared.edgeDelay }
     let tabIntent: TimeInterval = 0.12
-    let deadzone = CGSize(width: 96, height: 64)
+    /// How far outside the rail the pointer may stray before it starts closing.
+    let deadzone = CGSize(width: 40, height: 32)
     let grace: TimeInterval = 0.5
     let tolerance: CGFloat = 6
 

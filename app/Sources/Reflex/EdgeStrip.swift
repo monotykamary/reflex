@@ -23,6 +23,8 @@ final class RailModel: ObservableObject {
     /// Beside the buttons: the question, the agent list, or whichever fits.
     enum Panel { case auto, question, agents }
     @Published var panel: Panel = .auto
+    /// The open rail's size, measured; its window is made to fit it.
+    @Published var footprint: CGSize = .zero
 }
 
 // MARK: - Shared pieces
@@ -156,6 +158,9 @@ struct Rail: View {
     var openLog: () -> Void
     var quit: () -> Void
 
+    /// The button column alone: 40 pt buttons, the badge's overhang, the edge margin.
+    static let columnWidth: CGFloat = 60
+
     static func active(_ agents: [AgentInfo]) -> [AgentInfo] {
         agents.filter { ["working", "blocked", "done"].contains($0.status) }
     }
@@ -271,6 +276,11 @@ struct Rail: View {
             column
         }
         .padding(.trailing, 10)
+        .padding(.vertical, 12)
+        .fixedSize()
+        // Room for a hovered dot's status pill, which hangs off the column.
+        .padding(.leading, hoverDot != nil && showing == .auto ? 200 : 0)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { rail.footprint = $0 }
     }
 
     private func toggleAgents() {
@@ -307,7 +317,7 @@ struct Rail: View {
                         .buttonStyle(Pressable())
                         .onHover { h in hoverDot = h ? a.pane : (hoverDot == a.pane ? nil : hoverDot) }
                         .overlay(alignment: .trailing) {
-                            if hoverDot == a.pane && showing != .agents {
+                            if hoverDot == a.pane && showing != .agents && !inbox.shown {
                                 StatusPill(agent: a)
                                     .fixedSize()
                                     .offset(x: -48)
