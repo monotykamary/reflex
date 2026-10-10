@@ -36,6 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairing: KeyPanel?
     private var settings: NSWindow?
     private var popouts: [String: NSWindow] = [:]
+    private var terminals: [String: TerminalSession] = [:]
     private let command = CommandModel()
     private var hotkey: DoubleOption?
     private var bag = Set<AnyCancellable>()
@@ -87,6 +88,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ note: Notification) {
+        // Let go of every terminal, so no attach outlives Reflex (an update
+        // quits and relaunches it) and holds its pane from the next one.
+        for t in terminals.values { t.detach() }
         Daemon.shared.stop()
     }
 
@@ -771,6 +775,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 session.detach()
                 self?.popouts[pane] = nil
+                self?.terminals[pane] = nil
             }
         }
         // Clicking between terminals counts as switching, for the bar's order.
@@ -778,6 +783,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in Recents.shared.touch(pane); Store.shared.seen(pane) }
         }
         popouts[pane] = w
+        terminals[pane] = session
         AppDelegate.activateSelf()
         w.makeKeyAndOrderFront(nil)
         w.makeFirstResponder(session.view)

@@ -43,13 +43,18 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.needsDisplay = true
     }
 
-    /// Attach, retrying quietly: Herdr refuses an attach while a read is in flight.
+    /// Attach, retrying quietly: Herdr refuses an attach while a read is in
+    /// flight. A terminal takes one attached client; if another holds it (a
+    /// window left behind by a Reflex that was killed or crashed), take over:
+    /// this window is where you asked to see it.
     func attach() {
         ended = false
         let script = """
         err=$(mktemp -t reflex-attach)
+        takeover=""
         for i in 1 2 3 4 5 6 7 8 9 10; do
-          herdr agent attach "$1" 2>"$err" && { rm -f "$err"; exit 0; }
+          herdr agent attach "$1" $takeover 2>"$err" && { rm -f "$err"; exit 0; }
+          if grep -q "already has an attached client" "$err"; then takeover=--takeover; continue; fi
           grep -q retry "$err" || { cat "$err"; rm -f "$err"; exit 1; }
           printf '\\033[2J\\033[H'; sleep 0.3
         done
@@ -64,6 +69,9 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     }
 
     func detach() {
+        // The attach runs in its own session (setsid): end the whole group, as
+        // herdr's client outlives a closed terminal and would keep the pane.
+        if attached, let pid = view.process?.shellPid, pid > 0 { kill(-pid, SIGTERM) }
         if attached { view.terminate() }
         attached = false
         TerminalScroll.views[ObjectIdentifier(view)] = nil
