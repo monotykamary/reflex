@@ -25,6 +25,9 @@ final class Settings: ObservableObject {
     @Published var extraFolders: [String] { didSet { d.set(extraFolders, forKey: "extraFolders"); Settings.writeFolders(extraFolders) } }
     @Published var port: Int { didSet { d.set(port, forKey: "port") } }
     @Published var remote: Bool { didSet { d.set(remote, forKey: "remote") } }
+    /// Without Tailscale, the phone remote may use this Wi-Fi only when you
+    /// say so: plain HTTP there, and its token can type into your agents.
+    @Published var remoteLAN: Bool { didSet { d.set(remoteLAN, forKey: "remoteLAN") } }
     @Published var jevProvider: String { didSet { d.set(jevProvider, forKey: "jevProvider") } }
     @Published var jevCredentialCommand: String { didSet { d.set(jevCredentialCommand, forKey: "jevCredentialCommand") } }
     @Published var herdrSession: String { didSet { d.set(herdrSession, forKey: "herdrSession") } }
@@ -55,6 +58,7 @@ final class Settings: ObservableObject {
         extraFolders = d.stringArray(forKey: "extraFolders") ?? []
         port = d.object(forKey: "port") as? Int ?? (Settings.profile == nil ? 47823 : 47851)
         remote = d.bool(forKey: "remote")
+        remoteLAN = d.bool(forKey: "remoteLAN")
         jevProvider = d.string(forKey: "jevProvider") ?? "typesafe"
         jevCredentialCommand = d.string(forKey: "jevCredentialCommand") ?? ""
         herdrSession = d.string(forKey: "herdrSession") ?? ""

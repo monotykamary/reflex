@@ -51,7 +51,10 @@ cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
 cp scripts/reflex-scan.sh scripts/reflex-fork.sh "$app/Contents/Resources/scripts/"
 cp web/* "$app/Contents/Resources/web/"
-version=$(git -C "$root" describe --tags --always 2>/dev/null || echo 0.1.0)
+# CFBundleVersion must be numeric (updaters compare it): the commit count.
+# The commit itself is kept in ReflexCommit.
+build_number=$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)
+commit=$(git -C "$root" rev-parse --short HEAD 2>/dev/null || echo unknown)
 cat > "$app/Contents/Info.plist" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -63,7 +66,8 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundleExecutable</key><string>Reflex</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>0.1.0</string>
-  <key>CFBundleVersion</key><string>$version</string>
+  <key>CFBundleVersion</key><string>$build_number</string>
+  <key>ReflexCommit</key><string>$commit</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>

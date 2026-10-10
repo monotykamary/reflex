@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The hardened runtime with no exceptions: Reflex needs none (no JIT, no
+     plug-ins, no Apple Events). Accessibility is granted by the user. -->
+<plist version="1.0">
+<dict/>
+</plist>

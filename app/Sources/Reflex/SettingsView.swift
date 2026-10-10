@@ -892,7 +892,9 @@ private struct PhonePane: View {
 
     private var reach: String {
         guard s.remote else { return "Off: the phone link doesn't work; only this Mac can reach reflexd." }
-        guard let t = tailnet.current else { return "reflexd listens on your network." }
+        guard let t = tailnet.current else {
+            return s.remoteLAN ? "reflexd listens on this Wi-Fi (unencrypted)." : "Needs Tailscale, or this Wi-Fi allowed below."
+        }
         return t.userspace ? "Reachable from your tailnet only — Tailscale delivers it to this Mac's localhost."
                            : "reflexd listens on your network; your phone reaches it over Tailscale."
     }
@@ -913,6 +915,11 @@ private struct PhonePane: View {
                 } label: {
                     RowLabel("Tailscale", tailnet.current.map { $0.userspace ? "Running headless (userspace networking)." : "Running." }
                              ?? "Install Tailscale on this Mac and your phone for a private link that works anywhere.")
+                }
+                if tailnet.checked && tailnet.current == nil {
+                    Toggle(isOn: Binding(get: { s.remoteLAN }, set: { s.remoteLAN = $0; if s.remote { Daemon.shared.restart() } })) {
+                        RowLabel("Allow on this Wi-Fi", "Unencrypted: anyone on the network could read what passes — including the key that types into your agents. Only on networks you trust.")
+                    }
                 }
             }
             .onAppear { tailnet.refresh() }
@@ -1049,7 +1056,7 @@ private struct AboutPane: View {
                 VStack(spacing: 8) {
                     Image(nsImage: NSApp.applicationIconImage).resizable().frame(width: 84, height: 84)
                     Text("Reflex").font(.system(size: 22, weight: .bold))
-                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–"))")
+                    Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–") · \(Bundle.main.object(forInfoDictionaryKey: "ReflexCommit") as? String ?? "dev"))")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
                     Text("One reflex to every coding agent in herdr. Routing by Jev, decisions in reflexd — written in Bend, with its laws proved.")
                         .font(.system(size: 12.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)

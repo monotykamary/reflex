@@ -41,6 +41,10 @@ final class Pairing: ObservableObject {
             }
             let tailnet = await Task.detached { Tailnet.detect() }.value
             guard self.code == code else { return }
+            if tailnet == nil && !s.remoteLAN {
+                phase = .failed("Your phone can't reach this Mac yet. Install Tailscale on both — private, and it works anywhere — or allow this Wi-Fi in Settings → Phone.")
+                return
+            }
             let host = tailnet?.host ?? Remote.addresses.first ?? "127.0.0.1"
             phase = .ready(url: "http://\(host):\(s.port)/?p=\(code)")
         }

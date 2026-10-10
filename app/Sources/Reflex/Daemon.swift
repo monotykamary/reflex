@@ -67,6 +67,16 @@ final class Daemon: ObservableObject {
         return env
     }
 
+    /// Where reflexd listens. Off: this Mac only. Tailscale in userspace
+    /// mode delivers tailnet traffic to localhost, so localhost still; with a
+    /// Tailscale interface, the network (the phone comes in on it). Without
+    /// Tailscale: the network only when you allowed this Wi-Fi.
+    static func bind(remote: Bool, lan: Bool, tailnet: Tailnet?) -> String {
+        guard remote else { return "127.0.0.1" }
+        if let t = tailnet { return t.userspace ? "127.0.0.1" : "0.0.0.0" }
+        return lan ? "0.0.0.0" : "127.0.0.1"
+    }
+
     private func environment() -> [String: String] {
         let s = Settings.shared
         let r = Daemon.resources
@@ -78,7 +88,7 @@ final class Daemon: ObservableObject {
         // The phone remote: with Tailscale in userspace mode, tailnet traffic
         // already arrives on localhost — stay there, reachable from your
         // tailnet only. Otherwise listen on the network.
-        env["REFLEX_BIND"] = s.remote && !(Tailnet.detect()?.userspace ?? false) ? "0.0.0.0" : "127.0.0.1"
+        env["REFLEX_BIND"] = Daemon.bind(remote: s.remote, lan: s.remoteLAN, tailnet: s.remote ? Tailnet.detect() : nil)
         env["REFLEX_HARNESS"] = s.harness
         // How sure Jev must be to act alone: Reflex's own calibration, not a
         // dial — below it, the bar shows its best guess for you to confirm.
