@@ -136,7 +136,9 @@ Every call except health and pair needs the token.
    (kind, folder, state, title, last lines of output). Folders come from the
    index (`scripts/reflex-scan.sh`: every git repo under your roots with its
    description, recent commit subjects, branch, activity age and how often you
-   started sessions there), ranked by `daemon/Index.bend`: folders you name
+   started sessions there; and their parents: a plain folder holding two to
+   twelve repos, like `~/VCS/work/acme`, described by what it holds, for work
+   that spans them), ranked by `daemon/Index.bend`: folders you name
    (or the start of whose name you write) are pinned first, then lexical
    matches, then recent activity. Earlier conversations are ranked the same
    way. At most 8 folders, 12 agents and 5 earlier conversations are offered.
