@@ -3,6 +3,16 @@
     <channel>
         <title>Reflex</title>
         <item>
+            <title>0.1.2</title>
+            <pubDate>Sun, 11 Oct 2026 02:16:34 +0700</pubDate>
+            <link>https://reflex.farm/</link>
+            <sparkle:version>65</sparkle:version>
+            <sparkle:shortVersionString>0.1.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.2/Reflex-0.1.2.dmg" length="4556448" type="application/octet-stream" sparkle:edSignature="04yNgNlQwAjQSWugtWHf7l8kh5MMkwR23c02zfC0EFmSEObNOT/iCpIfuNnNBfwNHAgkwsvbYm8RnDeBe4NoAg=="/>
+        </item>
+        <item>
             <title>0.1.1</title>
             <pubDate>Sun, 11 Oct 2026 00:27:43 +0700</pubDate>
             <link>https://reflex.farm/</link>
