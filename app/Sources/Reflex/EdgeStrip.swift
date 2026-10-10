@@ -111,14 +111,17 @@ private struct RoundButton<Label: View>: View {
     var help: String
     var action: () -> Void
     @ViewBuilder var label: Label
+    @State private var hover = false
     var body: some View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
+                .background(Color.white.opacity(hover ? 0.1 : 0), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
         .glassEffect(.rail.interactive(), in: Circle())
+        .onHover { h in withAnimation(Motion.micro) { hover = h } }
         .help(help)
     }
 }
@@ -281,8 +284,13 @@ struct Rail: View {
 
     private func toggleAgents() {
         if inbox.shown { InboxModel.shared.shown = false }
-        rail.panel = side == .agents ? .auto : .agents
-        rail.hoverDot = nil
+        let next: RailModel.Panel = side == .agents ? .auto : .agents
+        // The pill goes at once, unanimated, so it never sits over the list
+        // as the list comes in; then the list animates in on its own.
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { rail.hoverDot = nil }
+        DispatchQueue.main.async { rail.panel = next }
     }
 
     private var column: some View {
@@ -309,11 +317,25 @@ struct Rail: View {
                         Button(action: toggleAgents) {
                             AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
                                 .frame(width: 40, height: 28)
+                                .background {
+                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
+                                        .fill(Color.white.opacity(rail.hoverDot == a.pane ? 0.1 : 0))
+                                        .padding(.horizontal, 5)
+                                }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(Pressable())
+                        .animation(Motion.micro, value: rail.hoverDot == a.pane)
                         .onHover { h in
-                            rail.hoverDot = h ? a.pane : (rail.hoverDot == a.pane ? nil : rail.hoverDot)
+                            if h {
+                                rail.hoverDot = a.pane
+                            } else {
+                                // A beat before letting go: sliding to the next dot
+                                // moves the pill instead of dropping and redrawing it.
+                                DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+                                    if rail.hoverDot == a.pane { rail.hoverDot = nil }
+                                }
+                            }
                         }
                         .accessibilityLabel("\(a.kind) in \(a.folder), \(StatusPill.word(a.status))")
                     }
@@ -421,8 +443,11 @@ struct RailSide: View {
                 Spacer(minLength: 0)
             }
             .frame(height: max(26, rail.columnSize.height - 24), alignment: .top)
-            .transition(.opacity.combined(with: .offset(x: reduce ? 0 : 6)))
-            .animation(Motion.micro, value: i)
+            .transition(.asymmetric(
+                insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 0.96, y: 0, blur: 3), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))
+                    .combined(with: .offset(x: reduce ? 0 : 6)),
+                removal: .opacity.animation(Motion.exit)))
+            .animation(Motion.swap, value: i)
         case .none:
             Color.clear.frame(width: 0, height: 0)
         }

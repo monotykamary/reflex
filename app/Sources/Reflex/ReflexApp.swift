@@ -298,6 +298,38 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard id != nil, Settings.shared.surfaceQuestions else { return }
             DispatchQueue.main.async { self?.edge.surface() }
         }.store(in: &bag)
+        setupClickAway()
+    }
+
+    private var clickMonitors: [Any] = []
+
+    /// A click anywhere else closes the inbox, and the rail when it lands
+    /// beyond the rail's dead zone — each with its usual exit. (Watching
+    /// mouse clicks in other apps needs no permission.)
+    private func setupClickAway() {
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown]
+        clickMonitors.append(NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] _ in
+            let p = NSEvent.mouseLocation
+            Task { @MainActor in self?.clickAway(at: p, in: nil) }
+        } as Any)
+        clickMonitors.append(NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] e in
+            let p = NSEvent.mouseLocation
+            let w = e.window
+            Task { @MainActor in self?.clickAway(at: p, in: w) }
+            return e
+        } as Any)
+    }
+
+    private func clickAway(at p: NSPoint, in window: NSWindow?) {
+        let mine = [strip, side, inbox].compactMap { $0 }
+        if let window, mine.contains(where: { $0 === window }) { return }
+        if InboxModel.shared.shown, let ib = inbox, !ib.frame.contains(p) {
+            hideInbox()
+        }
+        if RailModel.shared.visible && !Settings.shared.railAlways && !edge.near(p) {
+            // The click is activating whatever it landed on; leave focus to it.
+            edge.hide(returnFocus: false)
+        }
     }
 
     private var side: KeyPanel?

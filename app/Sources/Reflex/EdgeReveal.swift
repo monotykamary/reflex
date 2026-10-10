@@ -17,6 +17,12 @@ final class EdgeReveal {
     let tabIntent: TimeInterval = 0.12
     /// How far outside the rail the pointer may stray before it starts closing.
     let deadzone = CGSize(width: 40, height: 32)
+
+    /// Whether a point is on the open rail or within its dead zone.
+    func near(_ p: NSPoint) -> Bool {
+        [panel(), side()].compactMap { $0 }
+            .contains { $0.frame.insetBy(dx: -deadzone.width, dy: -deadzone.height).contains(p) }
+    }
     let grace: TimeInterval = 0.5
     let tolerance: CGFloat = 6
 
