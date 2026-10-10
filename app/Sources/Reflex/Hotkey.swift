@@ -24,6 +24,14 @@ final class DoubleOption {
         AXIsProcessTrustedWithOptions([key: true] as CFDictionary)
     }
 
+    /// Global monitors registered before Accessibility was granted stay deaf;
+    /// register them again once it is.
+    func restart() {
+        monitors.forEach { NSEvent.removeMonitor($0) }
+        monitors.removeAll()
+        start()
+    }
+
     func start() {
         let flags: (NSEvent) -> Void = { [weak self] e in self?.flags(e) }
         let key: (NSEvent) -> Void = { [weak self] _ in self?.dirty = true; self?.lastTap = 0 }

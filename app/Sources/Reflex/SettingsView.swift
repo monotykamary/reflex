@@ -705,7 +705,7 @@ private struct SetupPane: View {
             }
             Section("Keys") {
                 CheckRow(ok: o.trusted, title: "Accessibility", detail: o.trusted ? "⌥⌥ works in every app." : "Lets Reflex hear ⌥⌥ in other apps.") {
-                    Button("Allow…") { DoubleOption.requestTrust() }
+                    Button("Allow…") { AccessGuide.shared.start() }
                 }
             }
             Section {

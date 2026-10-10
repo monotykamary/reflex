@@ -46,6 +46,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.toggleBar()
         }
         hotkey?.start()
+        AccessGuide.shared.onGranted = { [weak self] in
+            self?.hotkey?.restart()
+            Onboarding.shared.refresh()
+            SetupState.shared.update()
+            // Back to where the user asked for it.
+            if let w = self?.onboarding, w.isVisible { NSApp.activate(); w.makeKeyAndOrderFront(nil) }
+            else if let w = self?.settings, w.isVisible { NSApp.activate(); w.makeKeyAndOrderFront(nil) }
+        }
         if !Settings.shared.onboarded && ProcessInfo.processInfo.environment["REFLEX_SHOW"] == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
         }
@@ -93,6 +101,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.command.submit(agents: Store.shared.state.agents) }
                 }
             case "inbox": self.showInbox()
+            case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
             case "agents":
                 if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }

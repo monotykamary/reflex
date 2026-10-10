@@ -438,14 +438,10 @@ struct OnboardingView: View {
         case .keys:
             VStack(alignment: .leading, spacing: 10) {
                 Check(ok: model.trusted, title: "Accessibility", detail: model.trusted ? "⌥⌥ works everywhere" : "needed to hear ⌥⌥ in other apps") {
-                    if !model.trusted { GlassAction("Allow…") { DoubleOption.requestTrust() } }
+                    if !model.trusted { GlassAction("Allow…") { AccessGuide.shared.start() } }
                 }
                 Check(ok: model.triedHotkey, title: "Double-tap ⌥", detail: model.triedHotkey ? "that's the one" : "try it now") { EmptyView() }
                 Check(ok: model.triedEdge, title: "Rest on the right edge", detail: model.triedEdge ? "there they are" : "move to the edge and hold still for half a second") { EmptyView() }
-                if model.trusted && !model.triedHotkey {
-                    Text("Just allowed it? Relaunch so macOS hands Reflex the keys.")
-                        .font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.5))
-                }
             }
         case .done:
             VStack(alignment: .leading, spacing: 9) {
