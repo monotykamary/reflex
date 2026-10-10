@@ -318,6 +318,17 @@ struct Rail: View {
                         .animation(Motion.micro, value: hoverDot)
                         .accessibilityLabel("\(a.kind) in \(a.folder), \(StatusPill.word(a.status))")
                     }
+                    if store.state.agents.count > 10 {
+                        Button(action: toggleAgents) {
+                            Text("+\(store.state.agents.count - 10)")
+                                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                                .foregroundStyle(Ink.dim)
+                                .contentTransition(.numericText(value: Double(store.state.agents.count)))
+                                .frame(width: 40, height: 20)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(Pressable())
+                    }
                 }
                 .padding(.vertical, 6)
                 .glassEffect(.rail.interactive(), in: Capsule())
@@ -391,13 +402,25 @@ private struct AgentList: View {
     var reveal: (AgentInfo) -> Void
     var showQuestion: () -> Void
     @State private var rowsHeight: CGFloat = 0
+    @State private var query = ""
+
+    /// Past this many agents a filter appears; the list is built for dozens.
+    static let filterAt = 12
+
+    private var shown: [AgentInfo] {
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return agents }
+        return agents.filter { a in
+            [a.title, a.folder, a.kind, a.status].contains { $0.localizedCaseInsensitiveContains(q) }
+        }
+    }
 
     /// Folders in order of first appearance, waiting agents' folders first.
     private var groups: [(String, [AgentInfo])] {
         let rank: [String: Int] = ["blocked": 0, "working": 1, "done": 2]
         var order: [String] = []
         var by: [String: [AgentInfo]] = [:]
-        for a in agents.sorted(by: { (rank[$0.status] ?? 3) < (rank[$1.status] ?? 3) }) {
+        for a in shown.sorted(by: { (rank[$0.status] ?? 3) < (rank[$1.status] ?? 3) }) {
             if by[a.folder] == nil { order.append(a.folder) }
             by[a.folder, default: []].append(a)
         }
@@ -407,64 +430,77 @@ private struct AgentList: View {
     private var summary: String {
         let w = agents.filter { $0.status == "working" }.count
         let b = agents.filter { $0.status == "blocked" }.count
-        var parts: [String] = []
+        var parts = [agents.count == 1 ? "1 agent" : "\(agents.count) agents"]
         if w > 0 { parts.append("\(w) working") }
         if b > 0 { parts.append("\(b) waiting") }
-        return parts.isEmpty ? (agents.count == 1 ? "1 agent" : "\(agents.count) agents") : parts.joined(separator: " · ")
+        return parts.joined(separator: " · ")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 8) {
-                Text("Agents").font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text)
-                Text(summary).font(.system(size: 11.5)).foregroundStyle(Ink.dim)
+            HStack(spacing: 6) {
+                Text(summary).font(.system(size: 11, weight: .medium)).foregroundStyle(Ink.dim)
                     .contentTransition(.numericText())
+                    .lineLimit(1)
                 Spacer(minLength: 4)
                 if waiting > 0 {
                     Button(action: showQuestion) {
                         HStack(spacing: 4) {
-                            Circle().fill(Tone.blocked).frame(width: 6, height: 6)
+                            Circle().fill(Tone.blocked).frame(width: 5, height: 5)
                             Text(waiting == 1 ? "1 question" : "\(waiting) questions")
-                            Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                            Image(systemName: "chevron.right").font(.system(size: 7, weight: .bold))
                         }
-                        .font(.system(size: 11, weight: .medium))
+                        .font(.system(size: 10.5, weight: .medium))
                         .foregroundStyle(Ink.text)
-                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .padding(.horizontal, 7).padding(.vertical, 3)
                         .background(Tone.blocked.opacity(0.18), in: Capsule())
                     }
                     .buttonStyle(Pressable())
                     .fixedSize()
                 }
             }
-            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+            .padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 3)
+
+            if agents.count > AgentList.filterAt {
+                HStack(spacing: 5) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 10, weight: .medium)).foregroundStyle(Ink.dim)
+                    TextField("", text: $query, prompt: Text("Filter \(agents.count) agents").foregroundStyle(Ink.dim))
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 11.5))
+                }
+                .padding(.horizontal, 8).padding(.vertical, 4)
+                .background(Color.white.opacity(0.07), in: Capsule())
+                .padding(.horizontal, 8).padding(.bottom, 3)
+            }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 2) {
+                LazyVStack(alignment: .leading, spacing: 0) {
                     ForEach(groups, id: \.0) { folder, list in
                         Text(folder.uppercased())
-                            .font(.system(size: 10, weight: .semibold)).tracking(0.9)
-                            .foregroundStyle(Ink.dim.opacity(0.8))
+                            .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
+                            .foregroundStyle(Ink.dim.opacity(0.75))
                             .lineLimit(1)
-                            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 2)
+                            .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
                         ForEach(list) { a in
                             AgentRow(agent: a, pulse: pulses[a.pane] ?? 0,
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                     }
                 }
-                .padding(.horizontal, 6).padding(.bottom, 8)
+                .padding(.horizontal, 4).padding(.bottom, 6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
             }
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
             // As tall as the rows, up to a point; then it scrolls.
-            .frame(height: min(max(rowsHeight, 44), 500))
+            .frame(height: min(max(rowsHeight, 30), 520))
         }
-        .frame(width: 356)
-        .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .frame(width: 340)
+        .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
+/// One line of title, one of state — about 30 pt, so dozens fit.
 private struct AgentRow: View {
     var agent: AgentInfo
     var pulse: Int
@@ -476,33 +512,31 @@ private struct AgentRow: View {
     private var title: String { agent.title.isEmpty ? "\(agent.kind) · \(agent.folder)" : agent.title }
 
     private var subtitle: String {
-        let state: String
         switch agent.status {
-        case "working": state = "working"
-        case "blocked": state = "needs you"
-        case "done": state = "done"
-        default: state = "idle"
+        case "working": return "\(agent.kind) · working"
+        case "blocked": return "\(agent.kind) · needs you"
+        case "done": return "\(agent.kind) · done, unread"
+        default: return "\(agent.kind) · idle"
         }
-        return "\(agent.kind) · \(state) · \(agent.place)"
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            AgentGlyph(status: agent.status, size: 12, pulse: pulse).frame(width: 16)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
-                Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Ink.dim).lineLimit(1).truncationMode(.middle)
+        HStack(spacing: 8) {
+            AgentGlyph(status: agent.status, size: 9, pulse: pulse).frame(width: 12)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
+                Text(subtitle).font(.system(size: 10.5)).foregroundStyle(Ink.dim).lineLimit(1)
             }
-            Spacer(minLength: 6)
-            HStack(spacing: 2) {
+            Spacer(minLength: 4)
+            HStack(spacing: 0) {
                 action("terminal", "Open terminal", open)
                 action("sparkle", "Message this agent", ask)
                 action("arrow.up.forward.app", "Show in herdr", reveal)
             }
-            .opacity(hover ? 1 : 0.55)
+            .opacity(hover ? 1 : 0.45)
         }
-        .padding(.horizontal, 8).padding(.vertical, 7)
-        .background(hover ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(hover ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
         .onHover { h in withAnimation(Motion.micro) { hover = h } }
@@ -511,8 +545,8 @@ private struct AgentRow: View {
 
     private func action(_ symbol: String, _ help: String, _ run: @escaping () -> Void) -> some View {
         Button(action: run) {
-            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(Ink.text)
-                .frame(width: 26, height: 26)
+            Image(systemName: symbol).font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.text)
+                .frame(width: 22, height: 22)
                 .contentShape(Rectangle())
         }
         .buttonStyle(Pressable())
