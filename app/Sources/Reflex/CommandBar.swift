@@ -681,7 +681,8 @@ struct CommandBar: View {
                                 .foregroundStyle(.tertiary)
                                 .lineLimit(1)
                                 .id(placeholder)
-                                .transition(.blurSwap)
+                                // Gone the instant you type; a new placeholder still blurs in.
+                                .transition(.asymmetric(insertion: .blurSwap, removal: .identity))
                                 .allowsHitTesting(false)
                         }
                     }

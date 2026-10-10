@@ -103,6 +103,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.toggleBar()
                 // Dev: fill or pin without sending, to check the bar's layout.
                 let env = ProcessInfo.processInfo.environment
+                // Dev: type a sequence ("sd|s||sd"), one step every 0.7 s.
+                if let seq = env["REFLEX_DEMO_SEQ"] {
+                    Task {
+                        for step in seq.components(separatedBy: "|") {
+                            self.command.text = step
+                            try? await Task.sleep(for: .milliseconds(700))
+                        }
+                    }
+                }
                 if let t = env["REFLEX_DEMO_TYPED"] {
                     Task {
                         for _ in 0..<40 where Store.shared.state.folders == 0 && !t.hasPrefix("/") {
@@ -327,11 +336,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         InboxModel.shared.$size.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeInbox() }
         }.store(in: &bag)
-        // In the same turn as the new size: a frame late, the content would
-        // be taller than its window for a moment and appear to jump.
-        command.$size.removeDuplicates().sink { [weak self] size in
-            if self?.bar?.isVisible == true { self?.placeBar(size) }
-        }.store(in: &bag)
+        // The bar's window never resizes while open (growing it downward made
+        // macOS draw the old content bottom-anchored for a frame, and the bar
+        // dropped then slid back). Instead the clear part below the bar lets
+        // clicks through: the window only takes the mouse over the bar itself.
+        barMouse = Timer.scheduledTimer(withTimeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.updateBarMouse() }
+        }
     }
 
     private var clickMonitors: [Any] = []
@@ -475,11 +486,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return (s.minY + s.height * 0.78, s.midX)
     }
 
-    private func placeBar(_ measured: CGSize? = nil) {
+    /// Tall enough for the longest list; the bar sits at its top.
+    static let barHeight: CGFloat = 600
+
+    private var barMouse: Timer?
+
+    private func placeBar() {
         guard let b = bar else { return }
-        let m = measured ?? command.size
-        let size = m == .zero ? NSSize(width: 720, height: 220) : m
-        Panels.fit(b, to: size, top: barTop.top, midX: barTop.midX)
+        let top = barTop.top.rounded()
+        b.setFrame(NSRect(x: (barTop.midX - 360).rounded(), y: top - AppDelegate.barHeight,
+                          width: 720, height: AppDelegate.barHeight), display: true)
+    }
+
+    /// Over the visible bar the window takes the mouse; elsewhere clicks go
+    /// through to whatever is underneath.
+    private func updateBarMouse() {
+        guard let b = bar, b.isVisible else { return }
+        let f = b.frame
+        let h = command.size == .zero ? f.height : min(f.height, command.size.height)
+        let visible = NSRect(x: f.minX, y: f.maxY - h, width: f.width, height: h)
+        let over = visible.contains(NSEvent.mouseLocation)
+        if b.ignoresMouseEvents == over { b.ignoresMouseEvents = !over }
     }
 
     /// From the rail: close it without handing the keys back, then open the
