@@ -9,6 +9,14 @@ import SwiftUI
 @main
 struct ReflexMain {
     static func main() {
+        // Launched from inside a herdr pane (`open -a Reflex`, a dev build),
+        // Reflex inherits that pane's HERDR_* variables, and every herdr it
+        // starts — the client opened in Ghostty, the terminal attaches —
+        // would think it is nested and refuse. Reflex is never inside a pane.
+        // (HERDR_SESSION stays: it names which herdr to talk to.)
+        for key in ProcessInfo.processInfo.environment.keys where key.hasPrefix("HERDR_") && key != "HERDR_SESSION" {
+            unsetenv(key)
+        }
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
