@@ -754,6 +754,14 @@ struct CommandBar: View {
             // Send, then open the terminal (in search, ⏎ already opens it).
             if model.mode == .search { model.submit() } else { model.sendAndOpen() }
             return .handled
+        case .return where press.modifiers.contains(.option):
+            // A new line in a long request.
+            return .ignored
+        case .return:
+            // A multi-line field takes Return as a new line and never submits;
+            // ⏎ is the bar's main key, so it is handled here.
+            model.submit()
+            return .handled
         case .delete where model.text.isEmpty: return model.dropToken() ? .handled : .ignored
         default: break
         }
