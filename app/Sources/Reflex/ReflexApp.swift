@@ -84,6 +84,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             switch show {
             case "bar":
                 self.toggleBar()
+                // Dev: fill or pin without sending, to check the bar's layout.
+                let env = ProcessInfo.processInfo.environment
+                if let t = env["REFLEX_DEMO_TYPED"] { self.command.text = t }
+                if env["REFLEX_DEMO_PIN"] != nil { self.command.target = Store.shared.state.agents.first?.pane }
                 if let t = ProcessInfo.processInfo.environment["REFLEX_DEMO_TEXT"] {
                     self.command.text = t
                     DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.command.submit(agents: Store.shared.state.agents) }

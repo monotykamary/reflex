@@ -202,6 +202,8 @@ struct CommandBar: View {
                     .opacity(model.phase == .typing ? 1 : 0.45)
                 trailing
             }
+            // One line tall whether empty, typed in or pinned; only more lines grow it.
+            .frame(minHeight: CommandBar.lineHeight)
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
             if model.phase == .routing {
@@ -209,6 +211,9 @@ struct CommandBar: View {
             }
         }
     }
+
+    /// The field's one-line height (Type.field), which the pin chip fits inside.
+    static let lineHeight: CGFloat = 28
 
     private var placeholder: String {
         pinned.map { "Message \($0.kind) · \($0.folder)…" } ?? "Ask your agents…"
@@ -223,7 +228,8 @@ struct CommandBar: View {
                     .id(a.pane)
                     .transition(.blurSwap)
             }
-            .padding(.horizontal, 10).padding(.vertical, 5)
+            .padding(.horizontal, 10)
+            .frame(height: CommandBar.lineHeight - 2)
             .glassEffect(.regular.tint(Tone.of(a.status).opacity(0.25)), in: Capsule())
             .glassEffectID("pin", in: glass)
             .transition(.surface(reduce: reduce))
