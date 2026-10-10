@@ -327,8 +327,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         InboxModel.shared.$size.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeInbox() }
         }.store(in: &bag)
-        command.$size.removeDuplicates().sink { [weak self] _ in
-            DispatchQueue.main.async { if self?.bar?.isVisible == true { self?.placeBar() } }
+        // In the same turn as the new size: a frame late, the content would
+        // be taller than its window for a moment and appear to jump.
+        command.$size.removeDuplicates().sink { [weak self] size in
+            if self?.bar?.isVisible == true { self?.placeBar(size) }
         }.store(in: &bag)
     }
 
@@ -473,9 +475,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return (s.minY + s.height * 0.78, s.midX)
     }
 
-    private func placeBar() {
+    private func placeBar(_ measured: CGSize? = nil) {
         guard let b = bar else { return }
-        let size = command.size == .zero ? NSSize(width: 720, height: 220) : command.size
+        let m = measured ?? command.size
+        let size = m == .zero ? NSSize(width: 720, height: 220) : m
         Panels.fit(b, to: size, top: barTop.top, midX: barTop.midX)
     }
 

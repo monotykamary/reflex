@@ -629,6 +629,8 @@ struct CommandBar: View {
                 .raySurface(RoundedRectangle(cornerRadius: 24, style: .continuous))
                 .modifier(Shake(animatableData: model.shake))
             list
+                // The footer's tint must not square off the rounded corners.
+                .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
         }
         .frame(width: 680)
@@ -689,6 +691,9 @@ struct CommandBar: View {
             .frame(minHeight: CommandBar.lineHeight)
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
+        }
+        // Over the field's bottom edge, taking no room: nothing shifts when Jev starts reading.
+        .overlay(alignment: .bottom) {
             if model.thinking {
                 ThinkingLine().frame(height: 2).padding(.horizontal, 24).transition(.opacity)
             }

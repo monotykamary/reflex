@@ -53,8 +53,10 @@ enum Panels {
     /// has had time to animate away. A window larger than what it shows would
     /// swallow clicks meant for the apps beneath its transparent part.
     @MainActor static func fit(_ w: NSWindow, to size: NSSize, top: CGFloat, midX: CGFloat) {
-        let target = NSRect(x: (midX - size.width / 2).rounded(), y: (top - size.height).rounded(),
-                            width: ceil(size.width), height: ceil(size.height))
+        // Whole points, and the top edge exactly where it was: rounding the
+        // origin and the height separately would let the top hop by a point.
+        let width = ceil(size.width), height = ceil(size.height)
+        let target = NSRect(x: (midX - width / 2).rounded(), y: top.rounded() - height, width: width, height: height)
         let cur = w.frame
         fitTickets[ObjectIdentifier(w), default: 0] += 1
         let ticket = fitTickets[ObjectIdentifier(w)]
