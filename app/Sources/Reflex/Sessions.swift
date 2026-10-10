@@ -51,7 +51,7 @@ enum Sessions {
             how = "attach"
         }
         let d = try await Client.local.resume(p, mode: how, text: text)
-        if open { openWhenStarted(d.id) }
+        watchStart(d.id, cwd: p.cwd, open: open)
         return d
     }
 
@@ -74,18 +74,42 @@ enum Sessions {
     /// A new session's pane is known once it has started ("started rx1-42 in
     /// w7:p1", "resumed … in w7:p1"): open its terminal then. Gives up quietly
     /// after half a minute.
-    @MainActor static func openWhenStarted(_ id: Int) {
+    /// A session being started (or brought back) for you. Its terminal opens
+    /// as soon as its pane exists when you asked to watch (⌘⏎) — or, either
+    /// way, the moment it stops to ask you something before it can take your
+    /// request (Claude's "Do you trust this folder?"): your request waits on
+    /// that answer. Watches as long as reflexd waits (about ten minutes).
+    @MainActor static func watchStart(_ id: Int, cwd: String, open: Bool) {
+        let before = Set(Store.shared.state.agents.map(\.pane))
+        let want = resolved(cwd)
         Task {
-            for _ in 0..<60 {
+            var shown = false
+            for _ in 0..<1300 {
                 try? await Task.sleep(for: .milliseconds(500))
                 await Store.shared.refresh()
-                guard let r = Store.shared.state.receipts.first(where: { $0.id == id }) else { continue }
-                if r.ok, let range = r.detail.range(of: " in ", options: .backwards) {
+                let s = Store.shared.state
+                if !shown, let a = s.agents.first(where: { !before.contains($0.pane) && resolved($0.cwd) == want }),
+                   open || a.status == "blocked" {
+                    AppDelegate.current?.showPane(a.pane)
+                    shown = true
+                }
+                guard let r = s.receipts.first(where: { $0.id == id }) else { continue }
+                // Started: if it was never seen as a new pane (another folder
+                // spelling), the receipt still names it.
+                if !shown, open, r.ok, let range = r.detail.range(of: " in ", options: .backwards) {
                     AppDelegate.current?.showPane(String(r.detail[range.upperBound...]).trimmingCharacters(in: .whitespaces))
                 }
                 return
             }
         }
+    }
+
+    /// One spelling per folder: symlinks resolved (/tmp is /private/tmp), no trailing slash.
+    private static func resolved(_ path: String) -> String {
+        var p = (path as NSString).resolvingSymlinksInPath
+        if p.hasPrefix("/tmp/") || p == "/tmp" { p = "/private" + p }
+        while p.count > 1 && p.hasSuffix("/") { p.removeLast() }
+        return p
     }
 
     /// End a session: herdr closes its pane and the agent in it; an open

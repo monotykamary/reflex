@@ -13,7 +13,8 @@ final class Daemon: ObservableObject {
     private var process: Process?
     private var stopping = false
     private var restarts = 0
-    private lazy var loginPath: String = Daemon.readLoginPath()
+    /// REFLEX_PATH (testing a profile): exactly this PATH, e.g. one without herdr.
+    private lazy var loginPath: String = ProcessInfo.processInfo.environment["REFLEX_PATH"] ?? Daemon.readLoginPath()
 
     var baseURL: URL { URL(string: "http://127.0.0.1:\(Settings.shared.port)")! }
     var token: String { Settings.daemonToken }

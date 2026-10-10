@@ -75,6 +75,19 @@ final class Onboarding: ObservableObject {
 
     // MARK: Checks
 
+    /// Jev's failures, in words a first-time user can act on.
+    static func plain(_ error: String?) -> String {
+        let e = (error ?? "").lowercased()
+        if e.contains("missing provider key") || e.contains("credential") || e.contains("api key") || e.contains("401") || e.contains("unauthorized") {
+            return "No Jev key yet — use the one pi has, or paste one below."
+        }
+        if e.contains("no response") || e.contains("not found") || e.contains("no such file") {
+            return "jev-fabric isn't answering — install it above, then Test."
+        }
+        if e.contains("timeout") || e.contains("timed out") { return "Jev took too long — check your connection and try again." }
+        return error.map { $0.isEmpty ? "Jev didn't answer." : $0 } ?? "Jev didn't answer."
+    }
+
     private static func which(_ name: String) -> Bool {
         let path = Daemon.shared.childEnvironment()["PATH"] ?? ""
         return path.split(separator: ":").contains { FileManager.default.isExecutableFile(atPath: "\($0)/\(name)") }
@@ -129,7 +142,7 @@ final class Onboarding: ObservableObject {
                     let label = route.label ?? route.title ?? (route.decision == "choose" ? "you pick: 1, 2 or 3" : route.decision)
                     next = .routed(label: label.bare, why: route.why ?? (route.decision == "choose" ? "not sure enough — it would ask you" : ""), ms: ms())
                 } else {
-                    next = .failed(error ?? "no answer")
+                    next = .failed(Onboarding.plain(error))
                 }
                 withAnimation(Motion.arrive) { trial = next }
             } catch {
@@ -189,7 +202,7 @@ final class Onboarding: ObservableObject {
             struct R: Decodable { var ok: Bool; var ms: Int?; var error: String? }
             do {
                 let r = try await Client.local.post("/api/jev/ping", [:], as: R.self)
-                withAnimation(Motion.enter) { ping = r.ok ? .ok(r.ms ?? 0) : .failed(r.error ?? "no answer") }
+                withAnimation(Motion.enter) { ping = r.ok ? .ok(r.ms ?? 0) : .failed(Onboarding.plain(r.error)) }
             } catch {
                 withAnimation(Motion.enter) { ping = .failed("reflexd is not answering yet") }
             }

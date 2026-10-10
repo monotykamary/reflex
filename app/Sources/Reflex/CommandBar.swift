@@ -77,6 +77,14 @@ final class CommandModel: ObservableObject {
     }
 
     @Published var text = "" { didSet { if text != oldValue { textChanged() } } }
+    /// What the list is built from: the text, about 90 ms behind while you
+    /// type. The field shows every keystroke at once; the list (sessions,
+    /// earlier conversations, folders, Jev) catches up when you pause, so fast
+    /// typing never waits on it. ⏎ catches up first.
+    @Published private(set) var listText = ""
+    private var listDebounce: Task<Void, Never>?
+    /// Bumped when Jev's answer lands: the one list change that animates.
+    private(set) var jevStamp = 0
     @Published var phase: Phase = .typing
     @Published var focusTick = 0
     @Published var shake: CGFloat = 0
@@ -149,8 +157,10 @@ final class CommandModel: ObservableObject {
 
     func reset() {
         debounce?.cancel()
+        listDebounce?.cancel()
         generation += 1
         text = ""
+        listText = ""
         attachments = []
         phase = .typing
         harness = nil
@@ -174,7 +184,15 @@ final class CommandModel: ObservableObject {
     // MARK: Words
 
     /// The request, trimmed.
-    var request: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
+    var request: String { listText.trimmingCharacters(in: .whitespacesAndNewlines) }
+
+    /// The list now: no waiting for the pause (before ⏎ acts on it).
+    func catchUp() {
+        guard listText != text else { return }
+        listDebounce?.cancel()
+        listText = text
+        schedule()
+    }
 
     /// While typing "/p…" (no space yet), the list is commands.
     var commandQuery: String? {
@@ -271,7 +289,14 @@ final class CommandModel: ObservableObject {
         }
         if naming { naming = false }
         if case .failed = phase { phase = .typing }
-        schedule()
+        listDebounce?.cancel()
+        // Cleared, or a slash command: at once. Typing: after a short pause.
+        if text.isEmpty || text.hasPrefix("/") { catchUp(); return }
+        listDebounce = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(90))
+            guard !Task.isCancelled else { return }
+            self?.catchUp()
+        }
     }
 
     func apply(_ c: SlashCommand) {
@@ -322,13 +347,14 @@ final class CommandModel: ObservableObject {
             return
         }
         debounce = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(280))
+            try? await Task.sleep(for: .milliseconds(200))
             guard !Task.isCancelled, let self, self.generation == gen else { return }
             self.thinking = true
             let r = try? await Client.local.candidates(words, harness: h)
             guard self.generation == gen else { return }
             self.thinking = false
             self.jev = r ?? CandidatesResponse(ok: false, error: "reflexd did not answer")
+            self.jevStamp += 1
             self.jevText = words
             self.settle()
             if self.sendWhenReady {
@@ -390,7 +416,10 @@ final class CommandModel: ObservableObject {
     var pick: String? {
         guard mode == .ask else { return nil }
         if newForced || (keywordHit && !request.isEmpty) { return "new" }
-        guard !request.isEmpty, jevText == request, let r = jev, r.ok else { return nil }
+        guard !request.isEmpty, jevText == request, let r = jev else { return nil }
+        // No Jev (not set up, or not answering): the local index's top folder,
+        // when your words name it; otherwise you choose.
+        guard r.ok else { return localNamed.map { "f:" + $0 } }
         if let a = r.decision?.action, r.decision?.decision == "go" {
             if a.type == "resume", let x = a.session { return "r:" + x }
             if let p = a.pane { return "s:" + p }
@@ -409,10 +438,39 @@ final class CommandModel: ObservableObject {
         return nil
     }
 
+    /// The local index's best folder, if the request names it ("in reflex",
+    /// "talkyform" for talkyform-private).
+    private var localNamed: String? {
+        guard let f = local.first else { return nil }
+        let name = f.name.lowercased()
+        let words = request.lowercased().split { !($0.isLetter || $0.isNumber || "-._".contains($0)) }.map(String.init)
+        return words.contains { $0 == name || name.hasPrefix($0 + "-") || name.hasPrefix($0 + ".") || name.hasPrefix($0 + "_") } ? f.path : nil
+    }
+
     /// Below the threshold, Jev's pick is a suggestion you confirm.
     var unsure: Bool { pick != nil && !confident }
 
+    /// Built once per change of what they depend on, not on every read: the
+    /// list, its highlight, the footer and Jev's pick all read the rows, and
+    /// rebuilding them (sorting sessions, searching earlier conversations)
+    /// several times a keystroke was what made typing feel heavy.
     var rows: [Candidate] {
+        let s = Store.shared.state
+        var h = Hasher()
+        h.combine(text); h.combine(listText); h.combine(harness); h.combine(resumeOnly); h.combine(sideForced)
+        h.combine(newForced); h.combine(chosenFolder); h.combine(jevText); h.combine(jevStamp)
+        h.combine(local.map(\.path)); h.combine(attachments.count); h.combine(s.folders > 0)
+        h.combine(s.agents.map { $0.pane + $0.status + $0.title })
+        h.combine(SessionArchive.shared.sessions.count); h.combine(Recents.shared.sorted(s.agents).map(\.pane))
+        let key = h.finalize()
+        if let c = rowsCache, c.key == key { return c.rows }
+        let built = buildRows()
+        rowsCache = (key, built)
+        return built
+    }
+    private var rowsCache: (key: Int, rows: [Candidate])?
+
+    private func buildRows() -> [Candidate] {
         if let q = commandQuery {
             return SlashCommand.all.filter { q.isEmpty || $0.token.dropFirst().hasPrefix(q) }.map {
                 Candidate(id: "c:" + $0.token, kind: .command, title: $0.token, detail: $0.help, command: $0)
@@ -528,6 +586,7 @@ final class CommandModel: ObservableObject {
     /// ⏎: send to the selected row. Before Jev has answered, wait for it —
     /// then go if it is sure, else show its pick to confirm.
     func submit() {
+        catchUp()
         guard phase == .typing || isFailed else { return }
         if selected?.kind == .command, let c = selected?.command { apply(c); return }
         if selected?.kind == .chooseFolder { chooseFolder(); return }
@@ -597,12 +656,14 @@ final class CommandModel: ObservableObject {
 
     /// ⌘⏎ in ask mode: send, then open that agent's terminal to watch.
     func sendAndOpen() {
+        catchUp()
         guard mode == .ask, let c = selected else { return }
         send(to: c, open: true)
     }
 
     func send(to c: Candidate, open: Bool = false) {
-        let words = request
+        // Exactly what is in the field, even if the list is a beat behind.
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let full = Attachments.prompt(words, attachments)
         let kind = harness ?? Settings.shared.harness
         if mode == .ask, ![.command, .chooseFolder, .ask].contains(c.kind), c.kind != .newFolder || naming {
@@ -665,7 +726,7 @@ final class CommandModel: ObservableObject {
         Task {
             do {
                 let p = try await Client.local.spawn(cwd: path, kind: kind, text: text)
-                if open { Sessions.openWhenStarted(p.id) }
+                Sessions.watchStart(p.id, cwd: path, open: open)
                 if isNew {
                     // The new folder is inside a root: the next index finds it.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { Task { await Client.local.reindex() } }
@@ -771,7 +832,10 @@ struct CommandBar: View {
         .offset(y: model.shown || reduce ? 0 : -6)
         .blur(radius: model.shown || reduce ? 0 : 3)
         .animation(model.shown ? nil : Motion.exit, value: model.shown)
-        .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.rows.map(\.id))
+        // The list follows typing instantly (as Raycast's does); only Jev's
+        // answer reorders it with motion. Animating every keystroke's change
+        // — rows blurring in and out on each one — was the lag.
+        .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.jevStamp)
         .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.phase)
         .onChange(of: model.focusTick) { _, _ in focused = true }
         .onChange(of: store.state.folders > 0) { _, ready in if ready { model.indexReady() } }
@@ -973,6 +1037,7 @@ struct CommandBar: View {
                                      name: $model.newName, nameFocused: $nameFocused,
                                      confirmName: { model.send(to: c) },
                                      click: { model.click(c, count: $0) })
+                            .equatable()
                             .id(c.id)
                     }
                 }
@@ -1052,7 +1117,9 @@ struct CommandBar: View {
                         if let ms = j.ms { Text(verbatim: "\(ms) ms").foregroundStyle(.tertiary).monospacedDigit() }
                         hint("⌘⏎", "send & open")
                     } else {
-                        Text(j.error ?? "Jev did not answer").foregroundStyle(Tone.blocked).lineLimit(1)
+                        // Without Jev the bar still works: you choose.
+                        Text("Jev isn't answering — ↑↓ to choose · Settings → Routing").foregroundStyle(Tone.blocked).lineLimit(1)
+                            .help(j.error ?? "")
                     }
                 } else if model.mode == .search {
                     hint("⏎", "open")
@@ -1097,7 +1164,16 @@ struct CommandBar: View {
 
 /// One row: icon, title, detail; Jev's weight; selection drawn on the row,
 /// hover only faintly — hovering never selects.
-private struct CandidateRow: View {
+/// Equatable: a keystroke redraws the bar, but a row whose candidate, place
+/// and highlight are unchanged is skipped (SwiftUI compares, then keeps it).
+/// Redrawing every row on every keystroke was most of the typing lag.
+private struct CandidateRow: View, Equatable {
+    static func == (a: CandidateRow, b: CandidateRow) -> Bool {
+        // While naming a new folder the row holds a text field: always live.
+        !a.naming && !b.naming && a.candidate == b.candidate && a.index == b.index
+            && a.selected == b.selected && a.isPick == b.isPick && a.unsure == b.unsure
+    }
+
     var candidate: Candidate
     var index: Int
     var selected: Bool

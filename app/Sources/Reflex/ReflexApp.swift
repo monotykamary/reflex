@@ -138,6 +138,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case "inbox": self.showInbox()
             case "pairing": self.showPairing()
+            case "spawn":
+                // Dev: what the bar's ⏎ does for a folder (no ⌘ → no "open").
+                let env = ProcessInfo.processInfo.environment
+                let cwd = env["REFLEX_DEMO_CWD"] ?? NSTemporaryDirectory()
+                Task {
+                    if let p = try? await Client.local.spawn(cwd: cwd, kind: "claude", text: env["REFLEX_DEMO_TEXT"] ?? "Reply with just: ok") {
+                        Sessions.watchStart(p.id, cwd: cwd, open: env["REFLEX_DEMO_OPEN"] != nil)
+                    }
+                }
             case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
             case "railclick":

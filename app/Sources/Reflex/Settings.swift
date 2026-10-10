@@ -7,7 +7,13 @@ import Security
 
 final class Settings: ObservableObject {
     static let shared = Settings()
-    private let d = UserDefaults.standard
+
+    /// A separate profile (REFLEX_PROFILE=<folder>): its own settings, support
+    /// folder, Keychain entry and port — Reflex as a new user meets it, on the
+    /// same Mac, without touching the real one. For testing first runs.
+    static let profile: String? = ProcessInfo.processInfo.environment["REFLEX_PROFILE"]
+    static let profileKey: String? = profile.map { "profile" + $0.replacingOccurrences(of: "/", with: ".") }
+    private let d = Settings.profileKey.flatMap { UserDefaults(suiteName: "dev.reflex." + $0) } ?? .standard
 
     @Published var roots: String { didSet { d.set(roots, forKey: "roots") } }
     @Published var harness: String { didSet { d.set(harness, forKey: "harness") } }
@@ -47,7 +53,7 @@ final class Settings: ObservableObject {
         newKeyword = d.string(forKey: "newKeyword") ?? "new project"
         newRoot = d.string(forKey: "newRoot") ?? ""
         extraFolders = d.stringArray(forKey: "extraFolders") ?? []
-        port = d.object(forKey: "port") as? Int ?? 47823
+        port = d.object(forKey: "port") as? Int ?? (Settings.profile == nil ? 47823 : 47851)
         remote = d.bool(forKey: "remote")
         jevProvider = d.string(forKey: "jevProvider") ?? "typesafe"
         jevCredentialCommand = d.string(forKey: "jevCredentialCommand") ?? ""
@@ -104,8 +110,9 @@ final class Settings: ObservableObject {
     }
 
     static var supportDir: URL {
-        let url = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Reflex", isDirectory: true)
+        let url = profile.map { URL(fileURLWithPath: $0, isDirectory: true) }
+            ?? FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("Reflex", isDirectory: true)
         try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         return url
     }
@@ -147,7 +154,7 @@ final class Settings: ObservableObject {
     }
 
     // Jev API key in the Keychain (used when no credential command is set).
-    private static let service = "dev.reflex.jev"
+    private static let service = "dev.reflex.jev" + (profileKey.map { "." + $0 } ?? "")
 
     static var jevKey: String? {
         get {
