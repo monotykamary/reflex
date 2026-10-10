@@ -469,6 +469,7 @@ struct Rail: View {
 
             Menu {
                 Button("Take Reflex with You…", systemImage: "iphone", action: openPhone)
+                if Updater.available { Button("Check for Updates…") { Updater.check() } }
                 Divider()
                 Button("Restart reflexd", action: restart)
                 Button("Open log", action: openLog)

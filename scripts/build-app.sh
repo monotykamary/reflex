@@ -47,6 +47,10 @@ app=build/Reflex.app
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/scripts" "$app/Contents/Resources/web"
 cp "$bin" "$app/Contents/MacOS/Reflex"
+# Sparkle (updates), without its XPC services: Reflex isn't sandboxed.
+mkdir -p "$app/Contents/Frameworks"
+ditto "$(dirname "$bin")/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.framework"
+rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$app/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
 cp scripts/reflex-scan.sh scripts/reflex-fork.sh "$app/Contents/Resources/scripts/"
@@ -67,15 +71,19 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>CFBundleDisplayName</key><string>Reflex</string>
   <key>CFBundleExecutable</key><string>Reflex</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>$(cat "$root/VERSION")</string>
   <key>CFBundleVersion</key><string>$build_number</string>
   <key>ReflexCommit</key><string>$commit</string>
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
+  <key>SUFeedURL</key><string>https://monotykamary.github.io/reflex/appcast.xml</string>
+  <key>SUPublicEDKey</key><string>nZ4HvEpyNprzUA/CbKoJfrxbQYhE35SU3UGC0YPDD3Y=</string>
+  <key>SUEnableAutomaticChecks</key><true/>
 </dict>
 </plist>
 EOF
+codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
 codesign --force --sign - "$app/Contents/Resources/reflexd"
 codesign --force --sign - "$app"
 echo "built $app"

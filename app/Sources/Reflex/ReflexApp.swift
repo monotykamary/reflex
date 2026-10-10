@@ -217,6 +217,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         app.addItem(.separator())
         app.addItem(item("Ask…", #selector(toggleBar), key: " ", mods: [.option]))
         app.addItem(item("Inbox", #selector(showInbox), key: "i", mods: [.command, .shift]))
+        if Updater.available { app.addItem(item("Check for Updates…", #selector(checkForUpdates), key: "")) }
         app.addItem(item("Restart reflexd", #selector(restartDaemon)))
         app.addItem(.separator())
         app.addItem(item("Hide Reflex", #selector(NSApplication.hide(_:)), key: "h", target: NSApp))
@@ -359,6 +360,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A pairing code never outlives the app that made it.
         Pairing.shared.stop()
         KeepAwake.shared.start()
+        Updater.start()
         BackgroundWatch.shared.start()
         Store.shared.watching = { [weak self] in
             self?.popouts.first { $0.value.isKeyWindow }?.key
@@ -607,6 +609,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     // MARK: Take Reflex with you — a one-time QR beside the rail
+
+    @objc func checkForUpdates() { Updater.check() }
 
     @objc func showPairing() {
         edge.hide(returnFocus: false)
