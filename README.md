@@ -206,3 +206,8 @@ runtime are assumptions. `--verdict` re-checks with Bend's Lean-proven kernel.
   design language.
 - Dev hooks (`REFLEX_SHOW=bar|inbox|rail|agents|settings|onboarding|pairing|…`)
   open a surface at launch for screenshots and tests.
+
+## License
+
+[MIT](LICENSE). The vendored JSON parser in `daemon/vendor/strict-json` is
+Apache-2.0 (see its `LICENSE` and `PROVENANCE.md`).

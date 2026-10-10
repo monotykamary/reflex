@@ -439,7 +439,7 @@ final class CommandModel: ObservableObject {
     }
 
     /// The local index's best folder, if the request names it ("in reflex",
-    /// "talkyform" for talkyform-private).
+    /// "acme" for acme-web).
     private var localNamed: String? {
         guard let f = local.first else { return nil }
         let name = f.name.lowercased()

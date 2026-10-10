@@ -167,7 +167,7 @@ def scored_all(+toks: List<&2, String>, fs: List<&2, M.Folder>) -> List<&2, Scor
       score(toks, f) <> scored_all(toks, t)
 
 # A folder is named when a word of the request is its name, or the first
-# part of it ("talkyform" names talkyform-private, "inloop" inloop.studio).
+# part of it ("acme" names acme-web, "studio" studio.app).
 def names(+name: String, +t: String) -> Bool:
   String.eq(name, t) || String.starts_with(name, t ++ "-") || String.starts_with(name, t ++ "_") || String.starts_with(name, t ++ ".")
 
