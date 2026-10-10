@@ -562,7 +562,7 @@ private struct AgentList: View {
                         Text("Type to filter \(agents.count) agents").foregroundStyle(Ink.dim)
                     } else {
                         Text(query).foregroundStyle(Ink.text)
-                        + Text(" · esc to clear").foregroundStyle(Ink.dim)
+                        Text("· esc to clear").foregroundStyle(Ink.dim)
                     }
                     Spacer(minLength: 0)
                 }

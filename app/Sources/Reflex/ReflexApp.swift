@@ -58,6 +58,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
         }
         Settings.shared.applyAppearance()
+        // Terminals follow the appearance: TokyoNight by night, TokyoNight Day by day.
+        NSApp.publisher(for: \.effectiveAppearance).removeDuplicates { $0.name == $1.name }.sink { _ in
+            DispatchQueue.main.async { Themes.shared.refresh() }
+        }.store(in: &bag)
         Settings.shared.$appearance.dropFirst().removeDuplicates().sink { _ in
             DispatchQueue.main.async { Settings.shared.applyAppearance() }
         }.store(in: &bag)
@@ -491,7 +495,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inbox == nil {
             let view = InboxView(openPane: { [weak self] p in self?.showPane(p) },
                                  close: { [weak self] in self?.hideInbox() })
-            let p = Panels.floating(view, size: NSSize(width: 552, height: 760), key: true)
+            let p = Panels.floating(view, size: NSSize(width: 520, height: 320), key: true)
             p.onEscape = { [weak self] in self?.hideInbox() }
             inbox = p
         }
@@ -510,7 +514,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard let w = inbox else { return }
         let s = Panels.screen
         let m = InboxModel.shared.size
-        let size = m == .zero ? NSSize(width: 552, height: 320) : NSSize(width: m.width, height: min(m.height, inboxMaxHeight))
+        // Open at the content's own width, so nothing re-lays out as it fits.
+        let size = m == .zero ? NSSize(width: 520, height: 320) : NSSize(width: m.width, height: min(m.height, inboxMaxHeight))
         Panels.fit(w, to: size, top: s.midY + inboxMaxHeight / 2, midX: s.maxX - Rail.columnWidth - 276)
     }
 

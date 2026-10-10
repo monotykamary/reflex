@@ -66,13 +66,7 @@ struct InboxView: View {
                 Label("herdr unreachable", systemImage: "exclamationmark.triangle.fill")
                     .font(Type.meta).foregroundStyle(Tone.blocked)
             }
-            Picker("", selection: $model.needsYouOnly) {
-                Text("All").tag(false)
-                Text("Needs you").tag(true)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .frame(width: 170)
+            Segmented(selection: $model.needsYouOnly, options: [("All", false), ("Needs you", true)])
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

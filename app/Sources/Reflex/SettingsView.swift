@@ -356,14 +356,60 @@ private struct RailPane: View {
 private struct TerminalPane: View {
     @ObservedObject var themes = Themes.shared
     @State private var query = ""
+    @State private var slot: Themes.Slot = Themes.shared.activeSlot
+    @State private var listAt: String?
 
+    private func name(_ s: Themes.Slot) -> String { s == .dark ? themes.darkName : themes.lightName }
+
+    /// The slot's themes only: dark ones for Dark, light ones for Light.
     private var names: [String] {
-        query.isEmpty ? themes.names : themes.names.filter { $0.localizedCaseInsensitiveContains(query) }
+        themes.names.filter { n in
+            (query.isEmpty || n.localizedCaseInsensitiveContains(query))
+                && (themes.darkness[n].map { $0 == (slot == .dark) } ?? true)
+        }
     }
 
     var body: some View {
         Form {
-            Section { TerminalPreview(theme: themes.current, family: themes.fontFamily, size: themes.fontSize) }
+            Section {
+                HStack(spacing: 0) {
+                    SlotCard(slot: .dark, name: themes.darkName, inUse: themes.activeSlot == .dark,
+                             editing: slot == .dark, family: themes.fontFamily) { withAnimation(Motion.swap) { slot = .dark } }
+                    Button { themes.linked.toggle() } label: {
+                        Image(systemName: themes.linked ? "link" : "link.badge.plus")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundStyle(themes.linked ? Color.accentColor : .secondary)
+                            .frame(width: 34, height: 34)
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(Pressable())
+                    .help(themes.linked ? "Paired: picking one picks its sibling" : "Not paired: each slot on its own")
+                    SlotCard(slot: .light, name: themes.lightName, inUse: themes.activeSlot == .light,
+                             editing: slot == .light, family: themes.fontFamily) { withAnimation(Motion.swap) { slot = .light } }
+                }
+            }
+            Section {
+                Picker(selection: $themes.mode) {
+                    Text("Follow Reflex").tag(Themes.Mode.follow)
+                    Text("Always dark").tag(Themes.Mode.dark)
+                    Text("Always light").tag(Themes.Mode.light)
+                } label: {
+                    RowLabel("Terminal appearance", "Following Reflex, terminals switch with Settings → General → Appearance.")
+                }
+                Toggle(isOn: $themes.linked) {
+                    RowLabel("Keep pairs together", "Picking TokyoNight picks TokyoNight Day, Catppuccin Mocha picks Latte — and back.")
+                }
+            }
+            Section("Start from a pair") {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 132), spacing: 8)], spacing: 8) {
+                    ForEach(Themes.starterPairs.filter { themes.names.contains($0.dark) && themes.names.contains($0.light) }) { pair in
+                        PairChip(pair: pair, on: themes.darkName == pair.dark && themes.lightName == pair.light) {
+                            withAnimation(Motion.swap) { themes.choose(pair) }
+                        }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
             Section {
                 Picker(selection: $themes.fontFamily) {
                     ForEach(Themes.monospacedFamilies, id: \.self) { Text($0).tag($0) }
@@ -381,34 +427,153 @@ private struct TerminalPane: View {
             Section {
                 HStack(spacing: 6) {
                     Image(systemName: "magnifyingglass").foregroundStyle(.secondary)
-                    TextField("", text: $query, prompt: Text("Search \(themes.names.count) themes"))
+                    TextField("", text: $query, prompt: Text("Search \(slot == .dark ? "dark" : "light") themes"))
                         .textFieldStyle(.plain)
                 }
-                ScrollViewReader { proxy in
-                    ScrollView {
-                        LazyVStack(spacing: 2) {
-                            ForEach(names, id: \.self) { name in
-                                ThemeRow(name: name, selected: name == themes.current.name)
-                                    .padding(.horizontal, 8).padding(.vertical, 4)
-                                    .background(name == themes.current.name ? Color.accentColor.opacity(0.14) : .clear,
-                                                in: RoundedRectangle(cornerRadius: 7, style: .continuous))
-                                    .contentShape(Rectangle())
-                                    .onTapGesture { themes.select(name) }
-                                    .id(name)
-                            }
+                // Scrolls itself to the chosen theme, without moving the page.
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(names, id: \.self) { n in
+                            ThemeRow(name: n, selected: n == name(slot))
+                                .padding(.horizontal, 8).padding(.vertical, 4)
+                                .background(n == name(slot) ? Color.accentColor.opacity(0.14) : .clear,
+                                            in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                                .contentShape(Rectangle())
+                                .onTapGesture { withAnimation(Motion.swap) { themes.select(n, for: slot) } }
+                                .id(n)
                         }
                     }
-                    .frame(height: 300)
-                    .scrollIndicators(.never)
-                    .onAppear { proxy.scrollTo(themes.current.name, anchor: .center) }
+                    .scrollTargetLayout()
+                }
+                .scrollPosition(id: $listAt, anchor: .center)
+                .frame(height: 300)
+                .scrollIndicators(.never)
+                .onAppear { listAt = name(slot) }
+                .onChange(of: slot) { _, s in listAt = name(s) }
+                HStack {
+                    Button("Import Theme…", action: importTheme)
+                    Button("Show Themes Folder") {
+                        let dir = Settings.supportDir.appendingPathComponent("themes")
+                        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                        NSWorkspace.shared.open(dir)
+                    }
+                    Spacer()
                 }
             } header: {
-                Text("Theme")
+                HStack {
+                    Text("Themes")
+                    Spacer()
+                    Segmented(selection: $slot, options: [("Dark", .dark), ("Light", .light)])
+                }
             } footer: {
-                Text("Every Ghostty theme when Ghostty is installed. Add more in ~/.config/ghostty/themes.")
+                Text("Every Ghostty theme when Ghostty is installed, and any Ghostty-format theme you import.")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }
+        .onAppear { themes.learnDarkness() }
+    }
+
+    private func importTheme() {
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = true
+        panel.canChooseDirectories = false
+        panel.prompt = "Import"
+        panel.message = "Choose Ghostty-format theme files (palette = N=#rrggbb, background, foreground…)."
+        guard panel.runModal() == .OK else { return }
+        let added = themes.importThemes(panel.urls)
+        if let first = added.first, let t = Themes.load(first) {
+            slot = t.isDark ? .dark : .light
+            themes.select(first, for: slot)
+        }
+    }
+}
+
+/// One slot as a small terminal: its theme, whether it is in use, and
+/// whether the list below is choosing for it.
+private struct SlotCard: View {
+    var slot: Themes.Slot
+    var name: String
+    var inUse: Bool
+    var editing: Bool
+    var family: String
+    var pick: () -> Void
+    @State private var theme: TermTheme?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if let t = theme {
+                TerminalPreview(theme: t, family: family, size: 10, compact: true)
+            } else {
+                RoundedRectangle(cornerRadius: 10).fill(.quaternary).frame(height: 92)
+            }
+            HStack(spacing: 6) {
+                Image(systemName: slot == .dark ? "moon.fill" : "sun.max.fill")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                Text(name).font(.system(size: 12, weight: .medium)).lineLimit(1)
+                    .contentTransition(.interpolate)
+                Spacer(minLength: 4)
+                if inUse {
+                    Text("In use")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(Color.accentColor)
+                        .padding(.horizontal, 7).padding(.vertical, 2)
+                        .background(Color.accentColor.opacity(0.14), in: Capsule())
+                        .transition(.opacity)
+                }
+            }
+        }
+        .padding(6)
+        .background(RoundedRectangle(cornerRadius: 14, style: .continuous)
+            .strokeBorder(editing ? Color.accentColor : Color.primary.opacity(0.08), lineWidth: editing ? 2 : 1))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: pick)
+        .task(id: name) { theme = Themes.load(name) }
+        .animation(Motion.swap, value: inUse)
+    }
+}
+
+/// A starter pair: both backgrounds side by side, and the family's name.
+private struct PairChip: View {
+    var pair: Themes.Pair
+    var on: Bool
+    var pick: () -> Void
+    @State private var dark: TermTheme?
+    @State private var light: TermTheme?
+
+    var body: some View {
+        Button(action: pick) {
+            HStack(spacing: 8) {
+                HStack(spacing: 0) {
+                    swatch(dark)
+                    swatch(light)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: 5, style: .continuous).strokeBorder(.primary.opacity(0.12)))
+                Text(pair.name).font(.system(size: 12, weight: on ? .semibold : .regular)).lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(6)
+            .background(on ? Color.accentColor.opacity(0.14) : Color.primary.opacity(0.05),
+                        in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(Pressable())
+        .task {
+            dark = Themes.load(pair.dark)
+            light = Themes.load(pair.light)
+        }
+    }
+
+    private func swatch(_ t: TermTheme?) -> some View {
+        ZStack {
+            Color(hex: t?.background ?? "#808080")
+            HStack(spacing: 2) {
+                ForEach([1, 2, 4], id: \.self) { i in
+                    Circle().fill(Color(hex: t?.palette[i] ?? "#808080")).frame(width: 4, height: 4)
+                }
+            }
+        }
+        .frame(width: 26, height: 22)
     }
 }
 
@@ -417,6 +582,7 @@ private struct TerminalPreview: View {
     var theme: TermTheme
     var family: String
     var size: Double
+    var compact = false
 
     private func c(_ i: Int) -> Color { Color(hex: theme.palette[i]) }
 
@@ -426,13 +592,16 @@ private struct TerminalPreview: View {
             (Text("~/VCS/jev-fabric ").foregroundColor(c(4)) + Text("main ").foregroundColor(c(5)) + Text("❯ ").foregroundColor(c(2)) + Text("claude"))
             (Text("● ").foregroundColor(c(2)) + Text("Read ").bold() + Text("src/follow.bend").foregroundColor(c(6)))
             (Text("  + ").foregroundColor(c(2)) + Text("fuel loop bounded at 64").foregroundColor(c(2)))
-            (Text("  - ").foregroundColor(c(1)) + Text("unbounded retry").foregroundColor(c(1)))
+            if !compact {
+                (Text("  - ").foregroundColor(c(1)) + Text("unbounded retry").foregroundColor(c(1)))
+            }
             (Text("? ").foregroundColor(c(3)) + Text("Run the tests now? ") + Text("1 Yes  2 No").foregroundColor(c(8)))
         }
         .font(font)
         .foregroundColor(Color(hex: theme.foreground))
+        .lineLimit(1)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(14)
+        .padding(compact ? 10 : 14)
         .background(Color(hex: theme.background), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.primary.opacity(0.08)))
     }

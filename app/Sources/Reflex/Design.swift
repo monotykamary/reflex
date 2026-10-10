@@ -277,3 +277,41 @@ struct SurfaceVeil: View {
     @Environment(\.colorScheme) private var scheme
     var body: some View { (scheme == .dark ? Color.black : Color.white).opacity(0.4) }
 }
+
+// MARK: Segmented
+
+/// Raycast-style segmented choice: a quiet track with a highlight that slides
+/// to the chosen option. Fixed to its content's width, so it never resizes
+/// when its window does.
+struct Segmented<T: Hashable>: View {
+    @Binding var selection: T
+    var options: [(label: String, value: T)]
+    @Namespace private var ns
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options.indices, id: \.self) { i in
+                let on = options[i].value == selection
+                Text(options[i].label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(on ? Color.primary : Color.primary.opacity(0.55))
+                    .padding(.horizontal, 12).padding(.vertical, 5)
+                    .background {
+                        if on {
+                            Capsule().fill(Color.primary.opacity(0.14))
+                                .matchedGeometryEffect(id: "on", in: ns)
+                        }
+                    }
+                    .contentShape(Capsule())
+                    .onTapGesture {
+                        withAnimation(Motion.pick(Motion.swap, reduce: reduce)) { selection = options[i].value }
+                    }
+                    .accessibilityAddTraits(on ? [.isButton, .isSelected] : .isButton)
+            }
+        }
+        .padding(2)
+        .background(Color.primary.opacity(0.06), in: Capsule())
+        .fixedSize()
+    }
+}
