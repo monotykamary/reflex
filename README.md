@@ -37,12 +37,12 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 
 | | |
 |---|---|
-| **Tab & rail** | While agents are active, a small dark tab grows out of the right screen edge: a spinning ring per working agent, amber for waiting, green for done. Hover it (or rest on an empty edge for half a second) to open the rail: inbox, agents, Ask, Settings, the setup guide, and — when something waits on you — its question as a card you answer with 1, 2 or 3. |
+| **Tab & rail** | While agents are active, a small dark tab grows out of the right screen edge: a spinning ring per working agent, amber for waiting, green for done. Hover it (or rest on an empty edge for half a second) to open the rail, in Liquid Glass: inbox, agents, Ask and Settings, beside either the question waiting on you (answer with 1, 2 or 3) or every agent at a glance, grouped by project, with one click to its terminal, a pinned message, or herdr. |
 | **⌥⌥ command bar** | Double-tap Option, type, ⏎. Reflex routes it to the right session, or starts a new one in the right folder. ⇥ pins a specific agent instead. The action waits out a **2 s undo window** (Esc undoes and gives your text back). |
 | **Unsure? It asks.** | Below the confidence threshold (default 60%) nothing is sent: you get numbered choices (1/2/3) instead. |
 | **Inbox** | Every blocked question (with its numbered options parsed off the agent's screen), finished turn, side answer and routing question. J/K move, 1–9 answer, E clear, ⏎ open, U undo. |
 | **btw** | Start with `btw` (or let Jev notice) to ask without interrupting: Claude Code gets its native `/btw` (no tools, shares the prompt cache); pi — and Claude when blocked on a dialog — gets a headless, unsaved fork of its session (same prefix, warm cache, read-only for Claude). Other harnesses: Reflex asks you. |
-| **Terminals** | Click a bead for a raw terminal on that agent (SwiftTerm attached through `herdr agent attach`): full color, keys and resizing go straight to the agent's TUI. Any Ghostty theme, Tokyo Night by default (Settings → Terminal). |
+| **Terminals** | Click a bead for a raw terminal on that agent (SwiftTerm attached through `herdr agent attach`): full color, keys and resizing go straight to the agent's TUI. Any Ghostty theme, Tokyo Night by default; Geist Mono when installed, or any monospaced font (Settings → Terminal). |
 | **Phone** | Settings → Phone shows a QR code for the web remote (prefers your Tailscale address). |
 
 Deliberately out of scope: voice input, and drag-to-point screenshots.
@@ -105,10 +105,11 @@ scripts/build-app.sh          # reflexd + Reflex.app → build/Reflex.app
 open build/Reflex.app
 ```
 
-First run opens the setup guide (menu bar → Setup Guide… to reopen it): it
-checks herdr and its integrations, connects Jev (one click to reuse pi's
-TypeSafe key, or paste a key) and pings it, indexes your project roots, picks
-your default agent, and has you try ⌥⌥ and the edge gesture.
+First run opens a short welcome: it checks herdr and its integrations,
+connects Jev (one click to reuse pi's TypeSafe key, or paste a key) and lets
+you try a real request as a dry run, indexes your project roots, has you try
+⌥⌥ and the edge gesture, and ends with your Reflex card. Every check also
+lives in Settings → Setup, live, with the welcome one click away.
 For `btw` forks to target the exact session, install herdr's integrations:
 `herdr integration install claude && herdr integration install pi`
 (without them Reflex forks the newest session in that folder).

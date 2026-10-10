@@ -37,8 +37,9 @@ struct Client {
 
     func state() async throws -> StateInfo { try await get("/api/state", as: StateInfo.self) }
 
-    func route(_ text: String) async throws -> RouteResponse {
-        try await post("/api/route", ["text": text], as: RouteResponse.self)
+    /// Route a request. `dry`: decide only — nothing is sent or started.
+    func route(_ text: String, dry: Bool = false) async throws -> RouteResponse {
+        try await post("/api/route", dry ? ["text": text, "dry": true] : ["text": text], as: RouteResponse.self)
     }
 
     func send(pane: String, text: String, label: String) async throws -> PendingInfo {

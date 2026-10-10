@@ -23,13 +23,13 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.optionAsMetaKey = true
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
-        apply(Themes.shared.current, size: Themes.shared.fontSize)
-        Themes.shared.$current.combineLatest(Themes.shared.$fontSize)
-            .sink { [weak self] t, s in self?.apply(t, size: s) }
+        apply(Themes.shared.current, font: Themes.font(Themes.shared.fontFamily, size: Themes.shared.fontSize))
+        Themes.shared.$current.combineLatest(Themes.shared.$fontSize, Themes.shared.$fontFamily)
+            .sink { [weak self] t, s, f in self?.apply(t, font: Themes.font(f, size: s)) }
             .store(in: &bag)
     }
 
-    func apply(_ t: TermTheme, size: Double) {
+    func apply(_ t: TermTheme, font: NSFont) {
         view.installColors(t.palette.map { hex in
             let c = NSColor(hex: hex).usingColorSpace(.sRGB) ?? .black
             return SwiftTerm.Color(red: UInt16(c.redComponent * 65535), green: UInt16(c.greenComponent * 65535),
@@ -39,7 +39,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.nativeForegroundColor = NSColor(hex: t.foreground)
         view.caretColor = NSColor(hex: t.cursor)
         view.selectedTextBackgroundColor = NSColor(hex: t.selection)
-        view.font = NSFont(name: "SF Mono", size: size) ?? .monospacedSystemFont(ofSize: size, weight: .regular)
+        view.font = font
         view.needsDisplay = true
     }
 

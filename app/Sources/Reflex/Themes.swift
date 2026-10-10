@@ -73,12 +73,36 @@ final class Themes: ObservableObject {
 
     @Published var current: TermTheme
     @Published var fontSize: Double { didSet { UserDefaults.standard.set(fontSize, forKey: "terminalFontSize") } }
+    /// A monospaced font family. Geist Mono when it is installed, else SF Mono.
+    @Published var fontFamily: String { didSet { UserDefaults.standard.set(fontFamily, forKey: "terminalFont") } }
     private(set) lazy var names: [String] = Themes.listNames()
 
     private init() {
         let name = UserDefaults.standard.string(forKey: "terminalTheme") ?? "TokyoNight"
         current = Themes.load(name) ?? .tokyoNight
         fontSize = UserDefaults.standard.object(forKey: "terminalFontSize") as? Double ?? 12.5
+        fontFamily = UserDefaults.standard.string(forKey: "terminalFont") ?? Themes.defaultFamily
+    }
+
+    static var defaultFamily: String {
+        NSFontManager.shared.availableMembers(ofFontFamily: "Geist Mono") != nil ? "Geist Mono" : "SF Mono"
+    }
+
+    /// Installed monospaced families, for the font picker.
+    static let monospacedFamilies: [String] = {
+        let mono = NSFontDescriptor(fontAttributes: [.traits: [NSFontDescriptor.TraitKey.symbolic: NSFontDescriptor.SymbolicTraits.monoSpace.rawValue]])
+        var names = Set(mono.matchingFontDescriptors(withMandatoryKeys: [.traits])
+            .compactMap { $0.object(forKey: .family) as? String }
+            .filter { !$0.hasPrefix(".") })
+        names.insert("SF Mono")
+        return names.sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+    }()
+
+    /// The terminal font at a size, falling back to the system monospace.
+    static func font(_ family: String, size: Double) -> NSFont {
+        if let f = NSFontManager.shared.font(withFamily: family, traits: [], weight: 5, size: size) { return f }
+        if family == "SF Mono", let f = NSFont(name: "SFMono-Regular", size: size) { return f }
+        return .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 
     func select(_ name: String) {

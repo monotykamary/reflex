@@ -22,6 +22,8 @@ final class Settings: ObservableObject {
     @Published var railAlways: Bool { didSet { d.set(railAlways, forKey: "railAlways") } }
     /// Let a new question surface at the edge on its own for a few seconds.
     @Published var surfaceQuestions: Bool { didSet { d.set(surfaceQuestions, forKey: "surfaceQuestions") } }
+    /// How long the pointer rests on an empty edge before the rail opens.
+    @Published var edgeDelay: Double { didSet { d.set(edgeDelay, forKey: "edgeDelay") } }
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
     /// A regular app (Dock, ⌘Tab, menu bar) rather than menu-bar only.
     @Published var showInDock: Bool { didSet { d.set(showInDock, forKey: "showInDock") } }
@@ -39,6 +41,7 @@ final class Settings: ObservableObject {
         showStrip = d.object(forKey: "showStrip") as? Bool ?? true
         railAlways = d.bool(forKey: "railAlways")
         surfaceQuestions = d.object(forKey: "surfaceQuestions") as? Bool ?? true
+        edgeDelay = d.object(forKey: "edgeDelay") as? Double ?? 0.5
         onboarded = d.bool(forKey: "onboarded")
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true
     }

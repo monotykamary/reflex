@@ -19,6 +19,7 @@ struct ReflexMain {
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
+    static weak var current: AppDelegate?
     private var status: NSStatusItem?
     private var strip: KeyPanel?
     private var sliver: KeyPanel?
@@ -31,13 +32,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var bag = Set<AnyCancellable>()
 
     func applicationDidFinishLaunching(_ note: Notification) {
+        AppDelegate.current = self
         Daemon.shared.start()
         Store.shared.start()
         setupMainMenu()
         setupStatusItem()
         setupRail()
         command.close = { [weak self] in self?.hideBar() }
-        command.openSetup = { [weak self] step in self?.showOnboarding(at: step) }
+        command.openSetup = { [weak self] step in self?.showSettings(pane: step == .jev ? .routing : .setup) }
+        SetupState.shared.start()
         hotkey = DoubleOption { [weak self] in
             if Onboarding.shared.consumeHotkey() { return }
             self?.toggleBar()
@@ -87,11 +90,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case "inbox": self.showInbox()
             case "settings": self.showSettings()
+            case "agents":
+                if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
+                RailModel.shared.panel = .agents
             case "rail": if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
             case "none": break
             case "onboarding":
                 let step = Int(ProcessInfo.processInfo.environment["REFLEX_STEP"] ?? "0") ?? 0
                 self.showOnboarding(at: Onboarding.Step(rawValue: step) ?? .welcome)
+                if let t = ProcessInfo.processInfo.environment["REFLEX_DEMO_TEXT"] {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                        Onboarding.shared.trialText = t
+                        Onboarding.shared.tryRoute()
+                    }
+                }
             default: if let a = Store.shared.state.agents.first { self.showPane(a.pane) }
             }
         }
@@ -113,8 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let app = NSMenu(title: "Reflex")
         app.addItem(item("About Reflex", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), target: NSApp))
         app.addItem(.separator())
-        app.addItem(item("Settings…", #selector(showSettings), key: ","))
-        app.addItem(item("Setup Guide…", #selector(openGuide)))
+        app.addItem(item("Settings…", #selector(showSettings as () -> Void), key: ","))
+        app.addItem(item("Welcome Tour…", #selector(openGuide)))
         app.addItem(.separator())
         app.addItem(item("Ask…", #selector(toggleBar), key: " ", mods: [.option]))
         app.addItem(item("Inbox", #selector(showInbox), key: "i", mods: [.command, .shift]))
@@ -159,8 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(item("Ask… (⌥⌥)", #selector(toggleBar), key: ""))
         m.addItem(item("Inbox", #selector(showInbox), key: ""))
         m.addItem(.separator())
-        m.addItem(item("Settings…", #selector(showSettings), key: ""))
-        m.addItem(item("Setup Guide…", #selector(openGuide), key: ""))
+        m.addItem(item("Settings…", #selector(showSettings as () -> Void), key: ""))
         m.addItem(item("Restart reflexd", #selector(restartDaemon), key: ""))
         m.addItem(item("Open log", #selector(openLog), key: ""))
         m.addItem(.separator())
@@ -186,9 +197,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func setupRail() {
         let view = Rail(openInbox: { [weak self] in self?.showInbox() },
                         openAgent: { [weak self] a in self?.showPane(a.pane) },
-                        openBar: { [weak self] in self?.toggleBar() },
+                        openBar: { [weak self] a in self?.openBar(pinned: a) },
+                        reveal: { a in HerdrWindow.reveal(pane: a.pane) },
                         openSettings: { [weak self] in self?.showSettings() },
-                        openGuide: { [weak self] in self?.showOnboarding() },
                         restart: { Daemon.shared.restart() },
                         openLog: { NSWorkspace.shared.open(Daemon.logURL) },
                         quit: { NSApp.terminate(nil) })
@@ -219,6 +230,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             self?.placeStrip()
         }
         edge.keepOpen = { InboxModel.shared.shown }
+        edge.othersKey = { [weak self] in
+            (self?.bar?.isVisible ?? false) || (self?.inbox?.isVisible ?? false)
+        }
         edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
         edge.start()
 
@@ -285,6 +299,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         bar!.makeKeyAndOrderFront(nil)
     }
 
+    /// From the rail: close it without handing the keys back, then open the
+    /// bar (pinned to an agent, when one was picked).
+    func openBar(pinned: AgentInfo?) {
+        edge.hide(returnFocus: false)
+        if let b = bar, b.isVisible { b.makeKey() } else { toggleBar() }
+        if let a = pinned { command.target = a.pane }
+    }
+
     private func hideBar() {
         guard let b = bar, b.isVisible else { return }
         Panels.fadeOut(b) { [weak self] in self?.command.reset() }
@@ -318,7 +340,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Agent terminals
 
     func showPane(_ pane: String) {
-        RailModel.shared.visible = false
+        edge.hide(returnFocus: false)
         if let w = popouts[pane] {
             NSApp.activate()
             w.makeKeyAndOrderFront(nil)
@@ -362,7 +384,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openGuide() { showOnboarding() }
 
     func showOnboarding(at step: Onboarding.Step = .welcome) {
-        RailModel.shared.visible = false
+        edge.hide(returnFocus: false)
         if onboarding == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 600),
                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -388,14 +410,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Settings
 
-    @objc func showSettings() {
-        RailModel.shared.visible = false
+    @objc func showSettings() { showSettings(pane: nil) }
+
+    func showSettings(pane: SettingsPane?) {
+        edge.hide(returnFocus: false)
+        if let pane { SettingsNav.shared.pane = pane }
         if settings == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 470),
-                             styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "Reflex Settings"
-            w.contentView = NSHostingView(rootView: SettingsView())
+            let host = NSHostingController(rootView: SettingsView())
+            host.sceneBridgingOptions = [.toolbars, .title]
+            let w = NSWindow(contentViewController: host)
+            w.styleMask = [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView]
+            w.toolbarStyle = .unified
+            w.titlebarSeparatorStyle = .automatic
+            w.setContentSize(NSSize(width: 820, height: 620))
             w.isReleasedWhenClosed = false
+            w.setFrameAutosaveName("ReflexSettings")
             w.center()
             settings = w
         }

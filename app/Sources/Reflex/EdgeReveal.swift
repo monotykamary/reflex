@@ -13,7 +13,7 @@ import AppKit
 
 @MainActor
 final class EdgeReveal {
-    var delay: TimeInterval = 0.5
+    var delay: TimeInterval { Settings.shared.edgeDelay }
     let tabIntent: TimeInterval = 0.12
     let deadzone = CGSize(width: 96, height: 64)
     let grace: TimeInterval = 0.5
@@ -26,6 +26,8 @@ final class EdgeReveal {
     var tabShown: () -> Bool = { false }
     var anchor: () -> (NSScreen, CGFloat)? = { nil }
     var keepOpen: () -> Bool = { false }
+    /// Another Reflex panel (the bar, the inbox) has the keys: leave them there.
+    var othersKey: () -> Bool = { false }
     var onReveal: () -> Void = {}
 
     private var timer: Timer?
@@ -67,6 +69,12 @@ final class EdgeReveal {
             if now > holdUntil { hide() }
             return
         }
+        // The bar or inbox is up: the edge stays quiet.
+        if othersKey() {
+            if dwellStart != nil || rail.dwell != 0 { dwellStart = nil; rail.dwell = 0 }
+            tabHoverAt = nil
+            return
+        }
         // Hovering the tab opens the rail where the tab is.
         if tabShown(), let f = panel()?.frame, f.insetBy(dx: -2, dy: -4).contains(p) {
             if let t = tabHoverAt {
@@ -97,6 +105,7 @@ final class EdgeReveal {
     /// Over the rail: it takes the keys. Off it: the app you were in gets them back.
     private func takeKeys(_ over: Bool) {
         guard let w = panel() else { return }
+        if othersKey() { lent = nil; return }
         if over && !w.isKeyWindow {
             let front = NSWorkspace.shared.frontmostApplication
             lent = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
@@ -136,10 +145,13 @@ final class EdgeReveal {
         }
     }
 
-    func hide() {
+    /// Close the rail. Pass `returnFocus: false` when another Reflex panel is
+    /// about to take the keys, so the app the rail borrowed them from does not
+    /// snatch them back.
+    func hide(returnFocus: Bool = true) {
         let rail = RailModel.shared
         guard rail.visible else { return }
-        returnKeys()
+        if returnFocus { returnKeys() } else { lent = nil }
         rail.visible = false
         panel()?.ignoresMouseEvents = !tabShown()
     }

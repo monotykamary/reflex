@@ -20,6 +20,9 @@ final class RailModel: ObservableObject {
     @Published var dwell: CGFloat = CGFloat(Double(ProcessInfo.processInfo.environment["REFLEX_DEBUG_DWELL"] ?? "") ?? 0)
     /// Which question card is showing when several wait.
     @Published var cardIndex = 0
+    /// Beside the buttons: the question, the agent list, or whichever fits.
+    enum Panel { case auto, question, agents }
+    @Published var panel: Panel = .auto
 }
 
 // MARK: - Shared pieces
@@ -92,21 +95,23 @@ struct EdgeTabShape: Shape {
     }
 }
 
+/// Liquid Glass, darkened enough that white text reads over any wallpaper.
+extension Glass {
+    static var rail: Glass { .regular.tint(Color.black.opacity(0.68)) }
+}
+
 private struct RoundButton<Label: View>: View {
     var help: String
     var action: () -> Void
     @ViewBuilder var label: Label
-    @State private var hover = false
     var body: some View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
-                .background(hover ? Ink.hover : Ink.surface, in: Circle())
-                .overlay(Circle().strokeBorder(Ink.line))
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
-        .onHover { h in withAnimation(Motion.micro) { hover = h } }
+        .glassEffect(.rail.interactive(), in: Circle())
         .help(help)
     }
 }
@@ -137,11 +142,13 @@ struct Rail: View {
     @ObservedObject var rail = RailModel.shared
     @ObservedObject var settings = Settings.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @Namespace private var glass
     var openInbox: () -> Void
     var openAgent: (AgentInfo) -> Void
-    var openBar: () -> Void
+    /// Open the command bar, pinned to an agent when one is given.
+    var openBar: (AgentInfo?) -> Void
+    var reveal: (AgentInfo) -> Void
     var openSettings: () -> Void
-    var openGuide: () -> Void
     var restart: () -> Void
     var openLog: () -> Void
     var quit: () -> Void
@@ -160,36 +167,52 @@ struct Rail: View {
         questions.indices.contains(rail.cardIndex) ? questions[rail.cardIndex] : questions.first
     }
 
+    /// What sits beside the buttons: the waiting question, or every agent at a glance.
+    private var showing: RailModel.Panel {
+        switch rail.panel {
+        case .question where card != nil: return .question
+        case .agents where !store.state.agents.isEmpty: return .agents
+        default:
+            if card != nil { return .question }
+            return store.state.agents.isEmpty ? .auto : .agents
+        }
+    }
+
     var body: some View {
-        ZStack(alignment: .trailing) {
-            if rail.visible {
-                open
-                    .transition(.asymmetric(
-                        insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 0.97, y: 0, blur: 4), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))
-                            .combined(with: .offset(x: reduce ? 0 : 18)),
-                        removal: .opacity.combined(with: .offset(x: reduce ? 0 : 12))))
-            } else if !Rail.active(store.state.agents).isEmpty && settings.showStrip {
-                tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
+        GlassEffectContainer(spacing: 14) {
+            ZStack(alignment: .trailing) {
+                if rail.visible {
+                    open
+                        .transition(.asymmetric(
+                            insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 0.97, y: 0, blur: 4), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))
+                                .combined(with: .offset(x: reduce ? 0 : 18)),
+                            removal: .opacity.combined(with: .offset(x: reduce ? 0 : 12))))
+                } else if !Rail.active(store.state.agents).isEmpty && settings.showStrip {
+                    tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
+                }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .animation(rail.visible ? Motion.enter : Motion.exit, value: rail.visible)
         .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
+        .animation(Motion.enter, value: showing)
         .environment(\.colorScheme, .dark)
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { press in key(press) }
+        .onChange(of: rail.visible) { _, open in if !open { rail.panel = .auto } }
     }
 
     /// With the pointer over the rail, 1–9 answer the card; ⇥ shows the next one.
     private func key(_ press: KeyPress) -> KeyPress.Result {
         guard rail.visible else { return .ignored }
-        if press.key == .tab, questions.count > 1 {
-            rail.cardIndex = (rail.cardIndex + 1) % questions.count
-            return .handled
-        }
         if press.characters.lowercased() == "u", let p = store.state.pending.last {
             Task { await Client.local.cancel(p.id); await Store.shared.refresh() }
+            return .handled
+        }
+        guard showing == .question else { return .ignored }
+        if press.key == .tab, questions.count > 1 {
+            rail.cardIndex = (rail.cardIndex + 1) % questions.count
             return .handled
         }
         guard let c = card, press.characters.count == 1, c.options.contains(where: { $0.key == press.characters }) else {
@@ -211,23 +234,34 @@ struct Rail: View {
         .padding(.vertical, 9 + 12)
         .padding(.leading, 8)
         .padding(.trailing, 7)
-        .background(EdgeTabShape().fill(Color.black))
-        .overlay(EdgeTabShape().stroke(Ink.line, lineWidth: 0.5))
+        .glassEffect(.regular.tint(Color.black.opacity(0.72)), in: EdgeTabShape())
+        .glassEffectID("agents", in: glass)
     }
 
     // MARK: Open rail
 
     private var open: some View {
         HStack(alignment: .center, spacing: 12) {
-            if let q = card {
-                VStack(spacing: 10) {
-                    QuestionCard(item: q, count: questions.count, index: rail.cardIndex,
-                                 agent: store.state.agents.first { $0.pane == q.pane },
-                                 pending: store.state.pending.first { $0.item == q.id },
-                                 openAgent: openAgent)
-                    KeyHint(keys: q.options.prefix(3).map(\.key))
+            switch showing {
+            case .question:
+                if let q = card {
+                    VStack(spacing: 10) {
+                        QuestionCard(item: q, count: questions.count, index: rail.cardIndex,
+                                     agent: store.state.agents.first { $0.pane == q.pane },
+                                     pending: store.state.pending.first { $0.item == q.id },
+                                     openAgent: openAgent,
+                                     showAgents: store.state.agents.isEmpty ? nil : { rail.panel = .agents })
+                        KeyHint(keys: q.options.prefix(3).map(\.key))
+                    }
+                    .transition(.surface(reduce: reduce))
                 }
-                .transition(.surface(reduce: reduce))
+            case .agents:
+                AgentList(agents: store.state.agents, pulses: store.pulses, waiting: questions.count,
+                          open: openAgent, ask: { openBar($0) }, reveal: reveal,
+                          showQuestion: { rail.panel = .question })
+                    .transition(.surface(reduce: reduce))
+            case .auto:
+                EmptyView()
             }
             column
         }
@@ -253,7 +287,7 @@ struct Rail: View {
 
             if !store.state.agents.isEmpty {
                 VStack(spacing: 2) {
-                    ForEach(store.state.agents) { a in
+                    ForEach(store.state.agents.prefix(10)) { a in
                         Button { openAgent(a) } label: {
                             AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
                                 .frame(width: 40, height: 28)
@@ -264,18 +298,17 @@ struct Rail: View {
                     }
                 }
                 .padding(.vertical, 6)
-                .background(Ink.surface, in: Capsule())
-                .overlay(Capsule().strokeBorder(Ink.line))
+                .glassEffect(.rail, in: Capsule())
+                .glassEffectID("agents", in: glass)
+                .onHover { h in if h { rail.panel = .agents } }
             }
 
             VStack(spacing: 0) {
-                PillButton(symbol: "sparkle", help: "Ask (⌥⌥)", action: openBar)
+                PillButton(symbol: "sparkle", help: "Ask (⌥⌥)") { openBar(nil) }
                 PillButton(symbol: "gearshape", help: "Settings", action: openSettings)
-                PillButton(symbol: "graduationcap", help: "Setup guide", action: openGuide)
             }
             .padding(.vertical, 4)
-            .background(Ink.surface, in: Capsule())
-            .overlay(Capsule().strokeBorder(Ink.line))
+            .glassEffect(.rail, in: Capsule())
 
             Menu {
                 Button("Restart reflexd", action: restart)
@@ -285,17 +318,160 @@ struct Rail: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.dim)
                     .frame(width: 40, height: 40)
-                    .background(Ink.surface, in: Circle())
-                    .overlay(Circle().strokeBorder(Ink.line))
+                    .contentShape(Circle())
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
+            .glassEffect(.rail.interactive(), in: Circle())
             .help("More")
         }
     }
 }
+
+// MARK: - Agents at a glance
+
+/// Every agent, grouped by project: what it is doing, and one click to its
+/// terminal, a message, or herdr.
+private struct AgentList: View {
+    var agents: [AgentInfo]
+    var pulses: [String: Int]
+    var waiting: Int
+    var open: (AgentInfo) -> Void
+    var ask: (AgentInfo) -> Void
+    var reveal: (AgentInfo) -> Void
+    var showQuestion: () -> Void
+    @State private var rowsHeight: CGFloat = 0
+
+    /// Folders in order of first appearance, waiting agents' folders first.
+    private var groups: [(String, [AgentInfo])] {
+        let rank: [String: Int] = ["blocked": 0, "working": 1, "done": 2]
+        var order: [String] = []
+        var by: [String: [AgentInfo]] = [:]
+        for a in agents.sorted(by: { (rank[$0.status] ?? 3) < (rank[$1.status] ?? 3) }) {
+            if by[a.folder] == nil { order.append(a.folder) }
+            by[a.folder, default: []].append(a)
+        }
+        return order.map { ($0, by[$0] ?? []) }
+    }
+
+    private var summary: String {
+        let w = agents.filter { $0.status == "working" }.count
+        let b = agents.filter { $0.status == "blocked" }.count
+        var parts: [String] = []
+        if w > 0 { parts.append("\(w) working") }
+        if b > 0 { parts.append("\(b) waiting") }
+        return parts.isEmpty ? (agents.count == 1 ? "1 agent" : "\(agents.count) agents") : parts.joined(separator: " · ")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 8) {
+                Text("Agents").font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text)
+                Text(summary).font(.system(size: 11.5)).foregroundStyle(Ink.dim)
+                    .contentTransition(.numericText())
+                Spacer(minLength: 4)
+                if waiting > 0 {
+                    Button(action: showQuestion) {
+                        HStack(spacing: 4) {
+                            Circle().fill(Tone.blocked).frame(width: 6, height: 6)
+                            Text(waiting == 1 ? "1 question" : "\(waiting) questions")
+                            Image(systemName: "chevron.right").font(.system(size: 8, weight: .bold))
+                        }
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundStyle(Ink.text)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(Tone.blocked.opacity(0.18), in: Capsule())
+                    }
+                    .buttonStyle(Pressable())
+                    .fixedSize()
+                }
+            }
+            .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 6)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(groups, id: \.0) { folder, list in
+                        Text(folder.uppercased())
+                            .font(.system(size: 10, weight: .semibold)).tracking(0.9)
+                            .foregroundStyle(Ink.dim.opacity(0.8))
+                            .lineLimit(1)
+                            .padding(.horizontal, 14).padding(.top, 8).padding(.bottom, 2)
+                        ForEach(list) { a in
+                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0,
+                                     open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
+                        }
+                    }
+                }
+                .padding(.horizontal, 6).padding(.bottom, 8)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+            }
+            .scrollIndicators(.never)
+            .scrollBounceBehavior(.basedOnSize)
+            // As tall as the rows, up to a point; then it scrolls.
+            .frame(height: min(max(rowsHeight, 44), 500))
+        }
+        .frame(width: 356)
+        .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+    }
+}
+
+private struct AgentRow: View {
+    var agent: AgentInfo
+    var pulse: Int
+    var open: () -> Void
+    var ask: () -> Void
+    var reveal: () -> Void
+    @State private var hover = false
+
+    private var title: String { agent.title.isEmpty ? "\(agent.kind) · \(agent.folder)" : agent.title }
+
+    private var subtitle: String {
+        let state: String
+        switch agent.status {
+        case "working": state = "working"
+        case "blocked": state = "needs you"
+        case "done": state = "done"
+        default: state = "idle"
+        }
+        return "\(agent.kind) · \(state) · \(agent.place)"
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            AgentGlyph(status: agent.status, size: 12, pulse: pulse).frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
+                Text(subtitle).font(.system(size: 11.5)).foregroundStyle(Ink.dim).lineLimit(1).truncationMode(.middle)
+            }
+            Spacer(minLength: 6)
+            HStack(spacing: 2) {
+                action("terminal", "Open terminal", open)
+                action("sparkle", "Message this agent", ask)
+                action("arrow.up.forward.app", "Show in herdr", reveal)
+            }
+            .opacity(hover ? 1 : 0.55)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 7)
+        .background(hover ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture(perform: open)
+        .onHover { h in withAnimation(Motion.micro) { hover = h } }
+        .help("\(agent.kind) in \(agent.place)")
+    }
+
+    private func action(_ symbol: String, _ help: String, _ run: @escaping () -> Void) -> some View {
+        Button(action: run) {
+            Image(systemName: symbol).font(.system(size: 12, weight: .medium)).foregroundStyle(Ink.text)
+                .frame(width: 26, height: 26)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(Pressable())
+        .help(help)
+    }
+}
+
 
 // MARK: - Question card
 
@@ -315,6 +491,7 @@ private struct QuestionCard: View {
     var agent: AgentInfo?
     var pending: PendingInfo?
     var openAgent: (AgentInfo) -> Void
+    var showAgents: (() -> Void)?
     @State private var hoverKey: String?
 
     private var title: String {
@@ -342,6 +519,13 @@ private struct QuestionCard: View {
                     .onTapGesture { RailModel.shared.cardIndex = (index + 1) % count }
                     .help("⇥ next question")
                 }
+                if let showAgents {
+                    Button(action: showAgents) {
+                        Image(systemName: "list.bullet").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.dim)
+                    }
+                    .buttonStyle(.plain)
+                    .help("All agents")
+                }
                 Button {
                     Task { await Client.local.dismiss(item.id); await Store.shared.refresh() }
                 } label: {
@@ -353,7 +537,7 @@ private struct QuestionCard: View {
             HStack(spacing: 10) {
                 AgentGlyph(status: item.kind == "route" ? "working" : "blocked", size: 14)
                     .frame(width: 26, height: 26)
-                    .background(Ink.raised, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.agent).font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text)
                     Text(item.kind == "route" ? "Pick where your request goes" : "Waiting for your answer · \(agent?.folder ?? "")")
@@ -378,7 +562,7 @@ private struct QuestionCard: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 9)
-                        .background(hoverKey == o.key ? Ink.hover : Ink.raised, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .background(Color.white.opacity(hoverKey == o.key ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Ink.line))
                         .contentShape(Rectangle())
                     }
@@ -408,9 +592,7 @@ private struct QuestionCard: View {
         }
         .padding(16)
         .frame(width: 340)
-        .background(Ink.surface, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(Ink.line))
-        .shadow(color: .black.opacity(0.35), radius: 18, y: 8)
+        .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Motion.enter, value: pending?.id)
     }
 }
@@ -436,8 +618,7 @@ private struct KeyHint: View {
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .background(Ink.surface, in: Capsule())
-        .overlay(Capsule().strokeBorder(Ink.line))
+        .glassEffect(.rail, in: Capsule())
     }
 }
 

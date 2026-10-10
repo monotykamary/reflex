@@ -337,8 +337,17 @@ def post_fork_reply(+chan: Chan(Env), +pane: String, +label: String, r: Result<&
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
 
-def agent_name(+id: U32) -> String:
-  "rx" ++ U32.show(id)
+# Ids restart with reflexd but herdr keeps agent names, so a random suffix
+# keeps a fresh "rx1" from colliding with one an earlier run started.
+def name_suffix(r: Result<&1, &1, U32 & String, U32>) -> String:
+  match r:
+    case Done{n}:
+      U32.show((n % 10000 : U32))
+    case Fail{e}:
+      "0"
+
+def agent_name(+id: U32, r: Result<&1, &1, U32 & String, U32>) -> String:
+  "rx" ++ U32.show(id) ++ "-" ++ name_suffix(r)
 
 # A freshly started agent can refuse its first prompt for a moment
 # (agent_not_ready) while Herdr registers it; retry that, and only that.
@@ -411,8 +420,10 @@ def spawn_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +text: String, w:
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
     case Done{+pane}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent(Cfg.sock(cfg), agent_name(id), kind, pane)
-        spawned(cfg, cwd, agent_name(id), pane, text, st)
+        r : Result<&1, &1, U32 & String, U32> <- IO.random_u32()
+        +name : String <- IO.pure(String, agent_name(id, r))
+        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent(Cfg.sock(cfg), name, kind, pane)
+        spawned(cfg, cwd, name, pane, text, st)
 
 def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) -> IO(Result<&1, &1, U32 & String, String>):
   match a:

@@ -11,7 +11,10 @@ final class Onboarding: ObservableObject {
     static let shared = Onboarding()
 
     enum Step: Int, CaseIterable { case welcome, herdr, jev, projects, keys, done }
-    enum Ping: Equatable { case idle, testing, ok(Int), failed(String) }
+    enum Ping: Equatable {
+        case idle, testing, ok(Int), failed(String)
+        var isOK: Bool { if case .ok = self { return true } else { return false } }
+    }
 
     @Published var step: Step = .welcome
     @Published var forward = true
@@ -25,6 +28,10 @@ final class Onboarding: ObservableObject {
     @Published var triedHotkey = false
     @Published var triedEdge = false
     @Published var working: String?
+    /// "Try a reflex": a real request, routed dry — nothing is sent.
+    enum Trial: Equatable { case idle, routing, routed(label: String, why: String, ms: Int), failed(String) }
+    @Published var trial: Trial = .idle
+    @Published var trialText = ""
     var close: () -> Void = {}
     private(set) var isOpen = false
     private var poll: Timer?
@@ -40,7 +47,7 @@ final class Onboarding: ObservableObject {
             Task { @MainActor in self?.refresh() }
         }
         if step == .jev { test() }
-        if step == .projects { Task { await loadFolders() } }
+        if step == .projects || step == .jev { Task { await loadFolders() } }
     }
 
     func end() {
@@ -59,7 +66,8 @@ final class Onboarding: ObservableObject {
         forward = s.rawValue >= step.rawValue
         withAnimation(Motion.enter) { step = s }
         if s == .jev, ping == .idle { test() }
-        if s == .projects { Task { await loadFolders() } }
+        if s == .projects || s == .jev { Task { await loadFolders() } }
+        if s == .done, !(ping.isOK) { test() }
     }
 
     func next() { if let n = Step(rawValue: step.rawValue + 1) { go(n) } else { end() } }
@@ -80,6 +88,7 @@ final class Onboarding: ObservableObject {
         integrations = FileManager.default.fileExists(atPath: home + "/.claude/hooks/herdr-agent-state.sh")
             || FileManager.default.fileExists(atPath: home + "/.pi/agent/extensions/herdr-agent-state.ts")
         trusted = DoubleOption.trusted
+        if folders.isEmpty && Store.shared.state.folders > 0 { Task { await loadFolders() } }
     }
 
     var herdrRunning: Bool { Store.shared.connected && Store.shared.state.herdr }
@@ -89,6 +98,45 @@ final class Onboarding: ObservableObject {
     }
 
     // MARK: Actions
+
+    /// A request worth trying, about a folder you actually have.
+    var trialSuggestion: String {
+        if let f = folders.first(where: { !$0.name.isEmpty }) { return "fix the flaky test in \(f.name)" }
+        return "add a dark mode toggle to the settings page"
+    }
+
+    func tryRoute(attempt: Int = 0) {
+        let text = (trialText.isEmpty ? trialSuggestion : trialText).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty, attempt > 0 || trial != .routing else { return }
+        if trialText.isEmpty { trialText = text }
+        withAnimation(Motion.enter) { trial = .routing }
+        let start = Date()
+        Task {
+            let ms = { Int(Date().timeIntervalSince(start) * 1000) }
+            do {
+                let r = try await Client.local.route(text, dry: true)
+                let error = r.route?.error ?? r.error
+                // Right after launch reflexd is still indexing: wait for it.
+                if let e = error, e.contains("nothing to route to"), attempt < 8 {
+                    trial = .routing
+                    try? await Task.sleep(for: .seconds(2))
+                    guard trialText == text || trialText.isEmpty else { return }
+                    tryRoute(attempt: attempt + 1)
+                    return
+                }
+                let next: Trial
+                if let route = r.route, error == nil {
+                    let label = route.label ?? route.title ?? (route.decision == "choose" ? "you pick: 1, 2 or 3" : route.decision)
+                    next = .routed(label: label.bare, why: route.why ?? (route.decision == "choose" ? "not sure enough — it would ask you" : ""), ms: ms())
+                } else {
+                    next = .failed(error ?? "no answer")
+                }
+                withAnimation(Motion.arrive) { trial = next }
+            } catch {
+                withAnimation(Motion.enter) { trial = .failed("reflexd is not answering yet") }
+            }
+        }
+    }
 
     func run(_ label: String, _ command: String) {
         working = label
@@ -216,7 +264,12 @@ struct OnboardingView: View {
         }
         .frame(width: 920, height: 600)
         .environment(\.colorScheme, .dark)
-        .onKeyPress(.return) { model.next(); return .handled }
+        .onKeyPress(.return) {
+            // On the Jev step, Return routes the trial request instead.
+            guard model.step != .jev else { return .ignored }
+            model.next()
+            return .handled
+        }
     }
 
     // MARK: Copy column
@@ -264,7 +317,7 @@ struct OnboardingView: View {
         case .jev: return "A reflex,\nnot a conversation."
         case .projects: return "Where do\nyou work?"
         case .keys: return "Two taps,\none edge."
-        case .done: return "You're set."
+        case .done: return "Welcome to\nReflex."
         }
     }
 
@@ -275,13 +328,13 @@ struct OnboardingView: View {
         case .herdr:
             return "Reflex sees and talks to agents through herdr, a terminal built for them. Run your agents in it; Reflex reads their state, answers their questions and opens their terminals."
         case .jev:
-            return "No chat model rewrites your words. Jev, a System 1 model, answers three typed questions — which session, which folder, is it a side question — in a few hundred milliseconds. Below 60% confidence, Reflex asks you instead."
+            return "No chat model rewrites your words. Jev, a System 1 model, answers typed questions — which session, which folder, is it a side question — in about a second. Unsure, it asks you instead. Try one: nothing is sent."
         case .projects:
             return "Reflex indexes the repositories under these folders — names, descriptions, recent commits — so a request like “fix the flaky test in jev fabric” starts in the right place."
         case .keys:
             return "Double-tap ⌥ anywhere to ask. Rest your pointer on the right edge for half a second to see your agents. Try both now."
         case .done:
-            return "Here's everything, in one breath."
+            return "Your card, and everything in one breath. All of this lives in Settings too."
         }
     }
 
@@ -419,12 +472,13 @@ struct OnboardingView: View {
     private var stage: some View {
         ZStack {
             switch model.step {
-            case .welcome: RailIllustration()
+            case .welcome: EdgeStory()
             case .herdr: PanesIllustration(agents: store.state.agents)
-            case .jev: DecisionIllustration(ping: model.ping)
+            case .jev: TryReflex(model: model)
             case .projects: FoldersIllustration(folders: model.folders)
             case .keys: KeysIllustration(hotkey: model.triedHotkey, edge: model.triedEdge)
-            case .done: RailIllustration(celebrate: true)
+            case .done: MemberCard(repos: store.state.folders, agents: store.state.agents.count,
+                                   harness: settings.harness, ping: model.ping)
             }
         }
         .id(model.step)
@@ -461,7 +515,7 @@ struct OnboardingView: View {
             .buttonStyle(.glassProminent)
             .tint(Tone.working)
             .controlSize(.large)
-            .keyboardShortcut(.defaultAction)
+            .keyboardShortcut(model.step == .jev ? nil : .defaultAction)
         }
         .padding(.horizontal, 48)
         .padding(.bottom, 32)
@@ -556,47 +610,6 @@ private struct Backdrop: View {
 
 // MARK: - Illustrations
 
-private struct RailIllustration: View {
-    var celebrate = false
-    @State private var bud = false
-    var body: some View {
-        HStack(alignment: .center, spacing: 14) {
-            if bud {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(spacing: 6) {
-                        Circle().fill(Tone.blocked).frame(width: 6, height: 6)
-                        Text("claude · api").font(Type.title)
-                        Text("needs you").font(Type.meta).foregroundStyle(.secondary)
-                    }
-                    Text("Run the migration?").font(Type.meta)
-                    HStack(spacing: 6) {
-                        KeyCap(key: "1", tint: Tone.blocked); Text("Yes").font(Type.meta)
-                        KeyCap(key: "2", tint: Tone.blocked); Text("No").font(Type.meta)
-                    }
-                }
-                .padding(14)
-                .glassEffect(.regular.tint(Tone.blocked.opacity(0.18)), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                .transition(.surface())
-            }
-            VStack(spacing: 14) {
-                Text(celebrate ? "✓" : "2").font(Type.count).foregroundStyle(.white)
-                    .frame(width: 22, height: 22).background((celebrate ? Tone.done : Tone.blocked), in: Circle())
-                Bead(status: "working", size: 10)
-                Bead(status: "blocked", size: 10)
-                Bead(status: "done", size: 10)
-                Bead(status: "working", size: 10)
-                Image(systemName: "sparkle").font(.system(size: 11)).foregroundStyle(.secondary)
-            }
-            .padding(.vertical, 16).padding(.horizontal, 10)
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        }
-        .task {
-            try? await Task.sleep(for: .milliseconds(700))
-            withAnimation(Motion.spring) { bud = true }
-        }
-    }
-}
-
 private struct PanesIllustration: View {
     var agents: [AgentInfo]
     private var rows: [(String, String)] {
@@ -621,53 +634,6 @@ private struct PanesIllustration: View {
         .frame(width: 330)
         .padding(18)
         .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
-}
-
-private struct DecisionIllustration: View {
-    var ping: Onboarding.Ping
-    @State private var fill = false
-    var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("“fix the flaky follow test in jev fabric”")
-                .font(.system(size: 15, design: .serif)).foregroundStyle(.white.opacity(0.9))
-            Divider().opacity(0.3)
-            bar("target", "pi · jev-fabric", 0.97, Tone.working)
-            bar("folder", "jev-fabric", 1.0, Tone.route)
-            bar("side question", "no", 0.31, Tone.blocked)
-            HStack {
-                Image(systemName: "bolt.fill").foregroundStyle(Tone.done)
-                Text(latency).font(.system(size: 12, design: .monospaced)).foregroundStyle(.white.opacity(0.7))
-            }
-        }
-        .frame(width: 330)
-        .padding(20)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .task {
-            try? await Task.sleep(for: .milliseconds(250))
-            withAnimation(.timingCurve(0.23, 1, 0.32, 1, duration: 0.7)) { fill = true }
-        }
-    }
-
-    private var latency: String {
-        if case .ok(let ms) = ping { return "jev · \(ms) ms · typed, no text" }
-        return "jev · typed answers, no text"
-    }
-
-    private func bar(_ q: String, _ answer: String, _ p: Double, _ tone: Color) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            HStack {
-                Text(q).font(.system(size: 11, weight: .semibold)).textCase(.uppercase).tracking(0.8).foregroundStyle(.white.opacity(0.45))
-                Spacer()
-                Text(answer).font(.system(size: 12.5, weight: .semibold))
-                Text("\(Int(p * 100))%").font(.system(size: 12, design: .monospaced)).foregroundStyle(.white.opacity(0.6))
-            }
-            GeometryReader { g in
-                Capsule().fill(.white.opacity(0.08))
-                Capsule().fill(tone).frame(width: g.size.width * (fill ? p : 0))
-            }
-            .frame(height: 5)
-        }
     }
 }
 
@@ -769,5 +735,256 @@ private struct EdgeDemo: View {
                 try? await Task.sleep(for: .milliseconds(600))
             }
         }
+    }
+}
+
+// MARK: - Welcome: the edge, told in five seconds
+
+/// A tiny screen: a tab grows out of its right edge, agents light up one by
+/// one, a question buds out, gets answered with "1", and drains away.
+private struct EdgeStory: View {
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var beat = 0
+
+    private var glyphs: [String] {
+        switch beat {
+        case 0: return []
+        case 1: return ["working"]
+        case 2: return ["working", "blocked"]
+        case 3, 4: return ["working", "blocked", "done"]
+        default: return ["working", "working", "done"]
+        }
+    }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            // The "screen": a few quiet windows.
+            RoundedRectangle(cornerRadius: 18, style: .continuous)
+                .fill(.white.opacity(0.035))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.09)))
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(0..<6, id: \.self) { i in
+                    Capsule().fill(.white.opacity(0.06)).frame(width: [180, 230, 140, 210, 120, 190][i], height: 7)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .padding(26)
+
+            HStack(spacing: 10) {
+                if beat == 4 { question.transition(.surface(reduce: reduce)) }
+                if beat >= 1 {
+                    VStack(spacing: 10) {
+                        ForEach(Array(glyphs.enumerated()), id: \.offset) { _, g in
+                            AgentGlyph(status: g, size: 11)
+                                .transition(.scale(scale: 0.6).combined(with: .opacity))
+                        }
+                    }
+                    .padding(.vertical, 9 + 12).padding(.leading, 8).padding(.trailing, 7)
+                    .glassEffect(.regular.tint(Color.black.opacity(0.72)), in: EdgeTabShape())
+                    .transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
+                }
+            }
+        }
+        .frame(width: 380, height: 300)
+        .clipShape(RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .animation(Motion.spring, value: beat)
+        .task {
+            if reduce { beat = 4; return }
+            while !Task.isCancelled {
+                for (b, wait) in [(0, 500), (1, 600), (2, 600), (3, 700), (4, 1900), (5, 1800)] {
+                    beat = b
+                    try? await Task.sleep(for: .milliseconds(wait))
+                }
+            }
+        }
+    }
+
+    private var question: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                AgentGlyph(status: "blocked", size: 9)
+                Text("claude · api").font(.system(size: 12, weight: .semibold))
+            }
+            Text("Run the migration now?").font(.system(size: 12.5))
+            HStack(spacing: 6) {
+                KeyCap(key: "1", tint: Tone.blocked); Text("Yes").font(.system(size: 11.5))
+                KeyCap(key: "2", tint: Tone.blocked); Text("Not yet").font(.system(size: 11.5))
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(12)
+        .glassEffect(.regular.tint(Color.black.opacity(0.6)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+// MARK: - Jev: try a reflex
+
+/// A real request, routed for real but dry: you see where it would go and
+/// how long Jev took. Nothing is sent.
+private struct TryReflex: View {
+    @ObservedObject var model: Onboarding
+    @FocusState private var focused: Bool
+
+    private var examples: [String] {
+        var out = [model.trialSuggestion]
+        if let f = model.folders.dropFirst().first { out.append("what changed in \(f.name) this week?") }
+        out.append("btw why is the build slow?")
+        return out
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Try a reflex").font(.system(size: 11, weight: .semibold)).tracking(1.4).textCase(.uppercase)
+                .foregroundStyle(.white.opacity(0.5))
+            HStack(spacing: 10) {
+                Image(systemName: "sparkle").foregroundStyle(Tone.route)
+                TextField("", text: $model.trialText, prompt: Text(model.trialSuggestion).foregroundStyle(.white.opacity(0.4)))
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 15))
+                    .focused($focused)
+                    .onSubmit { model.tryRoute() }
+                    .onChange(of: model.trialText) { _, _ in if model.trial != .routing { model.trial = .idle } }
+                KeyCap(key: "⏎", tint: .white)
+            }
+            .padding(.horizontal, 16).padding(.vertical, 13)
+            .glassEffect(.regular.tint(Color.black.opacity(0.4)).interactive(), in: Capsule())
+            .overlay(alignment: .bottom) {
+                if model.trial == .routing { ThinkingLine().frame(height: 2).padding(.horizontal, 24).clipShape(Capsule()) }
+            }
+
+            result.frame(minHeight: 96, alignment: .top)
+
+            HStack(spacing: 6) {
+                ForEach(examples, id: \.self) { e in
+                    Button { model.trialText = e; model.tryRoute() } label: {
+                        Text(e).font(.system(size: 11.5)).lineLimit(1).padding(.horizontal, 10).padding(.vertical, 6)
+                    }
+                    .buttonStyle(Pressable())
+                    .glassEffect(.regular.interactive(), in: Capsule())
+                }
+            }
+            .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(width: 400)
+        .onAppear { focused = true }
+    }
+
+    @ViewBuilder private var result: some View {
+        switch model.trial {
+        case .idle:
+            Text("Press Return. Jev decides where it would go — a session, a new one in a folder, or a side question. Nothing is sent.")
+                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
+        case .routing:
+            Text(Store.shared.state.folders == 0 ? "Reading your projects, then asking Jev…" : "Asking Jev…")
+                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.55))
+        case .routed(let label, let why, let ms):
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "arrow.turn.down.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(Tone.done)
+                    .frame(width: 30, height: 30)
+                    .glassEffect(.regular.tint(Tone.done.opacity(0.25)), in: Circle())
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(label).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
+                    if !why.isEmpty { Text(why).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6)) }
+                    Text(verbatim: "jev · \(ms) ms · dry run, nothing sent").font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
+                        .padding(.top, 2)
+                }
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .glassEffect(.regular.tint(Color.black.opacity(0.35)), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .transition(.surface())
+        case .failed(let e):
+            Label(e, systemImage: "exclamationmark.triangle.fill").font(.system(size: 12.5)).foregroundStyle(Tone.blocked)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+// MARK: - Done: your Reflex card
+
+/// Arc gave you a membership card; Reflex gives you one too, made from your
+/// setup. It leans toward the pointer.
+private struct MemberCard: View {
+    var repos: Int
+    var agents: Int
+    var harness: String
+    var ping: Onboarding.Ping
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var tilt = CGSize.zero
+    @State private var shown = false
+
+    private var name: String {
+        let n = NSFullUserName()
+        return n.isEmpty ? NSUserName() : n
+    }
+
+    private var since: String {
+        let f = DateFormatter()
+        f.dateFormat = "MMMM yyyy"
+        return f.string(from: Date())
+    }
+
+    private var jev: String {
+        if case .ok(let ms) = ping { return "\(ms) ms" }
+        return "—"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("REFLEX").font(.system(size: 13, weight: .bold)).tracking(4)
+                Spacer()
+                HStack(spacing: 6) {
+                    AgentGlyph(status: "working", size: 10)
+                    AgentGlyph(status: "blocked", size: 10)
+                    AgentGlyph(status: "done", size: 10)
+                }
+                .padding(.horizontal, 9).padding(.vertical, 6)
+                .glassEffect(.regular.tint(Color.black.opacity(0.6)), in: Capsule())
+            }
+            Spacer()
+            Text(name).font(.system(size: 26, weight: .regular, design: .serif)).lineLimit(1).minimumScaleFactor(0.6)
+            Text("Member since \(since)").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55)).padding(.top, 2)
+            Spacer().frame(height: 18)
+            HStack(spacing: 0) {
+                stat("\(repos)", "repos")
+                stat("\(agents)", agents == 1 ? "agent" : "agents")
+                stat(harness, "starts new")
+                stat(jev, "jev")
+            }
+        }
+        .foregroundStyle(.white)
+        .padding(22)
+        .frame(width: 380, height: 240)
+        .glassEffect(.regular.tint(Color.black.opacity(0.45)).interactive(), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rotation3DEffect(.degrees(Double(tilt.height) * 9), axis: (x: 1, y: 0, z: 0), perspective: 0.6)
+        .rotation3DEffect(.degrees(Double(-tilt.width) * 11), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
+        .scaleEffect(shown || reduce ? 1 : 0.92)
+        .opacity(shown || reduce ? 1 : 0)
+        .rotation3DEffect(.degrees(shown || reduce ? 0 : 14), axis: (x: 1, y: 0, z: 0))
+        .onContinuousHover { phase in
+            guard !reduce else { return }
+            switch phase {
+            case .active(let p):
+                withAnimation(.spring(duration: 0.4, bounce: 0)) {
+                    tilt = CGSize(width: (p.x - 190) / 190, height: (p.y - 120) / 120)
+                }
+            case .ended:
+                withAnimation(.spring(duration: 0.6, bounce: 0.2)) { tilt = .zero }
+            }
+        }
+        .task {
+            try? await Task.sleep(for: .milliseconds(120))
+            withAnimation(Motion.arrive) { shown = true }
+        }
+    }
+
+    private func stat(_ value: String, _ label: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(value).font(.system(size: 14, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.7)
+                .contentTransition(.numericText())
+            Text(label).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.5))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
