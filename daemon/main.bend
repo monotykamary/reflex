@@ -423,6 +423,79 @@ def prompt_retry(fuel: Nat, +sock: String, +pane: String, +text: String, st: PTr
         next : PTry <- prompt_step(sock, pane, text, st)
         prompt_retry(p, sock, pane, text, next)
 
+# A prompt taken as typing, never sent
+# ------------------------------------
+# A freshly started TUI can read a prompt and its Enter as one paste, and in a
+# paste Enter is a new line: the words sit in its input and nothing runs. So
+# after each prompt, in the background: still idle a moment later, with the
+# request's opening words on its screen, it gets an Enter (at most three
+# times; an Enter on an empty input does nothing).
+
+def opening.of(lines: List<&2, String>) -> String:
+  match lines:
+    case Nil{}:
+      ""
+    case Con{h, t}:
+      String.take(String.trim(h), 24n)
+
+def opening(+text: String) -> String:
+  opening.of(String.lines(text))
+
+def screen_of(r: Result<&1, &1, U32 & String, String>) -> String:
+  match r:
+    case Done{t}:
+      t
+    case Fail{e}:
+      ""
+
+def unsent(+status: String, +screen: String, +probe: String) -> Bool:
+  ready_status(status) && Core.bool_not(String.is_empty(probe)) && String.contains(screen, probe)
+
+def press_if(go: Bool, +sock: String, +pane: String) -> IO(Bool):
+  match go:
+    case True{}:
+      do IO<Bool>:
+        k : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(sock, pane, "enter")
+        IO.print("prompt in " ++ pane ++ " was typed but not sent: pressed Enter")
+        return True{}
+    case False{}:
+      IO.pure(Bool, False{})
+
+# Checks while the last one pressed Enter (live), up to fuel times.
+def confirm(fuel: Nat, live: Bool, +sock: String, +pane: String, +probe: String) -> IO(Unit):
+  match fuel live:
+    case 0n _:
+      IO.pure(Unit, Unit{})
+    case 1n+p False{}:
+      IO.pure(Unit, Unit{})
+    case 1n+p True{}:
+      do IO<Unit>:
+        IO.sleep(2500)
+        s : String <- Herdr.pane_status(sock, pane)
+        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(sock, pane, "visible", 40)
+        pressed : Bool <- press_if(unsent(s, screen_of(r), probe), sock, pane)
+        confirm(p, pressed, sock, pane, probe)
+
+def confirm.start(go: Bool, +sock: String, +pane: String, +text: String) -> IO(Unit):
+  match go:
+    case True{}:
+      do IO<Unit>:
+        IO.spawn(Unit, confirm(4n, True{}, sock, pane, opening(text)))
+        return Unit{}
+    case False{}:
+      IO.pure(Unit, Unit{})
+
+
+# A prompt to a live session: delivered, then watched until it runs.
+def prompted(+sock: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
+  match r:
+    case Done{v}:
+      do IO<Result<&1, &1, U32 & String, String>>:
+        confirm.start(True{}, sock, pane, text)
+        return ok_detail(Done{v}, "sent")
+    case Fail{e}:
+      IO.pure(Result<&1, &1, U32 & String, String>, ok_detail(Fail{e}, "sent"))
+
 def record_use(ok: Bool, +cfg: Cfg, +cwd: String) -> IO(Unit):
   match ok:
     case True{}:
@@ -461,6 +534,7 @@ def spawned(+cfg: Cfg, +cwd: String, +name: String, +pane: String, +text: String
       do IO<Result<&1, &1, U32 & String, String>>:
         +st : PTry <- prompt_if(String.is_empty(String.trim(text)), cfg, pane, text)
         record_use(PTry.ok(st), cfg, cwd)
+        confirm.start(PTry.ok(st) && Core.bool_not(String.is_empty(String.trim(text))), Cfg.sock(cfg), pane, text)
         return spawn_result(name, pane, st)
 
 def spawn_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +text: String, w: Result<&1, &1, U32 & String, String>) -> IO(Result<&1, &1, U32 & String, String>):
@@ -502,10 +576,10 @@ def resume_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +args: List<&2, 
 
 def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) -> IO(Result<&1, &1, U32 & String, String>):
   match a:
-    case M.Prompt{pane, text}:
+    case M.Prompt{+pane, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(Cfg.sock(cfg), pane, text)
-        return ok_detail(r, "sent")
+        prompted(Cfg.sock(cfg), pane, text, r)
     case M.Press{pane, +key}:
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.sock(cfg), pane, key)
