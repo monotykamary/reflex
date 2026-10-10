@@ -121,6 +121,15 @@ enum Type {
 
 // MARK: Shared pieces
 
+/// Where a looping motion is right now, 0…1, read from the clock — so it
+/// can't stall the way a once-started "repeat forever" animation does when
+/// a view changes state after it appeared.
+enum Loop {
+    static func phase(_ date: Date, period: Double) -> Double {
+        date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: period) / period
+    }
+}
+
 /// An agent as a bead of light. Working beads breathe; a blocked bead wears a
 /// ring; a bead that just received something bumps once.
 struct Bead: View {
@@ -128,20 +137,21 @@ struct Bead: View {
     var size: CGFloat = 8
     var pulse: Int = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
-    @State private var breathe = false
 
     var body: some View {
         let tone = Tone.of(status)
-        ZStack {
-            Circle().fill(tone)
-                .shadow(color: tone.opacity(status == "idle" || status == "unknown" ? 0 : 0.7), radius: 4)
-            if status == "blocked" {
-                Circle().strokeBorder(tone.opacity(0.55), lineWidth: 1.2).scaleEffect(1.9)
+        TimelineView(.animation(minimumInterval: 1.0 / 30, paused: status != "working" || reduce)) { ctx in
+            ZStack {
+                Circle().fill(tone)
+                    .shadow(color: tone.opacity(status == "idle" || status == "unknown" ? 0 : 0.7), radius: 4)
+                if status == "blocked" {
+                    Circle().strokeBorder(tone.opacity(0.55), lineWidth: 1.2).scaleEffect(1.9)
+                }
             }
+            .frame(width: size, height: size)
+            // Working: breathes between full and 55% every 2.8 s.
+            .opacity(status == "working" && !reduce ? 0.775 + 0.225 * cos(2 * .pi * Loop.phase(ctx.date, period: 2.8)) : 1)
         }
-        .frame(width: size, height: size)
-        .opacity(status == "working" && breathe && !reduce ? 0.55 : 1)
-        .animation(status == "working" && !reduce ? .easeInOut(duration: 1.4).repeatForever(autoreverses: true) : .default, value: breathe)
         .keyframeAnimator(initialValue: CGFloat(1), trigger: pulse) { v, scale in
             v.scaleEffect(scale)
         } keyframes: { _ in
@@ -152,7 +162,6 @@ struct Bead: View {
                 SpringKeyframe(1, duration: 0.32, spring: .bouncy)
             }
         }
-        .onAppear { breathe = true }
     }
 }
 
@@ -202,20 +211,19 @@ struct CountdownLine: View {
 
 /// An indeterminate shimmer along an edge while Jev thinks.
 struct ThinkingLine: View {
-    @State private var x: CGFloat = -0.4
     @Environment(\.accessibilityReduceMotion) private var reduce
     var body: some View {
-        GeometryReader { g in
-            LinearGradient(colors: [.clear, Tone.route.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
-                .frame(width: g.size.width * 0.4)
-                .offset(x: g.size.width * x)
+        TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduce)) { ctx in
+            GeometryReader { g in
+                let t = Loop.phase(ctx.date, period: 0.9)
+                let eased = t < 0.5 ? 2 * t * t : 1 - pow(-2 * t + 2, 2) / 2
+                LinearGradient(colors: [.clear, Tone.route.opacity(0.9), .clear], startPoint: .leading, endPoint: .trailing)
+                    .frame(width: g.size.width * 0.4)
+                    .offset(x: g.size.width * (reduce ? 0.3 : -0.4 + 1.4 * eased))
+            }
         }
         .frame(height: 2)
         .clipped()
-        .onAppear {
-            guard !reduce else { return }
-            withAnimation(.easeInOut(duration: 0.9).repeatForever(autoreverses: false)) { x = 1 }
-        }
     }
 }
 

@@ -43,9 +43,32 @@ enum Sessions {
     /// when `open` is set. Returns the dispatch, or throws.
     @MainActor @discardableResult
     static func resume(_ p: PastSession, mode: String? = nil, text: String = "", open: Bool) async throws -> PendingInfo {
-        let d = try await Client.local.resume(p, mode: mode ?? p.mode, text: text)
+        var how = mode ?? p.mode
+        // A stopped `claude --bg` session won't take --resume (Claude prints
+        // "Resume this session with…" and exits): restart it, then attach.
+        if p.agent == "claude", p.state == .background, how == "resume" {
+            await respawn(p.id)
+            how = "attach"
+        }
+        let d = try await Client.local.resume(p, mode: how, text: text)
         if open { openWhenStarted(d.id) }
         return d
+    }
+
+    /// `claude respawn <id>`: restart a stopped background session.
+    @MainActor static func respawn(_ id: String) async {
+        let env = Daemon.shared.childEnvironment()
+        await Task.detached {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            p.arguments = ["claude", "respawn", id]
+            p.environment = env
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            p.standardInput = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { return }
+            p.waitUntilExit()
+        }.value
     }
 
     /// A new session's pane is known once it has started ("started rx1-42 in

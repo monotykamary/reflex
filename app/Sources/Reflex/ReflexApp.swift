@@ -137,7 +137,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "agents":
                 if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
                 RailModel.shared.panel = .agents
-            case "rail": if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
+            case "rail":
+                if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
+                // Dev: close it again, to watch the exit.
+                if ProcessInfo.processInfo.environment["REFLEX_DEMO_HIDE"] != nil {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.edge.hide() }
+                }
             case "none": break
             case "onboarding":
                 let step = Int(ProcessInfo.processInfo.environment["REFLEX_STEP"] ?? "0") ?? 0
@@ -318,7 +323,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Open: size up now. Closed: wait for the exit animation, then size down.
         RailModel.shared.$visible.removeDuplicates().sink { [weak self] open in
-            DispatchQueue.main.asyncAfter(deadline: .now() + (open ? 0 : 0.22)) {
+            if !open { self?.railClosingUntil = Date().addingTimeInterval(0.24) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (open ? 0 : 0.24)) {
                 guard RailModel.shared.visible == open else { return }
                 self?.placeStrip()
             }
@@ -397,6 +403,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var side: KeyPanel?
+    /// Until when the rail's exit animation is still playing.
+    private var railClosingUntil = Date.distantPast
     private var railKeys: KeyPanel?
     private var placeQueued = false
     private var sideFit = 0
@@ -430,10 +438,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let size = c == .zero ? NSSize(width: Rail.columnWidth, height: 300) : NSSize(width: ceil(c.width), height: min(s.height, ceil(c.height)))
             column = centred(size, right: s.maxX)
         } else {
-            let n = CGFloat(max(1, min(8, Rail.active(Store.shared.state.agents).count)))
-            column = centred(NSSize(width: 30, height: 42 + 22 * n - 11), right: s.maxX)
+            column = centred(NSSize(width: 30, height: Rail.tabHeight(Store.shared.state.agents)), right: s.maxX)
         }
-        if p.frame != column { p.setFrame(column, display: true) }
+        // Closing: the column fades out in its own window, so that window
+        // keeps its size until the fade is done (the visible sink places it
+        // then). Shrinking it at once clipped the column away in one frame.
+        let closing = !rail.visible && Date() < railClosingUntil && p.frame.width > column.width
+        if p.frame != column && !closing { p.setFrame(column, display: true) }
 
         guard let sp = side else { return }
         let mode = Rail.side(rail, Store.shared, inboxShown: InboxModel.shared.shown)
@@ -658,7 +669,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let titlebar = w.frame.height - w.contentLayoutRect.height
         w.contentView = NSHostingView(rootView: AgentPopout(session: session, titlebar: max(titlebar, 28)))
         w.isReleasedWhenClosed = false
-        w.tabbingMode = .preferred
+        // One window per session — never merged into tabs, whatever the
+        // system's "prefer tabs" setting says.
+        w.tabbingMode = .disallowed
         w.center()
         Themes.shared.$current.sink { [weak w] t in
             w?.backgroundColor = NSColor(hex: t.background)

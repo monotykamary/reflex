@@ -26,6 +26,8 @@ final class RailModel: ObservableObject {
     @Published var panel: Panel = .auto
     /// Typed while the pointer is on the agent list: filters it.
     @Published var filter = ""
+    /// The list shows only this state ("blocked", "working", "done", "idle").
+    @Published var stateFilter: String?
     /// The pointer is on the rail.
     @Published var hovering = false
     /// The dot under the pointer, whose status shows beside the column.
@@ -51,17 +53,19 @@ struct AgentGlyph: View {
     var size: CGFloat = 12
     var pulse: Int = 0
     @Environment(\.accessibilityReduceMotion) private var reduce
-    @State private var spin = false
 
     var body: some View {
         ZStack {
             switch status {
             case "working":
                 Circle().stroke(Tone.working.opacity(0.25), lineWidth: 1.6)
-                Circle().trim(from: 0, to: 0.72)
-                    .stroke(Tone.working, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                    .rotationEffect(.degrees(spin ? 360 : 0))
-                    .animation(reduce ? nil : .linear(duration: 0.9).repeatForever(autoreverses: false), value: spin)
+                // One turn every 0.9 s, read from the clock: it never stalls,
+                // however the agent's state came and went.
+                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduce)) { ctx in
+                    Circle().trim(from: 0, to: 0.72)
+                        .stroke(Tone.working, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
+                        .rotationEffect(.degrees(reduce ? 0 : 360 * Loop.phase(ctx.date, period: 0.9)))
+                }
             case "blocked":
                 Circle().fill(Tone.blocked).frame(width: size * 0.62, height: size * 0.62)
             case "done":
@@ -79,7 +83,6 @@ struct AgentGlyph: View {
                 SpringKeyframe(1, duration: 0.3, spring: .bouncy)
             }
         }
-        .onAppear { spin = true }
     }
 }
 
@@ -159,12 +162,66 @@ private struct PillButton: View {
 enum RailSideMode: Equatable {
     case none, question, agents
     /// A hovered dot's status pill, at that dot's row.
-    case pill(index: Int, agent: AgentInfo)
+    case pill(index: Int, status: String, label: String, word: String)
+}
+
+/// One row of the dot column or the edge tab: an agent, or — once there are
+/// too many to show one by one — a state and how many agents are in it.
+enum RailDot: Identifiable, Equatable {
+    case agent(AgentInfo)
+    case state(String, Int)
+
+    var id: String {
+        switch self {
+        case .agent(let a): return a.pane
+        case .state(let s, _): return "state:" + s
+        }
+    }
+
+    var status: String {
+        switch self {
+        case .agent(let a): return Rail.norm(a.status)
+        case .state(let s, _): return s
+        }
+    }
 }
 
 extension Rail {
     /// The button column alone: 40 pt buttons, the badge's overhang, the edge margin.
     static let columnWidth: CGFloat = 60
+    /// Past these, the tab and the dots count agents per state instead.
+    static let tabLimit = 5
+    static let dotLimit = 8
+    static let states = ["blocked", "working", "done", "idle"]
+
+    static func norm(_ status: String) -> String { states.contains(status) ? status : "idle" }
+
+    /// Waiting first, then working, done, idle; most recently switched first within.
+    @MainActor static func ordered(_ agents: [AgentInfo]) -> [AgentInfo] {
+        let rank = Dictionary(uniqueKeysWithValues: states.enumerated().map { ($1, $0) })
+        return Recents.shared.sorted(agents).enumerated().sorted { l, r in
+            let a = rank[norm(l.element.status)]!, b = rank[norm(r.element.status)]!
+            return a != b ? a < b : l.offset < r.offset
+        }.map(\.element)
+    }
+
+    /// One dot per agent while they fit; past `limit`, one row per state.
+    @MainActor static func dots(_ agents: [AgentInfo], limit: Int) -> [RailDot] {
+        if agents.count <= limit { return ordered(agents).map { .agent($0) } }
+        return states.compactMap { s in
+            let n = agents.filter { norm($0.status) == s }.count
+            return n > 0 ? .state(s, n) : nil
+        }
+    }
+
+    /// The edge tab's height for these rows (glyphs, or glyph-and-count).
+    @MainActor static func tabHeight(_ agents: [AgentInfo]) -> CGFloat {
+        let rows = dots(active(agents), limit: tabLimit)
+        let body = rows.reduce(CGFloat(0)) { h, r in
+            if case .state = r { return h + 23 } else { return h + 11 }
+        }
+        return 42 + body + 11 * CGFloat(max(0, rows.count - 1))
+    }
 
     static func active(_ agents: [AgentInfo]) -> [AgentInfo] {
         agents.filter { ["working", "blocked", "done"].contains($0.status) }
@@ -185,8 +242,12 @@ extension Rail {
         guard rail.visible, !inboxShown else { return .none }
         let agents = store.state.agents
         if rail.panel == .agents && !agents.isEmpty { return .agents }
-        if rail.panel != .agents, let pane = rail.hoverDot, let i = agents.prefix(10).firstIndex(where: { $0.pane == pane }) {
-            return .pill(index: i, agent: agents[i])
+        let rows = dots(agents, limit: dotLimit)
+        if rail.panel != .agents, let id = rail.hoverDot, let i = rows.firstIndex(where: { $0.id == id }) {
+            switch rows[i] {
+            case .agent(let a): return .pill(index: i, status: norm(a.status), label: a.folder, word: StatusPill.word(a.status))
+            case .state(let s, let n): return .pill(index: i, status: s, label: "\(n)", word: StatusPill.word(s).lowercased())
+            }
         }
         return card(rail, store.state.inbox) != nil ? .question : .none
     }
@@ -267,7 +328,7 @@ struct Rail: View {
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { Rail.key($0) }
         .onChange(of: rail.visible) { _, open in
-            if !open { rail.panel = .auto; rail.hoverDot = nil; rail.filter = "" }
+            if !open { rail.panel = .auto; rail.hoverDot = nil; rail.filter = ""; rail.stateFilter = nil }
         }
     }
 
@@ -275,9 +336,21 @@ struct Rail: View {
 
     private var tab: some View {
         VStack(spacing: 11) {
-            ForEach(Rail.active(store.state.agents).prefix(8)) { a in
-                AgentGlyph(status: a.status, size: 11, pulse: store.pulses[a.pane] ?? 0)
-                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+            ForEach(Rail.dots(Rail.active(store.state.agents), limit: Rail.tabLimit)) { row in
+                switch row {
+                case .agent(let a):
+                    AgentGlyph(status: a.status, size: 11, pulse: store.pulses[a.pane] ?? 0)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                case .state(let s, let n):
+                    // Many agents: the state, and how many are in it.
+                    VStack(spacing: 1) {
+                        AgentGlyph(status: s, size: 11)
+                        Text(verbatim: "\(n)").font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Ink.dim).contentTransition(.numericText(value: Double(n)))
+                    }
+                    .frame(height: 23)
+                    .transition(.opacity)
+                }
             }
         }
         .padding(.vertical, 9 + 12)
@@ -287,6 +360,25 @@ struct Rail: View {
     }
 
     // MARK: Column
+
+    private func open(_ row: RailDot) {
+        if case .state(let s, _) = row {
+            // Straight to that state's agents; the same row again puts them away.
+            if side == .agents && rail.stateFilter == s { toggleAgents(); return }
+            rail.stateFilter = s
+            if side != .agents { toggleAgents() }
+            return
+        }
+        rail.stateFilter = nil
+        toggleAgents()
+    }
+
+    private func accessibility(_ row: RailDot) -> String {
+        switch row {
+        case .agent(let a): return "\(a.kind) in \(a.folder), \(StatusPill.word(a.status))"
+        case .state(let s, let n): return "\(n) agents \(StatusPill.word(s).lowercased())"
+        }
+    }
 
     private func toggleAgents() {
         if inbox.shown { InboxModel.shared.shown = false }
@@ -318,37 +410,39 @@ struct Rail: View {
 
             if !store.state.agents.isEmpty {
                 // The dots: click for every agent's details, click again to put them away.
+                // Up to 8, one dot per agent; past that, one row per state with
+                // its count — click it for the list, filtered to that state.
                 VStack(spacing: 0) {
-                    ForEach(store.state.agents.prefix(10)) { a in
-                        Button(action: toggleAgents) {
-                            AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
-                                .frame(width: 40, height: 28)
-                                .contentShape(Rectangle())
+                    ForEach(Rail.dots(store.state.agents, limit: Rail.dotLimit)) { row in
+                        Button { open(row) } label: {
+                            Group {
+                                switch row {
+                                case .agent(let a):
+                                    AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
+                                case .state(let s, let n):
+                                    VStack(spacing: 0) {
+                                        AgentGlyph(status: s, size: 10)
+                                        Text(verbatim: "\(n)").font(.system(size: 9, weight: .semibold, design: .rounded))
+                                            .foregroundStyle(Ink.dim).contentTransition(.numericText(value: Double(n)))
+                                    }
+                                }
+                            }
+                            .frame(width: 40, height: 28)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(Pressable())
                         .onHover { h in
                             if h {
-                                rail.hoverDot = a.pane
+                                rail.hoverDot = row.id
                             } else {
                                 // A beat before letting go: sliding to the next dot
                                 // moves the pill instead of dropping and redrawing it.
                                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-                                    if rail.hoverDot == a.pane { rail.hoverDot = nil }
+                                    if rail.hoverDot == row.id { rail.hoverDot = nil }
                                 }
                             }
                         }
-                        .accessibilityLabel("\(a.kind) in \(a.folder), \(StatusPill.word(a.status))")
-                    }
-                    if store.state.agents.count > 10 {
-                        Button(action: toggleAgents) {
-                            Text("+\(store.state.agents.count - 10)")
-                                .font(.system(size: 10, weight: .semibold, design: .rounded))
-                                .foregroundStyle(Ink.dim)
-                                .contentTransition(.numericText(value: Double(store.state.agents.count)))
-                                .frame(width: 40, height: 20)
-                                .contentShape(Rectangle())
-                        }
-                        .buttonStyle(Pressable())
+                        .accessibilityLabel(accessibility(row))
                     }
                 }
                 .padding(.vertical, 6)
@@ -434,11 +528,11 @@ struct RailSide: View {
                       open: openAgent, ask: { openBar($0) }, reveal: reveal,
                       showQuestion: { rail.panel = .question })
                 .transition(.surface(reduce: reduce))
-        case .pill(let i, let a):
+        case .pill(let i, let status, let label, let word):
             // Level with its dot: the same height as the column, pill at the dot's row.
             VStack(spacing: 0) {
                 Color.clear.frame(height: max(0, Rail.dotCenter(i) - 13))
-                StatusPill(agent: a).fixedSize().frame(height: 26)
+                StatusPill(status: status, label: label, word: word).fixedSize().frame(height: 26)
                 Spacer(minLength: 0)
             }
             .frame(height: max(26, rail.columnSize.height - 24), alignment: .top)
@@ -455,7 +549,9 @@ struct RailSide: View {
 
 /// getone-style: hovering a dot names its state beside it.
 private struct StatusPill: View {
-    var agent: AgentInfo
+    var status: String
+    var label: String
+    var word: String
 
     static func word(_ status: String) -> String {
         switch status {
@@ -468,9 +564,9 @@ private struct StatusPill: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Circle().fill(Tone.of(agent.status)).frame(width: 6, height: 6)
-            Text(agent.folder).foregroundStyle(Ink.dim)
-            Text(StatusPill.word(agent.status)).foregroundStyle(Ink.text)
+            Circle().fill(Tone.of(status)).frame(width: 6, height: 6)
+            Text(label).foregroundStyle(Ink.dim)
+            Text(word).foregroundStyle(Ink.text)
         }
         .font(.system(size: 12, weight: .medium))
         .lineLimit(1)
@@ -500,12 +596,48 @@ private struct AgentList: View {
     /// Past this many agents a filter appears; the list is built for dozens.
     static let filterAt = 12
 
+    @State private var expanded: Set<String> = []
+    /// A project shows this many sessions, then "Show N more".
+    static let groupLimit = 5
+
     private var shown: [AgentInfo] {
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return agents }
-        return agents.filter { a in
+        let inState = rail.stateFilter.map { s in agents.filter { Rail.norm($0.status) == s } } ?? agents
+        guard !q.isEmpty else { return inState }
+        return inState.filter { a in
             [a.title, a.folder, a.kind, a.status].contains { $0.localizedCaseInsensitiveContains(q) }
         }
+    }
+
+    private func header(_ title: String) -> some View {
+        Text(title.uppercased())
+            .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
+            .foregroundStyle(Ink.dim.opacity(0.75))
+            .lineLimit(1)
+            .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
+    }
+
+    /// States present, with counts: the chips that narrow the list.
+    private var chips: [(String, Int)] {
+        Rail.states.compactMap { s in
+            let n = agents.filter { Rail.norm($0.status) == s }.count
+            return n > 0 ? (s, n) : nil
+        }
+    }
+
+    private func chip(_ label: String, _ on: Bool, _ tint: Color?, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                if let tint { Circle().fill(tint).frame(width: 5, height: 5) }
+                Text(label)
+            }
+            .font(.system(size: 10.5, weight: .medium))
+            .foregroundStyle(on ? Ink.text : Ink.dim)
+            .padding(.horizontal, 7).padding(.vertical, 3)
+            .background(Color.primary.opacity(on ? 0.14 : 0.05), in: Capsule())
+            .fixedSize()
+        }
+        .buttonStyle(Pressable())
     }
 
     /// Folders in order of first appearance, waiting agents' folders first.
@@ -513,7 +645,8 @@ private struct AgentList: View {
         let rank: [String: Int] = ["blocked": 0, "working": 1, "done": 2]
         var order: [String] = []
         var by: [String: [AgentInfo]] = [:]
-        for a in shown.sorted(by: { (rank[$0.status] ?? 3) < (rank[$1.status] ?? 3) }) {
+        _ = rank
+        for a in Rail.ordered(shown) {
             if by[a.folder] == nil { order.append(a.folder) }
             by[a.folder, default: []].append(a)
         }
@@ -554,6 +687,19 @@ private struct AgentList: View {
             }
             .padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 3)
 
+            // Many agents: narrow by state.
+            if agents.count > Rail.dotLimit {
+                HStack(spacing: 4) {
+                    chip("All \(agents.count)", rail.stateFilter == nil, nil) { withAnimation(Motion.swap) { rail.stateFilter = nil } }
+                    ForEach(chips, id: \.0) { s, n in
+                        chip("\(StatusPill.word(s)) \(n)", rail.stateFilter == s, Tone.of(s)) {
+                            withAnimation(Motion.swap) { rail.stateFilter = rail.stateFilter == s ? nil : s }
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.horizontal, 10).padding(.bottom, 4)
+            }
             // Type while the pointer is on the list to filter it (no field to click).
             if agents.count > AgentList.filterAt || !query.isEmpty {
                 HStack(spacing: 5) {
@@ -575,31 +721,45 @@ private struct AgentList: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
-                    // Project headers only when there is more than one project;
-                    // with one, each row names its folder instead.
-                    let grouped = groups.count > 1
-                    ForEach(groups, id: \.0) { folder, list in
-                        if grouped {
-                            Text(folder.uppercased())
-                                .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
-                                .foregroundStyle(Ink.dim.opacity(0.75))
-                                .lineLimit(1)
-                                .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
+                    // A project gets a header only when it holds two or more
+                    // agents; one-agent projects stay a flat list that names
+                    // each folder — under "Other" only when real groups are above.
+                    let multi = groups.filter { $0.1.count > 1 }
+                    let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
+                    ForEach(multi, id: \.0) { folder, list in
+                        header(folder)
+                        // A big project shows its first few; the rest one click away.
+                        let folded = query.isEmpty && list.count > AgentList.groupLimit + 1 && !expanded.contains(folder)
+                        ForEach(folded ? Array(list.prefix(AgentList.groupLimit)) : list) { a in
+                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, showFolder: false,
+                                     open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
-                        ForEach(list) { a in
-                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, showFolder: !grouped,
+                        if folded {
+                            Button {
+                                withAnimation(Motion.swap) { _ = expanded.insert(folder) }
+                            } label: {
+                                Text("Show \(list.count - AgentList.groupLimit) more")
+                                    .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.dim)
+                                    .padding(.horizontal, 28).padding(.vertical, 4)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle())
+                            }
+                            .buttonStyle(Pressable())
+                        }
+                    }
+                    if !singles.isEmpty {
+                        if !multi.isEmpty { header("Other") }
+                        ForEach(singles) { a in
+                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, showFolder: true,
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                     }
                     if !background.isEmpty && query.isEmpty {
-                        Text("BACKGROUND")
-                            .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
-                            .foregroundStyle(Ink.dim.opacity(0.75))
-                            .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
+                        header("Background")
                         ForEach(background) { p in BackgroundRow(session: p) }
                     }
                 }
-                .padding(.horizontal, 4).padding(.top, groups.count > 1 ? 0 : 3).padding(.bottom, 6)
+                .padding(.horizontal, 4).padding(.top, groups.contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
             }
             .scrollIndicators(.never)
