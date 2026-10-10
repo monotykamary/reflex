@@ -22,7 +22,6 @@ struct InboxView: View {
     @ObservedObject var model = InboxModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var rowsHeight: CGFloat = 0
-    @State private var hover = false
     var openPane: (String) -> Void
     var close: () -> Void
 
@@ -35,7 +34,7 @@ struct InboxView: View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 header
-                    .glassDepth(RoundedRectangle(cornerRadius: 18, style: .continuous), active: hover)
+                    .glassTone(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                 list
                 footer
@@ -51,7 +50,6 @@ struct InboxView: View {
         .offset(x: model.shown || reduce ? 0 : 14)
         .blur(radius: model.shown || reduce ? 0 : 3)
         .animation(model.shown ? Motion.enter : Motion.exit, value: model.shown)
-        .onHover { hover = $0 }
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { handle($0) }
@@ -92,7 +90,7 @@ struct InboxView: View {
                 Text("Nothing needs you right now.").font(Type.meta).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 220)
-            .glassDepth(RoundedRectangle(cornerRadius: 18, style: .continuous), active: hover, amount: 0.18)
+            .glassTone(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
             .transition(.surface(reduce: reduce))
         } else {

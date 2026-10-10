@@ -603,7 +603,7 @@ private struct Backdrop: View {
     var body: some View {
         Rectangle()
             .fill(.clear)
-            .modifier(WindowGlassDepth(shape: Rectangle(), amount: 0.22))
+            .glassTone(Rectangle())
             .glassEffect(.regular, in: .rect)
             .ignoresSafeArea()
     }

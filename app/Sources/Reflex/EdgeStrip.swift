@@ -26,7 +26,7 @@ final class RailModel: ObservableObject {
     @Published var panel: Panel = .auto
     /// Typed while the pointer is on the agent list: filters it.
     @Published var filter = ""
-    /// The pointer is on the rail: its glass deepens (see `RailDepth`).
+    /// The pointer is on the rail.
     @Published var hovering = false
     /// The dot under the pointer, whose status shows beside the column.
     @Published var hoverDot: String?
@@ -119,7 +119,7 @@ private struct RoundButton<Label: View>: View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
-                .modifier(RailDepth(shape: Circle()))
+                .glassTone(Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
@@ -128,17 +128,6 @@ private struct RoundButton<Label: View>: View {
     }
 }
 
-/// The rail's glass rests dark and lightens while the pointer is on it —
-/// faded, never switched (see GlassDepth). Its windows never become key, so
-/// macOS's own instant active/inactive change of glass cannot happen.
-struct RailDepth<S: Shape>: ViewModifier {
-    var shape: S
-    var amount: Double = 0.28
-    @ObservedObject private var rail = RailModel.shared
-    func body(content: Content) -> some View {
-        content.glassDepth(shape, active: rail.hovering, amount: amount)
-    }
-}
 
 private struct PillButton: View {
     var symbol: String
@@ -371,7 +360,7 @@ struct Rail: View {
                     }
                 }
                 .padding(.vertical, 6)
-                .modifier(RailDepth(shape: Capsule()))
+                .glassTone(Capsule())
                 .glassEffect(.rail, in: Capsule())
                 .glassEffectID("agents", in: glass)
                 .help(side == .agents ? "Hide agents" : "Show agents")
@@ -382,7 +371,7 @@ struct Rail: View {
                 PillButton(symbol: "gearshape", help: "Settings", action: openSettings)
             }
             .padding(.vertical, 4)
-            .modifier(RailDepth(shape: Capsule()))
+            .glassTone(Capsule())
             .glassEffect(.rail, in: Capsule())
 
             Menu {
@@ -393,7 +382,7 @@ struct Rail: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.dim)
                     .frame(width: 40, height: 40)
-                    .modifier(RailDepth(shape: Circle()))
+                    .glassTone(Circle())
                     .contentShape(Circle())
             }
             .menuStyle(.button)
@@ -498,7 +487,7 @@ private struct StatusPill: View {
         .font(.system(size: 12, weight: .medium))
         .lineLimit(1)
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .modifier(RailDepth(shape: Capsule()))
+        .glassTone(Capsule())
         .glassEffect(.rail, in: Capsule())
     }
 }
@@ -623,7 +612,7 @@ private struct AgentList: View {
             .frame(height: min(max(rowsHeight, 30), 520))
         }
         .frame(width: 340)
-        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 16, style: .continuous), amount: 0.18))
+        .glassTone(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -805,7 +794,7 @@ private struct QuestionCard: View {
         }
         .padding(16)
         .frame(width: 340)
-        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 20, style: .continuous), amount: 0.18))
+        .glassTone(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Motion.enter, value: pending?.id)
     }
@@ -832,7 +821,7 @@ private struct KeyHint: View {
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .modifier(RailDepth(shape: Capsule()))
+        .glassTone(Capsule())
         .glassEffect(.rail, in: Capsule())
     }
 }

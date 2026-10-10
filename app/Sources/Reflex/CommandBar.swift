@@ -150,7 +150,6 @@ struct CommandBar: View {
     @FocusState private var focused: Bool
     @Namespace private var glass
     @Environment(\.accessibilityReduceMotion) private var reduce
-    @State private var hover = false
 
     private var pinned: AgentInfo? { store.state.agents.first { $0.pane == model.target } }
 
@@ -158,12 +157,12 @@ struct CommandBar: View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 field
-                    .glassDepth(RoundedRectangle(cornerRadius: 24, style: .continuous), active: hover)
+                    .glassTone(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .glassEffectID("field", in: glass)
                     .modifier(Shake(animatableData: model.shake))
                 tray
-                    .glassDepth(RoundedRectangle(cornerRadius: 18, style: .continuous), active: hover)
+                    .glassTone(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .glassEffectID("tray", in: glass)
             }
@@ -185,7 +184,6 @@ struct CommandBar: View {
         .onChange(of: store.state.receipts) { _, _ in model.observe(store.state) }
         .onChange(of: store.state.pending) { _, _ in model.observe(store.state) }
         .onAppear { focused = true }
-        .onHover { hover = $0 }
         .sensoryFeedback(.alignment, trigger: model.target)
         .sensoryFeedback(.levelChange, trigger: model.arrivals)
     }
