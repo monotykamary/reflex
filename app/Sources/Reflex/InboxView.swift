@@ -11,12 +11,17 @@ final class InboxModel: ObservableObject {
     @Published var shown = false
     @Published var selected: Int?
     @Published var needsYouOnly = false
+    /// The inbox's measured size; its window fits it.
+    @Published var size: CGSize = .zero
+    /// The tallest the card list may grow before it scrolls.
+    @Published var maxList: CGFloat = 560
 }
 
 struct InboxView: View {
     @ObservedObject var store = Store.shared
     @ObservedObject var model = InboxModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var rowsHeight: CGFloat = 0
     var openPane: (String) -> Void
     var close: () -> Void
 
@@ -36,6 +41,8 @@ struct InboxView: View {
         }
         .padding(16)
         .frame(width: 520)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { model.size = $0 }
         .frame(maxHeight: .infinity, alignment: .top)
         .opacity(model.shown ? 1 : 0)
         .scaleEffect(model.shown || reduce ? 1 : 0.97, anchor: .trailing)
@@ -102,8 +109,10 @@ struct InboxView: View {
                         }
                     }
                     .padding(.vertical, 2)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
                 }
                 .scrollIndicators(.never)
+                .frame(height: min(max(rowsHeight, 60), model.maxList))
                 .onChange(of: model.selected) { _, id in
                     if let id { instantly { proxy.scrollTo(id) } }
                 }

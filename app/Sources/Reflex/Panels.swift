@@ -42,6 +42,32 @@ enum Panels {
         return p
     }
 
+    /// Fit a floating window to its content's measured size, keeping its top
+    /// edge and horizontal centre: grow at once, shrink once the old content
+    /// has had time to animate away. A window larger than what it shows would
+    /// swallow clicks meant for the apps beneath its transparent part.
+    @MainActor static func fit(_ w: NSWindow, to size: NSSize, top: CGFloat, midX: CGFloat) {
+        let target = NSRect(x: (midX - size.width / 2).rounded(), y: (top - size.height).rounded(),
+                            width: ceil(size.width), height: ceil(size.height))
+        let cur = w.frame
+        fitTickets[ObjectIdentifier(w), default: 0] += 1
+        let ticket = fitTickets[ObjectIdentifier(w)]
+        if !w.isVisible || (target.width >= cur.width && target.height >= cur.height) {
+            w.setFrame(target, display: true)
+            return
+        }
+        let grown = NSRect(x: min(cur.minX, target.minX), y: min(cur.minY, target.minY),
+                           width: max(cur.maxX, target.maxX) - min(cur.minX, target.minX),
+                           height: max(cur.maxY, target.maxY) - min(cur.minY, target.minY))
+        if grown != cur { w.setFrame(grown, display: true) }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            guard fitTickets[ObjectIdentifier(w)] == ticket else { return }
+            w.setFrame(target, display: true)
+        }
+    }
+
+    @MainActor private static var fitTickets: [ObjectIdentifier: Int] = [:]
+
     static var screen: NSRect { NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900) }
 
     /// Fade a panel out quickly (exits are shorter than entrances), then hide it.

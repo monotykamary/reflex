@@ -22,6 +22,10 @@ final class CommandModel: ObservableObject {
     @Published var target: String?
     @Published var shake: CGFloat = 0
     @Published var arrivals = 0
+    /// False while the bar animates away (it appears instantly: used all day).
+    @Published var shown = true
+    /// The bar's measured size; its window fits it.
+    @Published var size: CGSize = .zero
     private var lastText = ""
     var close: () -> Void = {}
     var openSetup: (Onboarding.Step) -> Void = { _ in }
@@ -162,8 +166,16 @@ struct CommandBar: View {
             }
         }
         .frame(width: 680)
-        .frame(maxHeight: .infinity, alignment: .top)
         .padding(20)
+        .fixedSize(horizontal: false, vertical: true)
+        .onGeometryChange(for: CGSize.self) { $0.size } action: { model.size = $0 }
+        .frame(maxHeight: .infinity, alignment: .top)
+        // Leaves like the rail does — a short fade, settle and blur; arrives with none.
+        .opacity(model.shown ? 1 : 0)
+        .scaleEffect(model.shown || reduce ? 1 : 0.98, anchor: .top)
+        .offset(y: model.shown || reduce ? 0 : -6)
+        .blur(radius: model.shown || reduce ? 0 : 3)
+        .animation(model.shown ? nil : Motion.exit, value: model.shown)
         .animation(Motion.pick(Motion.spring, reduce: reduce), value: model.phase)
         .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.target)
         .onChange(of: model.focusTick) { _, _ in focused = true }

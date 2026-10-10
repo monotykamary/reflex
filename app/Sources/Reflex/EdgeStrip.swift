@@ -116,12 +116,13 @@ private struct RoundButton<Label: View>: View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
-                .background(Color.white.opacity(hover ? 0.1 : 0), in: Circle())
+                .background(Color.white.opacity(hover ? 0.16 : 0), in: Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
         .glassEffect(.rail.interactive(), in: Circle())
-        .onHover { h in withAnimation(Motion.micro) { hover = h } }
+        .scaleEffect(hover ? 1.05 : 1)
+        .onHover { h in withAnimation(Motion.spring) { hover = h } }
         .help(help)
     }
 }
@@ -137,6 +138,10 @@ private struct PillButton: View {
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(hover ? Ink.text : Ink.dim)
                 .frame(width: 40, height: 34)
+                .background {
+                    Capsule().fill(Color.white.opacity(hover ? 0.14 : 0)).padding(.horizontal, 4).padding(.vertical, 1)
+                }
+                .scaleEffect(hover ? 1.04 : 1)
                 .contentShape(Rectangle())
         }
         .buttonStyle(Pressable())
@@ -319,7 +324,7 @@ struct Rail: View {
                                 .frame(width: 40, height: 28)
                                 .background {
                                     RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(Color.white.opacity(rail.hoverDot == a.pane ? 0.1 : 0))
+                                        .fill(Color.white.opacity(rail.hoverDot == a.pane ? 0.16 : 0))
                                         .padding(.horizontal, 5)
                                 }
                                 .contentShape(Rectangle())

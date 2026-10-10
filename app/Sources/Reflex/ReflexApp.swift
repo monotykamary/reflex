@@ -299,6 +299,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { self?.edge.surface() }
         }.store(in: &bag)
         setupClickAway()
+        InboxModel.shared.$size.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.placeInbox() }
+        }.store(in: &bag)
+        command.$size.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { if self?.bar?.isVisible == true { self?.placeBar() } }
+        }.store(in: &bag)
     }
 
     private var clickMonitors: [Any] = []
@@ -426,10 +432,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bar = p
         }
         command.reset()
-        let s = Panels.screen
-        bar!.setFrameOrigin(NSPoint(x: s.midX - 360, y: s.minY + s.height * 0.78 - 560))
+        var t = Transaction()
+        t.disablesAnimations = true
+        withTransaction(t) { command.shown = true }
+        placeBar()
         bar!.alphaValue = 1
         bar!.makeKeyAndOrderFront(nil)
+    }
+
+    private var barTop: (top: CGFloat, midX: CGFloat) {
+        let s = Panels.screen
+        return (s.minY + s.height * 0.78, s.midX)
+    }
+
+    private func placeBar() {
+        guard let b = bar else { return }
+        let size = command.size == .zero ? NSSize(width: 720, height: 220) : command.size
+        Panels.fit(b, to: size, top: barTop.top, midX: barTop.midX)
     }
 
     /// From the rail: close it without handing the keys back, then open the
@@ -441,8 +460,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func hideBar() {
-        guard let b = bar, b.isVisible else { return }
-        Panels.fadeOut(b) { [weak self] in self?.command.reset() }
+        guard let b = bar, b.isVisible, command.shown else { return }
+        command.shown = false
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in
+            guard let self, !self.command.shown else { return }
+            b.orderOut(nil)
+            self.command.reset()
+        }
     }
 
     // MARK: Inbox — grows out of the rail
@@ -456,11 +480,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             inbox = p
         }
         if inbox!.isVisible && InboxModel.shared.shown { hideInbox(); return }
-        let s = Panels.screen
-        let h = min(760, s.height * 0.86)
-        inbox!.setFrame(NSRect(x: s.maxX - Rail.columnWidth - 552, y: s.midY - h / 2, width: 552, height: h), display: true)
+        let h = inboxMaxHeight
+        InboxModel.shared.maxList = h - 150
+        placeInbox()
         inbox!.makeKeyAndOrderFront(nil)
         DispatchQueue.main.async { InboxModel.shared.shown = true }
+    }
+
+    private var inboxMaxHeight: CGFloat { min(760, Panels.screen.height * 0.86) }
+
+    /// Beside the rail, top fixed, as tall as its cards.
+    private func placeInbox() {
+        guard let w = inbox else { return }
+        let s = Panels.screen
+        let m = InboxModel.shared.size
+        let size = m == .zero ? NSSize(width: 552, height: 320) : NSSize(width: m.width, height: min(m.height, inboxMaxHeight))
+        Panels.fit(w, to: size, top: s.midY + inboxMaxHeight / 2, midX: s.maxX - Rail.columnWidth - 276)
     }
 
     private func hideInbox() {
