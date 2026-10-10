@@ -134,6 +134,10 @@ struct SettingsView: View {
             }
             .searchable(text: $query, placement: .sidebar, prompt: "Search settings")
             .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
+            // The sidebar's glass rests dark and lightens while the window is focused.
+            .background {
+                Color.clear.modifier(WindowGlassDepth(shape: Rectangle(), amount: 0.22)).ignoresSafeArea()
+            }
         } detail: {
             Group {
                 switch nav.pane ?? .general {

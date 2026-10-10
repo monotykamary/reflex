@@ -128,16 +128,15 @@ private struct RoundButton<Label: View>: View {
     }
 }
 
-/// The rail's glass is grey at rest and deepens to near-black while the
-/// pointer is on it — faded, never switched. (The windows never become key,
-/// so macOS's own instant active/inactive change of glass cannot happen.)
+/// The rail's glass rests dark and lightens while the pointer is on it —
+/// faded, never switched (see GlassDepth). Its windows never become key, so
+/// macOS's own instant active/inactive change of glass cannot happen.
 struct RailDepth<S: Shape>: ViewModifier {
     var shape: S
+    var amount: Double = 0.28
     @ObservedObject private var rail = RailModel.shared
     func body(content: Content) -> some View {
-        content
-            .background(Color.black.opacity(rail.hovering ? 0.5 : 0), in: shape)
-            .animation(rail.hovering ? Motion.enter : Motion.exit, value: rail.hovering)
+        content.glassDepth(shape, active: rail.hovering, amount: amount)
     }
 }
 
@@ -624,7 +623,7 @@ private struct AgentList: View {
             .frame(height: min(max(rowsHeight, 30), 520))
         }
         .frame(width: 340)
-        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 16, style: .continuous)))
+        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 16, style: .continuous), amount: 0.18))
         .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -806,7 +805,7 @@ private struct QuestionCard: View {
         }
         .padding(16)
         .frame(width: 340)
-        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 20, style: .continuous)))
+        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 20, style: .continuous), amount: 0.18))
         .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Motion.enter, value: pending?.id)
     }

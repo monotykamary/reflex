@@ -341,7 +341,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if InboxModel.shared.shown, let ib = inbox, !ib.frame.contains(p) {
             hideInbox()
         }
-        if RailModel.shared.visible && !Settings.shared.railAlways && !edge.near(p) {
+        // (Dev launches that pin the rail open for a screenshot keep it open.)
+        let pinned = ProcessInfo.processInfo.environment["REFLEX_SHOW"].map { ["rail", "agents", "railclick"].contains($0) } ?? false
+        if RailModel.shared.visible && !Settings.shared.railAlways && !pinned && !edge.near(p) {
             // The click is activating whatever it landed on; leave focus to it.
             edge.hide(returnFocus: false)
         }

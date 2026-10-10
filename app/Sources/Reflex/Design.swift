@@ -217,3 +217,36 @@ struct ThinkingLine: View {
         }
     }
 }
+
+// MARK: Glass depth
+
+/// Reflex's glass rests dark and lightens while it is active — the pointer on
+/// a panel, or its window focused — fading both ways, never switching.
+struct GlassDepth<S: Shape>: ViewModifier {
+    var shape: S
+    var active: Bool
+    /// Large surfaces take less: one tint over a big area reads darker.
+    var amount: Double = 0.28
+    func body(content: Content) -> some View {
+        content
+            .background(Color.black.opacity(active ? 0 : amount), in: shape)
+            .animation(active ? Motion.enter : Motion.exit, value: active)
+    }
+}
+
+extension View {
+    /// Dark glass at rest, lighter while `active` (see GlassDepth).
+    func glassDepth<S: Shape>(_ shape: S, active: Bool, amount: Double = 0.28) -> some View {
+        modifier(GlassDepth(shape: shape, active: active, amount: amount))
+    }
+}
+
+/// For windows: active while the window is focused.
+struct WindowGlassDepth<S: Shape>: ViewModifier {
+    var shape: S
+    var amount: Double = 0.28
+    @Environment(\.controlActiveState) private var state
+    func body(content: Content) -> some View {
+        content.glassDepth(shape, active: state == .key || state == .active, amount: amount)
+    }
+}
