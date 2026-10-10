@@ -30,6 +30,12 @@ final class Settings: ObservableObject {
     @Published var surfaceQuestions: Bool { didSet { d.set(surfaceQuestions, forKey: "surfaceQuestions") } }
     /// How long the pointer rests on an empty edge before the rail opens.
     @Published var edgeDelay: Double { didSet { d.set(edgeDelay, forKey: "edgeDelay") } }
+    /// Keep awake: "off", "agents" (while any agent works) or "always".
+    @Published var awakeMode: String { didSet { d.set(awakeMode, forKey: "awakeMode") } }
+    /// Keep the display on too, not only the Mac.
+    @Published var awakeDisplay: Bool { didSet { d.set(awakeDisplay, forKey: "awakeDisplay") } }
+    /// On battery at or below this percentage, let the Mac sleep (0: never).
+    @Published var awakeBattery: Int { didSet { d.set(awakeBattery, forKey: "awakeBattery") } }
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
     /// A regular app (Dock, ⌘Tab, menu bar) rather than menu-bar only.
     @Published var showInDock: Bool { didSet { d.set(showInDock, forKey: "showInDock") } }
@@ -52,6 +58,9 @@ final class Settings: ObservableObject {
         railAlways = d.bool(forKey: "railAlways")
         surfaceQuestions = d.object(forKey: "surfaceQuestions") as? Bool ?? true
         edgeDelay = d.object(forKey: "edgeDelay") as? Double ?? 0.5
+        awakeMode = d.string(forKey: "awakeMode") ?? "agents"
+        awakeDisplay = d.object(forKey: "awakeDisplay") as? Bool ?? false
+        awakeBattery = d.object(forKey: "awakeBattery") as? Int ?? 20
         onboarded = d.bool(forKey: "onboarded")
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true
         appearance = d.string(forKey: "appearance") ?? "system"

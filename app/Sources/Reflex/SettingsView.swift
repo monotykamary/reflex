@@ -66,7 +66,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     /// Words the sidebar search matches besides the title.
     var keywords: String {
         switch self {
-        case .general: return "login startup dock cmd tab hotkey option double agent harness claude codex pi daemon reflexd restart log appearance light dark"
+        case .general: return "login startup dock cmd tab hotkey option double agent harness claude codex pi daemon reflexd restart log appearance light dark keep awake caffeinate sleep battery display"
         case .rail: return "edge tab rail hover delay rest questions surface visible sliver"
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential confidence threshold typesafe openrouter vercel test"
@@ -249,6 +249,53 @@ private struct RowLabel: View {
 
 // MARK: - General
 
+/// Keep awake: off, while agents work, or always; a battery floor; the display.
+private struct KeepAwakeSection: View {
+    @ObservedObject var s = Settings.shared
+    @ObservedObject var awake = KeepAwake.shared
+
+    var body: some View {
+        Section {
+            Picker(selection: $s.awakeMode) {
+                Text("Off").tag("off")
+                Text("While agents work").tag("agents")
+                Text("Always").tag("always")
+            } label: {
+                RowLabel("Keep the Mac awake", s.awakeMode == "agents"
+                         ? "So an agent working through the night isn't stopped by sleep. Lets go a minute after the last one finishes."
+                         : (s.awakeMode == "always" ? "While Reflex is running." : "macOS sleeps as usual."))
+            }
+            if s.awakeMode != "off" {
+                Picker(selection: $s.awakeBattery) {
+                    Text("Never").tag(0)
+                    ForEach([10, 15, 20, 30, 50], id: \.self) { Text("At \($0)%").tag($0) }
+                } label: {
+                    RowLabel("On battery, let it sleep", "Unplugged and at or below this charge, Reflex stops keeping it awake.")
+                }
+                Toggle(isOn: $s.awakeDisplay) {
+                    RowLabel("Keep the display on too", "Off: the screen may dim and lock; the Mac and your agents keep running.")
+                }
+            }
+        } header: {
+            Text("Keep awake")
+        } footer: {
+            if s.awakeMode != "off" {
+                HStack(spacing: 6) {
+                    Image(systemName: awake.holding ? "cup.and.saucer.fill" : "cup.and.saucer")
+                        .foregroundStyle(awake.holding ? Tone.blocked : Color.secondary)
+                    Text(awake.holding ? "Awake — \(awake.reason.lowercasedFirst)" : (awake.reason.isEmpty ? "Not holding: no agent is working." : awake.reason))
+                        .font(Type.meta).foregroundStyle(.secondary)
+                }
+                .animation(Motion.micro, value: awake.holding)
+            }
+        }
+    }
+}
+
+private extension String {
+    var lowercasedFirst: String { isEmpty ? self : prefix(1).lowercased() + dropFirst() }
+}
+
 private struct GeneralPane: View {
     @ObservedObject var s = Settings.shared
     @ObservedObject var daemon = Daemon.shared
@@ -278,6 +325,7 @@ private struct GeneralPane: View {
                     RowLabel("Ask", DoubleOption.trusted ? "Double-tap Option anywhere." : "Needs Accessibility — see Setup.")
                 }
             }
+            KeepAwakeSection()
             Section("New sessions") {
                 Picker(selection: $s.harness) {
                     ForEach(Onboarding.harnesses, id: \.self) { Text($0) }

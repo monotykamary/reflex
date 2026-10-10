@@ -343,6 +343,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
         edge.start()
+        KeepAwake.shared.start()
         Store.shared.watching = { [weak self] in
             self?.popouts.first { $0.value.isKeyWindow }?.key
         }
