@@ -1,0 +1,15 @@
+# Railway terminates TLS and routes reflex.farm here, on $PORT.
+:{$PORT:8080} {
+	root * /srv
+	encode zstd gzip
+	file_server
+
+	# Sparkle's feed: always fresh, typed as a feed.
+	header /appcast.xml Content-Type "application/rss+xml; charset=utf-8"
+	header /appcast.xml Cache-Control "no-cache"
+	header /assets/* Cache-Control "public, max-age=86400"
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy strict-origin-when-cross-origin
+	}
+}

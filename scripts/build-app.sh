@@ -77,7 +77,7 @@ cat > "$app/Contents/Info.plist" <<EOF
   <key>LSMinimumSystemVersion</key><string>26.0</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>NSHighResolutionCapable</key><true/>
-  <key>SUFeedURL</key><string>https://monotykamary.github.io/reflex/appcast.xml</string>
+  <key>SUFeedURL</key><string>https://reflex.farm/appcast.xml</string>
   <key>SUPublicEDKey</key><string>nZ4HvEpyNprzUA/CbKoJfrxbQYhE35SU3UGC0YPDD3Y=</string>
   <key>SUEnableAutomaticChecks</key><true/>
 </dict>

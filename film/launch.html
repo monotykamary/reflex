@@ -3,9 +3,10 @@
 <head>
 <meta charset="utf-8">
 <title>Reflex — launch film</title>
-<!-- The launch film. Every frame is film.render(t) — a pure function of time —
-     so film/render.mjs can step it frame by frame into an MP4. Open it in a
-     browser to watch it play (or ?t=12.5 to see one moment). 1920×1080. -->
+<!-- The launch film: "Say what. Reflex finds where." Every frame is
+     film.render(t) — a pure function of time — so film/render.mjs can step
+     it frame by frame into an MP4. Open it in a browser to watch it play, or
+     ?t=17.5 for one moment. 1920×1080. -->
 <style>
   :root {
     --ink: #ededef; --ink2: rgba(237,237,239,.62); --ink3: rgba(237,237,239,.36);
@@ -17,31 +18,55 @@
   html, body { margin: 0; background: #000; overflow: hidden; }
   #film { position: relative; width: 1920px; height: 1080px; overflow: hidden; color: var(--ink); font-family: var(--sans);
     -webkit-font-smoothing: antialiased; background: #08090c; }
-  .layer { position: absolute; inset: 0; }
-  .glow { position: absolute; inset: 0; background: radial-gradient(1200px 700px at 50% 42%, rgba(110,148,255,.16), transparent 65%),
-    radial-gradient(900px 600px at 85% 90%, rgba(165,139,255,.10), transparent 60%); }
+  .glow { position: absolute; inset: 0; background: radial-gradient(1200px 700px at 50% 40%, rgba(110,148,255,.15), transparent 65%),
+    radial-gradient(900px 600px at 85% 95%, rgba(165,139,255,.09), transparent 60%); }
+  .abs { position: absolute; }
   .words { position: absolute; left: 0; right: 0; text-align: center; font-weight: 700; letter-spacing: -.035em; }
-  .big { font-size: 92px; line-height: 1.05; }
-  .mid { font-size: 64px; }
-  .small { font-size: 26px; font-weight: 500; letter-spacing: 0; color: var(--ink2); }
-  .tile { position: absolute; width: 300px; height: 176px; border-radius: 16px; background: rgba(16,17,21,.92); border: 1px solid rgba(255,255,255,.08);
-    box-shadow: 0 24px 60px rgba(0,0,0,.45); padding: 34px 16px 14px; font: 15px/1.6 var(--mono); color: rgba(192,202,245,.7); overflow: hidden; }
-  .tile::before { content: ""; position: absolute; left: 14px; top: 13px; width: 52px; height: 10px;
-    background: radial-gradient(circle at 5px 5px, #ff5f57 4.5px, transparent 5px), radial-gradient(circle at 24px 5px, #febc2e 4.5px, transparent 5px), radial-gradient(circle at 43px 5px, #28c840 4.5px, transparent 5px); }
-  .tile .lbl { position: absolute; right: 14px; top: 9px; font: 600 13px var(--sans); color: var(--ink2); display: flex; gap: 8px; align-items: center; }
-  .g { width: 14px; height: 14px; border-radius: 50%; display: inline-block; flex: none; }
-  .g.work { border: 2.5px solid rgba(110,148,255,.22); border-top-color: var(--blue); }
-  .g.wait { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,178,36,.22); }
-  .g.done { background: var(--green); }
-  .bubble { position: absolute; padding: 10px 16px; border-radius: 14px; background: rgba(36,37,43,.96); border: 1px solid rgba(255,178,36,.35);
-    font-size: 17px; font-weight: 600; white-space: nowrap; box-shadow: 0 14px 40px rgba(0,0,0,.45); }
+  .say { font-size: 66px; }
+  .huge { font-size: 300px; letter-spacing: -.06em; line-height: 1; }
+  .cap { font-size: 40px; font-weight: 600; letter-spacing: -.02em; color: var(--ink); }
+  .sub { font-size: 26px; font-weight: 500; letter-spacing: 0; color: var(--ink2); }
+  #paths { position: absolute; inset: 0; font: 22px/1.5 var(--mono); color: rgba(192,202,245,.22); }
+  #paths div { position: absolute; white-space: nowrap; }
+  .panel { position: absolute; top: 300px; width: 760px; height: 440px; border-radius: 22px; background: rgba(16,17,21,.94);
+    border: 1px solid rgba(255,255,255,.08); box-shadow: 0 30px 90px rgba(0,0,0,.5); padding: 56px 34px 30px; overflow: visible; }
+  .panel::before { content: ""; position: absolute; left: 22px; top: 20px; width: 64px; height: 14px;
+    background: radial-gradient(circle at 7px 7px, #ff5f57 6px, transparent 6.5px), radial-gradient(circle at 32px 7px, #febc2e 6px, transparent 6.5px), radial-gradient(circle at 57px 7px, #28c840 6px, transparent 6.5px); }
+  .panel .title { position: absolute; left: 0; right: 0; top: -66px; text-align: center; font-size: 30px; font-weight: 650; color: var(--ink2); }
+  .term { font: 26px/1.7 var(--mono); color: rgba(192,202,245,.85); }
+  .term .dim { color: rgba(192,202,245,.4); }
+  .chat { display: flex; flex-direction: column; gap: 18px; font-size: 25px; }
+  .msg { max-width: 82%; padding: 16px 20px; border-radius: 20px; }
+  .msg.me { align-self: flex-end; background: #2c5bd6; }
+  .msg.it { align-self: flex-start; background: rgba(255,255,255,.08); }
+  .bar { position: absolute; left: 50%; width: 1100px; border-radius: 28px; background: rgba(26,27,32,.97); border: 1px solid rgba(255,255,255,.09);
+    box-shadow: 0 40px 120px rgba(0,0,0,.6); overflow: hidden; }
+  .bar .field { display: flex; align-items: center; gap: 18px; padding: 26px 30px; font-size: 32px; border-bottom: 1px solid rgba(255,255,255,.06); }
+  .caret { display: inline-block; width: 3px; height: 36px; background: var(--blue); vertical-align: -6px; margin-left: 2px; }
+  .bar .rows { padding: 10px; font-size: 22px; min-height: 60px; }
+  .bar .h { font-size: 15px; font-weight: 650; color: var(--ink3); padding: 8px 16px 4px; letter-spacing: .02em; }
+  .row { display: flex; align-items: center; gap: 16px; padding: 13px 16px; border-radius: 15px; }
+  .row.sel { background: rgba(255,255,255,.085); }
+  .row .t { font-weight: 600; }
+  .row .d { color: var(--ink3); font-size: 19px; }
+  .row .w { margin-left: auto; font: 20px var(--mono); color: var(--ink3); }
+  .row .pick { margin-left: 12px; font-size: 14px; font-weight: 700; color: var(--amber); background: rgba(255,178,36,.14); padding: 3px 10px; border-radius: 99px; }
+  .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; flex: none; font-size: 17px; }
+  .ic.folder { background: rgba(110,148,255,.22); color: #b9c8ff; }
+  .ic.session { background: transparent; }
+  .ic.resume { background: rgba(165,139,255,.2); color: #d2c4ff; }
+  .ic.new { background: rgba(61,214,140,.18); color: var(--green); }
+  .ring { width: 18px; height: 18px; border-radius: 50%; border: 3px solid rgba(110,148,255,.22); border-top-color: var(--blue); }
+  .bar .foot { display: flex; gap: 14px; padding: 12px 22px; border-top: 1px solid rgba(255,255,255,.06); font-size: 17px; color: var(--ink3); }
+  .reading { position: absolute; left: 0; right: 0; bottom: 0; height: 3px; background: linear-gradient(90deg, transparent, var(--blue), transparent); }
+  .key { position: absolute; min-width: 92px; height: 92px; padding: 0 24px; border-radius: 22px; display: grid; place-items: center; font: 600 40px var(--sans);
+    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 0 rgba(0,0,0,.45); }
   .tab { position: absolute; right: 0; width: 44px; padding: 22px 0 22px 11px; border-radius: 18px 0 0 18px; background: rgba(12,13,16,.94);
     border: 1px solid rgba(255,255,255,.07); border-right: 0; display: flex; flex-direction: column; gap: 16px; align-items: center; }
-  .tab .g { width: 17px; height: 17px; }
-  .rail { position: absolute; right: 18px; display: flex; flex-direction: column; gap: 14px; align-items: center; }
-  .rb { width: 58px; height: 58px; border-radius: 50%; background: rgba(28,29,34,.94); border: 1px solid rgba(255,255,255,.09); display: grid; place-items: center; font-size: 22px; }
-  .dots { padding: 14px 0; width: 58px; border-radius: 29px; background: rgba(28,29,34,.94); border: 1px solid rgba(255,255,255,.09); display: flex; flex-direction: column; gap: 17px; align-items: center; }
-  .dots .g { width: 17px; height: 17px; }
+  .g { width: 17px; height: 17px; border-radius: 50%; display: inline-block; flex: none; }
+  .g.work { border: 3px solid rgba(110,148,255,.22); border-top-color: var(--blue); }
+  .g.wait { background: var(--amber); box-shadow: 0 0 0 4px rgba(255,178,36,.22); }
+  .g.done { background: var(--green); }
   .card { position: absolute; right: 100px; width: 470px; padding: 22px 22px 14px; border-radius: 22px; background: rgba(26,27,32,.96);
     border: 1px solid rgba(255,255,255,.09); box-shadow: 0 30px 80px rgba(0,0,0,.5); font-size: 20px; }
   .card .who { font-weight: 650; }
@@ -49,39 +74,20 @@
   .opt { display: flex; gap: 14px; align-items: center; padding: 8px 6px; border-radius: 12px; }
   .opt .k { min-width: 30px; height: 30px; border-radius: 9px; display: grid; place-items: center; font: 650 16px var(--sans); background: rgba(255,178,36,.18); color: var(--amber); }
   .opt.hit { background: rgba(255,255,255,.09); }
-  .bar { position: absolute; left: 50%; width: 980px; border-radius: 26px; background: rgba(26,27,32,.97); border: 1px solid rgba(255,255,255,.09);
-    box-shadow: 0 40px 120px rgba(0,0,0,.6); overflow: hidden; }
-  .bar .field { display: flex; align-items: center; gap: 18px; padding: 24px 28px; font-size: 30px; border-bottom: 1px solid rgba(255,255,255,.06); }
-  .bar .caret { display: inline-block; width: 3px; height: 34px; background: var(--blue); vertical-align: -6px; margin-left: 2px; }
-  .bar .rows { padding: 10px; font-size: 21px; }
-  .bar .h { font-size: 15px; font-weight: 650; color: var(--ink3); padding: 8px 14px 4px; }
-  .row { display: flex; align-items: center; gap: 14px; padding: 12px 14px; border-radius: 14px; }
-  .row.sel { background: rgba(255,255,255,.08); }
-  .row .t { font-weight: 600; }
-  .row .d { color: var(--ink3); font-size: 18px; }
-  .row .w { margin-left: auto; font: 19px var(--mono); color: var(--ink3); }
-  .key { position: absolute; min-width: 92px; height: 92px; padding: 0 24px; border-radius: 22px; display: grid; place-items: center; font: 600 40px var(--sans);
-    background: rgba(255,255,255,.1); border: 1px solid rgba(255,255,255,.12); box-shadow: 0 4px 0 rgba(0,0,0,.45); }
+  .phone { position: absolute; width: 360px; height: 740px; border-radius: 58px; background: #0c0c0d; border: 10px solid #1d1e22;
+    box-shadow: 0 50px 140px rgba(0,0,0,.6), 0 0 0 2px #2a2b30; overflow: hidden; padding: 66px 20px 20px; }
+  .phone::before { content: ""; position: absolute; left: 50%; top: 16px; width: 110px; height: 32px; border-radius: 18px; background: #000; transform: translateX(-50%); }
+  .phone h4 { margin: 0 0 16px; font-size: 30px; letter-spacing: -.02em; }
+  .pq { background: #171719; border-radius: 22px; padding: 18px; border: 1px solid rgba(255,255,255,.06); font-size: 18px; }
   .flyer { position: absolute; width: 18px; height: 18px; border-radius: 50%; background: var(--blue); box-shadow: 0 0 28px var(--blue), 0 0 6px #fff; }
-  .phone { position: absolute; width: 400px; height: 820px; border-radius: 64px; background: #0c0c0d; border: 10px solid #1d1e22;
-    box-shadow: 0 50px 140px rgba(0,0,0,.6), 0 0 0 2px #2a2b30; overflow: hidden; padding: 70px 22px 22px; }
-  .phone::before { content: ""; position: absolute; left: 50%; top: 18px; width: 120px; height: 34px; border-radius: 20px; background: #000; transform: translateX(-50%); }
-  .phone h4 { margin: 0 0 18px; font-size: 32px; letter-spacing: -.02em; }
-  .pq { background: #171719; border-radius: 22px; padding: 18px; border: 1px solid rgba(255,255,255,.06); }
-  .pq .who { font-weight: 650; font-size: 19px; }
-  .pq .what { color: var(--ink2); font-size: 16px; margin: 3px 0 10px; }
-  .pq .opt { font-size: 18px; padding: 12px 8px; }
-  .prow { display: flex; gap: 14px; align-items: center; padding: 14px; background: #171719; border-radius: 18px; margin-top: 12px; font-size: 18px; font-weight: 600; }
-  .prow span { color: var(--ink3); font-weight: 400; font-size: 15px; display: block; }
-  .tap { position: absolute; width: 70px; height: 70px; border-radius: 50%; background: rgba(255,255,255,.22); border: 2px solid rgba(255,255,255,.5); }
 </style>
 </head>
 <body>
 <div id="film">
   <div class="glow" id="glow"></div>
+  <div id="paths"></div>
 
-  <!-- the bot (scene 1 and the end card) -->
-  <svg id="bot" viewBox="0 0 1024 1024" style="position:absolute;width:360px;height:360px;left:780px;top:250px">
+  <svg id="bot" viewBox="0 0 1024 1024" class="abs">
     <defs>
       <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#23252b"/><stop offset="1" stop-color="#0b0c0f"/></linearGradient>
       <radialGradient id="peb" cx="590" cy="380" r="520" gradientUnits="userSpaceOnUse"><stop offset="0" stop-color="#fff"/><stop offset=".72" stop-color="#d9dadd"/><stop offset="1" stop-color="#8e9097"/></radialGradient>
@@ -96,57 +102,42 @@
     </g></g>
     <rect x="102" y="102" width="820" height="820" rx="183" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
   </svg>
-  <div class="words big" id="wordmark" style="top:650px">Reflex</div>
 
-  <!-- scenes 2–3: the agents, and the noise -->
-  <div class="layer" id="tiles"></div>
-  <div class="layer" id="bubbles"></div>
+  <div class="words huge" id="where">Where?</div>
 
-  <!-- scene 4: the edge -->
-  <div class="tab" id="tab"><i class="g work"></i><i class="g work"></i><i class="g wait" id="tabWait"></i><i class="g done"></i><i class="g work"></i></div>
-  <div class="rail" id="rail"><div class="rb">⌂</div><div class="dots"><i class="g work"></i><i class="g work"></i><i class="g wait" id="railWait"></i><i class="g done"></i><i class="g work"></i></div><div class="rb">✦</div></div>
-  <div class="card" id="card">
-    <div class="who">claude · payments-api</div>
-    <div class="what">Run the migration now?</div>
-    <div class="opt" id="o1"><span class="k">1</span>Yes, run it</div>
-    <div class="opt"><span class="k">2</span>Not yet</div>
-    <div class="opt"><span class="k">3</span>Show me the SQL first</div>
-  </div>
+  <!-- the two extremes -->
+  <div class="panel" id="left"><div class="title">Choose it yourself</div><div class="term" id="leftTerm"></div></div>
+  <div class="panel" id="right"><div class="title">Or hide it</div><div class="chat">
+    <div class="msg me">Add a webmcp adapter to the form builder</div>
+    <div class="msg it" id="hideReply">Sure! I’ll do that in my workspace.</div>
+    <div class="msg me" id="hideAsk">…which repo is that?</div>
+  </div></div>
 
-  <!-- scene 5: the bar -->
+  <!-- the search -->
   <div class="bar" id="bar">
     <div class="field"><span style="color:var(--ink3)">✦</span><span id="typed"></span><span class="caret" id="caret"></span></div>
-    <div class="rows">
-      <div class="h" id="hPick">Sessions</div>
-      <div class="row" id="r1"><i class="g work"></i><span class="t">Fix the flaky login test</span><span class="d">claude · payments-api</span><span class="w" id="w1">—</span></div>
-      <div class="row"><i class="g done"></i><span class="t">Landing page copy</span><span class="d">pi · marketing</span><span class="w" id="w2">—</span></div>
-      <div class="row"><i class="g work"></i><span class="t">Refactor the ingest worker</span><span class="d">codex · pipeline</span><span class="w" id="w3">—</span></div>
-      <div class="row"><span style="width:14px;height:14px;border-radius:4px;background:rgba(110,148,255,.6)"></span><span class="t">payments-api</span><span class="d">start a new session here</span><span class="w" id="w4">—</span></div>
-    </div>
+    <div class="rows" id="rows"></div>
+    <div class="foot"><span id="foot"></span></div>
+    <div class="reading" id="reading"></div>
   </div>
   <div class="flyer" id="flyer"></div>
 
-  <!-- scene 6: the phone -->
-  <div class="phone" id="phone">
-    <h4>Reflex</h4>
-    <div class="pq">
-      <div class="who">claude · payments-api</div>
-      <div class="what">Run the migration now?</div>
-      <div class="opt" id="po1"><span class="k">1</span>Yes, run it</div>
-      <div class="opt"><span class="k">2</span>Not yet</div>
-    </div>
-    <div class="prow"><i class="g work"></i><div>Fix the flaky login test<span>claude · payments-api · working</span></div></div>
-    <div class="prow"><i class="g work"></i><div>Refactor the ingest worker<span>codex · pipeline · working</span></div></div>
-    <div class="prow"><i class="g done"></i><div>Landing page copy<span>pi · marketing · done</span></div></div>
+  <!-- the reach -->
+  <div class="tab" id="tab"><i class="g work"></i><i class="g work"></i><i class="g wait"></i><i class="g done"></i><i class="g work"></i></div>
+  <div class="card" id="card">
+    <div class="who">claude · form-builder</div>
+    <div class="what">Run the adapter tests now?</div>
+    <div class="opt" id="o1"><span class="k">1</span>Yes, run them</div>
+    <div class="opt"><span class="k">2</span>Not yet</div>
   </div>
-  <div class="tap" id="tap"></div>
+  <div class="phone" id="phone"><h4>Reflex</h4><div class="pq"><b>claude · form-builder</b><div style="color:var(--ink2);margin:4px 0 10px">Run the adapter tests now?</div>
+    <div class="opt" id="po1"><span class="k">1</span>Yes, run them</div><div class="opt"><span class="k">2</span>Not yet</div></div></div>
 
-  <!-- keys -->
-  <div class="key" id="kOne">1</div><div class="key" id="kA1">⌥</div><div class="key" id="kA2">⌥</div><div class="key" id="kEnter">⏎</div>
+  <div class="key" id="kA1">⌥</div><div class="key" id="kA2">⌥</div><div class="key" id="kEnter">⏎</div><div class="key" id="kDown">↓</div><div class="key" id="kOne">1</div>
 
-  <!-- words -->
-  <div class="words mid" id="say"></div>
-  <div class="words small" id="sub"></div>
+  <div class="words say" id="say"></div>
+  <div class="words cap" id="cap"></div>
+  <div class="words sub" id="sub"></div>
 </div>
 
 <script>
@@ -156,133 +147,148 @@
   const seg = (t, a, b) => clamp((t - a) / (b - a));
   const out = (x) => 1 - Math.pow(1 - x, 3);
   const inOut = (x) => x < .5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-  const back = (x) => { const c = 1.6; return 1 + (c + 1) * Math.pow(x - 1, 3) + c * Math.pow(x - 1, 2); };
   const S = (el, o) => Object.assign((typeof el === "string" ? $(el) : el).style, o);
   const show = (el, v, extra = {}) => S(el, { opacity: v, visibility: v > 0.001 ? "visible" : "hidden", ...extra });
-  const LEN = 36;
+  const fade = (t, a, b, inn = .45, outt = .35) => out(seg(t, a, a + inn)) * (1 - out(seg(t, b - outt, b)));
+  const LEN = 44;
 
-  // The agents: a grid of terminals, built once.
-  const agents = [
-    ["claude", "payments-api", "Reading tests/auth/login.spec.ts"], ["pi", "marketing", "Rewriting the hero copy"], ["codex", "pipeline", "Splitting the ingest worker"],
-    ["claude", "mobile", "Migrating to the new router"], ["pi", "docs", "Updating the API reference"], ["claude", "infra", "terraform plan · 12 to change"],
-    ["codex", "billing", "Adding proration tests"], ["claude", "design-system", "Tokens for dark mode"], ["pi", "analytics", "Backfilling events"],
-  ];
-  const waiting = [0, 4, 7];
-  const tiles = agents.map(([k, f, line], i) => {
+  // ── the haystack: repo paths drifting behind "Where?" ──
+  const roots = ["~/VCS/work/acme", "~/VCS/work/acme/studio", "~/VCS/oss", "~/VCS/clients/northwind", "~/VCS/work/acme/platform", "~/code", "~/VCS/oss/forks", "~/VCS/work/acme/mobile"];
+  const leaves = ["web", "mobile", "form-builder", "api", "design-system", "infra", "billing", "docs", "webmcp-sdk", "pipeline", "admin", "auth", "cli", "sdk-js", "landing", "analytics", "ios", "android", "shared-ui", "edge"];
+  const paths = [];
+  for (let i = 0; i < 44; i++) {
     const d = document.createElement("div");
-    d.className = "tile";
-    d.innerHTML = `<div class="lbl"><i class="g ${waiting.includes(i) ? "work" : "work"}"></i>${k} · ${f}</div><div>❯ ${line}</div><div style="opacity:.5">  ${["✓ 214 passed", "  3 files changed", "  …"][i % 3]}</div>`;
-    $("tiles").appendChild(d);
-    return d;
-  });
-  const asks = ["Run the migration now?", "Trust this folder?", "Which approach — A or B?"];
-  const bubbles = waiting.map((ti, j) => { const b = document.createElement("div"); b.className = "bubble"; b.textContent = asks[j]; $("bubbles").appendChild(b); return b; });
+    d.textContent = `${roots[i % roots.length]}/${leaves[(i * 7) % leaves.length]}${i % 5 === 0 ? "/packages/" + leaves[(i * 3) % leaves.length] : ""}`;
+    $("paths").appendChild(d);
+    paths.push({ d, x: (i * 397) % 1820 - 120, y: 40 + (i * 233) % 1000, v: 18 + (i % 7) * 6 });
+  }
+
+  // ── the requests, and where Reflex sends them ──
+  const examples = [
+    { at: 14.6, req: "add a webmcp adapter to the form builder", cap: "A repo nested deep in your tree.",
+      rows: [["folder", "form-builder", "~/VCS/work/acme/studio/form-builder", 91, true], ["folder", "studio", "~/VCS/work/acme/studio", 5],
+             ["session", "Landing page copy", "pi · landing", 2], ["folder", "webmcp-sdk", "~/VCS/oss/webmcp-sdk", 2]] },
+    { at: 18.8, req: "update the shared button across web and mobile", cap: "The parent, when the work spans repos.",
+      rows: [["folder", "acme", "~/VCS/work/acme · holds web and mobile", 88, true], ["folder", "web", "~/VCS/work/acme/web", 6],
+             ["folder", "mobile", "~/VCS/work/acme/mobile", 4], ["folder", "shared-ui", "~/VCS/work/acme/shared-ui", 2]] },
+    { at: 23.0, req: "continue the logo exploration", cap: "The conversation you already had.",
+      rows: [["resume", "Logo exploration", "claude · brand · 2 days ago — resume", 94, true], ["folder", "brand", "~/VCS/work/acme/brand", 4],
+             ["session", "Design tokens", "claude · design-system", 2]] },
+    { at: 27.2, req: "start a new project for the pitch deck", cap: "A new folder — only when you say so.",
+      rows: [["new", "New folder “pitch-deck”", "~/VCS/pitch-deck · you said “new project”", 97, true], ["folder", "landing", "~/VCS/work/acme/landing", 2],
+             ["folder", "docs", "~/VCS/work/acme/docs", 1]] },
+  ];
+  const icon = (k) => k === "session" ? `<span class="ic session"><i class="ring"></i></span>` : `<span class="ic ${k}">${{ folder: "▰", resume: "↺", new: "+" }[k]}</span>`;
+  let shown = -1;
+  function rows(i, ranked, sel) {
+    const key = `${i}|${ranked}|${sel}`;
+    if (shown === key) return;
+    shown = key;
+    const ex = examples[i];
+    if (!ranked) {
+      $("rows").innerHTML = `<div class="h">Searching your projects, sessions and conversations</div>`;
+      return;
+    }
+    $("rows").innerHTML = `<div class="h">${sel === 0 ? "JEV’S PICK" : "YOUR PICK"}</div>` + ex.rows.map(([k, title, detail, w, pick], j) =>
+      `<div class="row${j === sel ? " sel" : ""}">${icon(k)}<span class="t">${title}</span><span class="d">${detail}</span><span class="w" data-w="${w}">${w}%</span>${pick ? `<span class="pick">${sel === 0 ? "pick" : "guess"}</span>` : ""}</div>`).join("");
+  }
 
   function words(id, text, v, top) {
     if ($(id).textContent !== text) $(id).textContent = text;
     show(id, v, { top: `${top}px`, transform: `translateY(${(1 - v) * 14}px)`, filter: `blur(${(1 - v) * 6}px)` });
   }
-
-  function bot(t, x, y, size, v, gaze) {
-    show("bot", v, { left: `${x - size / 2}px`, top: `${y - size / 2}px`, width: `${size}px`, height: `${size}px`, filter: `blur(${(1 - v) * 14}px)` });
-    const bob = Math.sin(t * 1.7) * 7;
-    const b = t % 4.4, close = b > 4.05 ? Math.sin((b - 4.05) / .35 * Math.PI) : 0;
-    $("bbody").setAttribute("transform", `translate(${gaze * 10} ${bob})`);
-    const sy = 1 - .85 * close, gx = gaze * 34, roll = -13.75 * (1 - Math.abs(gaze) * 0) ;
-    $("e1").setAttribute("transform", `translate(${530 + gx} 476) rotate(${roll}) scale(1 ${sy})`);
-    $("e2").setAttribute("transform", `translate(${718 + gx} 430) rotate(${roll}) scale(1 ${sy})`);
-  }
-
-  function spin(t) {
-    document.querySelectorAll(".g.work").forEach((g, i) => { g.style.transform = `rotate(${(t * 400 + i * 47) % 360}deg)`; });
-  }
-
-  function key(id, at, x, y) {
-    const k = seg(at[0], at[1], at[1] + .1) * (1 - seg(at[0], at[1] + .28, at[1] + .55));
+  function key(id, t, at, x, y) {
+    const k = seg(t, at, at + .09) * (1 - seg(t, at + .26, at + .5));
     show(id, k, { left: `${x}px`, top: `${y}px`, transform: `translateY(${(1 - k) * 10}px) scale(${.94 + .06 * k})` });
+  }
+  function bot(t, x, y, size, v) {
+    show("bot", v, { left: `${x - size / 2}px`, top: `${y - size / 2}px`, width: `${size}px`, height: `${size}px`, filter: `blur(${(1 - v) * 14}px)` });
+    const bob = Math.sin(t * 1.7) * 7, b = t % 4.4, close = b > 4.05 ? Math.sin((b - 4.05) / .35 * Math.PI) : 0;
+    const glance = t > 40.5 ? -1 * out(seg(t, 40.5, 40.8)) : 0;
+    $("bbody").setAttribute("transform", `translate(${glance * 8} ${bob})`);
+    const sy = 1 - .85 * close, gx = glance * 30;
+    $("e1").setAttribute("transform", `translate(${530 + gx} 476) rotate(-13.75) scale(1 ${sy})`);
+    $("e2").setAttribute("transform", `translate(${718 + gx} 430) rotate(-13.75) scale(1 ${sy})`);
   }
 
   function render(t) {
-    spin(t);
-    // ── 1 · the bot (0–4) ──────────────────────────────────────────
-    const s1 = out(seg(t, .2, 1.4)) * (1 - out(seg(t, 3.6, 4.1)));
-    const endV = out(seg(t, 31.2, 32.2));
-    const glanceIn = t < 4 ? (seg(t, 2.8, 3.1) - seg(t, 3.5, 3.8)) : (endV > 0 ? -seg(t, 33.4, 33.7) * 0 : 0);
-    if (endV > 0) bot(t, 960, 400, 330, endV, 0);
-    else bot(t, 960, 450, 360, s1, glanceIn);
-    words("wordmark", "Reflex", out(seg(t, 1.1, 1.9)) * (1 - out(seg(t, 3.5, 4))), 680);
+    document.querySelectorAll(".ring, .g.work").forEach((g, i) => { g.style.transform = `rotate(${(t * 400 + i * 47) % 360}deg)`; });
     S("glow", { opacity: .6 + .4 * Math.sin(t * .4) });
 
-    // ── 2 · the agents (4–9) and 3 · the noise (9–13) ──────────────
-    const cols = 3, tw = 300, th = 176, gx = 70, gy = 54;
-    const gridW = cols * tw + (cols - 1) * gx, x0 = (1920 - gridW) / 2, y0 = 300;
-    const toEdge = inOut(seg(t, 13.2, 14.4));
-    tiles.forEach((d, i) => {
-      const at = 4.6 + i * .16, v = back(seg(t, at, at + .5)) * (1 - seg(t, 14.0, 14.4));
-      const cx = x0 + (i % cols) * (tw + gx), cy = y0 + Math.floor(i / cols) * (th + gy);
-      const ex = 1920 - 40, ey = 470 + (i - 4) * 18;
-      const x = cx + (ex - cx) * toEdge, y = cy + (ey - cy) * toEdge, sc = 1 - .9 * toEdge;
-      show(d, clamp(v), { left: `${x}px`, top: `${y}px`, transform: `scale(${clamp(v) * sc})`, transformOrigin: "50% 50%" });
-      const lbl = d.querySelector(".g"); const wait = waiting.includes(i) && t > 9.3 + waiting.indexOf(i) * .45;
-      lbl.className = "g " + (wait ? "wait" : "work");
-      if (wait) lbl.style.transform = `scale(${1 + .25 * Math.max(0, Math.sin((t - 9.3) * 7))})`;
+    // 1 · the bot (0–3) and the end card (39–44)
+    const endV = out(seg(t, 39.3, 40.2));
+    if (endV > 0) bot(t, 960, 380, 300, endV);
+    else bot(t, 960, 470, 360, fade(t, .1, 3.0, 1.0, .5));
+
+    // 2 · the problem (3–8.5): "Where?" in a haystack of repos
+    const hay = fade(t, 3.2, 8.6, .8, .6);
+    S("paths", { opacity: hay * .9 });
+    if (hay > 0) paths.forEach((p, i) => { p.d.style.transform = `translate(${p.x + (t - 3) * p.v}px, ${p.y}px)`; });
+    const w = fade(t, 5.0, 8.4, .5, .4);
+    show("where", w, { top: "330px", transform: `scale(${.94 + .06 * w})`, filter: `blur(${(1 - w) * 10}px)` });
+
+    // 3 · the two extremes (8.6–14.4)
+    const ext = fade(t, 8.7, 14.3, .5, .5);
+    show("left", ext, { left: `${150 - (1 - ext) * 40}px` });
+    show("right", ext, { left: `${1010 + (1 - ext) * 40}px` });
+    const cmd = "cd ~/VCS/work/acme/studio/form-builder";
+    const n = Math.round(cmd.length * clamp((t - 9.2) / 2.2));
+    $("leftTerm").innerHTML = `<span class="dim">~ </span>❯ ${cmd.slice(0, n)}${t > 11.6 ? `<br><span class="dim">form-builder </span>❯ claude` : ""}${t > 12.2 ? `<br><span class="dim">  …and the parent, for work across repos?</span>` : ""}`;
+    S("hideReply", { opacity: seg(t, 10.0, 10.4) }); S("hideAsk", { opacity: seg(t, 11.8, 12.2) });
+
+    // 4 · the search (14.4–31)
+    const barV = fade(t, 14.4, 35.0, .35, .4);
+    show("bar", barV, { top: "150px", transform: `translateX(-50%) translateY(${(1 - barV) * -16}px) scale(${.98 + .02 * barV})` });
+    key("kA1", t, 14.0, 860, 820); key("kA2", t, 14.2, 970, 820);
+    let i = examples.length - 1;
+    for (let j = 0; j < examples.length; j++) if (t < examples[j].at + 4.2) { i = j; break; }
+    if (t >= 31.0) i = 0;  // the override replays the first request
+    const ex = examples[i];
+    const at = t >= 31.0 ? 31.0 : ex.at;
+    const typeEnd = at + (t >= 31.0 ? .01 : 1.3);
+    const shownReq = ex.req.slice(0, Math.round(ex.req.length * clamp((t - at) / Math.max(.01, typeEnd - at))));
+    $("typed").textContent = t >= 14.4 ? shownReq : "";
+    S("caret", { opacity: t < typeEnd + .1 || (t * 2) % 1 < .55 ? 1 : 0 });
+    const ranked = t >= typeEnd + .55;
+    const sel = t >= 31.0 && t > 32.3 ? 1 : 0;
+    rows(i, ranked, sel);
+    S("reading", { opacity: t > typeEnd && !ranked ? 1 : 0, transform: `translateX(${((t * 1.4) % 1 - .5) * 100}%)` });
+    document.querySelectorAll("#rows .row").forEach((r, j) => {
+      const v = out(seg(t, typeEnd + .55 + j * .06, typeEnd + .85 + j * .06));
+      S(r, { opacity: v, transform: `translateY(${(1 - v) * 8}px)` });
+      const wEl = r.querySelector(".w"); const wv = +wEl.dataset.w;
+      wEl.textContent = Math.round(wv * inOut(seg(t, typeEnd + .55, typeEnd + 1.15))) + "%";
     });
-    bubbles.forEach((b, j) => {
-      const ti = waiting[j], at = 9.6 + j * .45, v = back(seg(t, at, at + .4)) * (1 - seg(t, 12.9, 13.3));
-      const cx = x0 + (ti % cols) * (tw + gx) + 150, cy = y0 + Math.floor(ti / cols) * (th + gy) - 26;
-      show(b, clamp(v), { left: `${cx}px`, top: `${cy + Math.sin(t * 3 + j) * 4}px`, transform: `translateX(-50%) scale(${clamp(v)})` });
-    });
+    $("foot").textContent = !ranked ? "Jev is reading…" : (t >= 31 ? "Jev isn’t sure — ↑↓ to choose · ⏎ send · it remembers what you pick" : "Jev · about a second   ⏎ send   ⌘⏎ send & open");
+    if (t < 31) key("kEnter", t, ex.at + 3.55, 914, 820);
+    const capV = t < 31 ? fade(t, typeEnd + .7, ex.at + 4.15, .35, .3) : 0;
+    words("cap", ex.cap, capV, 760);
+    // the override (31–34.6)
+    key("kDown", t, 32.2, 860, 820); key("kEnter", t, t >= 31 ? 33.4 : -9, 970, 820);
+    const fly = seg(t, 33.6, 34.4), f = inOut(fly);
+    show("flyer", fly > 0 && fly < 1 ? 1 : 0, { left: `${900 + (1890 - 900) * f}px`, top: `${400 + (440 - 400) * f - Math.sin(f * Math.PI) * 140}px` });
 
+    // 5 · the reach (34.6–39.2): the edge, a question, the phone
+    const tabV = fade(t, 34.4, 39.3, .4, .4);
+    show("tab", tabV, { top: "380px", transform: `translateX(${(1 - tabV) * 30}px)` });
+    const cardV = fade(t, 35.0, 39.2, .4, .4);
+    show("card", cardV, { top: "330px", transform: `translateX(${(1 - cardV) * 20}px)` });
+    $("o1").classList.toggle("hit", t > 36.2 && t < 39.2);
+    key("kOne", t, 36.0, 1300, 820);
+    const ph = fade(t, 36.6, 39.2, .5, .4);
+    show("phone", ph, { left: "520px", top: `${190 + (1 - ph) * 70}px`, transform: `rotate(${(1 - ph) * 4}deg)` });
+    $("po1").classList.toggle("hit", t > 37.6 && t < 39.2);
 
-    // ── 4 · the edge (13–19) ───────────────────────────────────────
-    const tabV = out(seg(t, 14.0, 14.6)) * (1 - out(seg(t, 15.4, 15.8))) + out(seg(t, 18.6, 19.0)) * (1 - out(seg(t, 26.0, 26.4)));
-    show("tab", clamp(tabV), { top: "380px", transform: `translateX(${(1 - clamp(tabV)) * 30}px)` });
-    S("tabWait", { transform: `scale(${t > 14 && t < 15.6 ? 1 + .3 * Math.sin((t - 14) * 8) : 1})` });
-    const railV = out(seg(t, 15.5, 16.0)) * (1 - out(seg(t, 18.3, 18.7)));
-    show("rail", railV, { top: "330px", transform: `translateX(${(1 - railV) * 26}px)` });
-    show("card", railV, { top: "330px", transform: `translateX(${(1 - railV) * 20}px) scale(${.97 + .03 * railV})` });
-    $("o1").classList.toggle("hit", t > 17.0 && t < 18.6);
-    const answered = t > 17.25;
-    $("railWait").className = "g " + (answered ? "work" : "wait");
-
-    key("kOne", [t, 16.9], 1120, 760);
-
-    // ── 5 · the bar (19–26) ────────────────────────────────────────
-    key("kA1", [t, 19.4], 860, 760); key("kA2", [t, 19.6], 970, 760);
-    const barV = out(seg(t, 19.8, 20.15)) * (1 - out(seg(t, 24.6, 24.95)));
-    show("bar", barV, { top: "240px", transform: `translateX(-50%) translateY(${(1 - barV) * -16}px) scale(${.98 + .02 * barV})` });
-    const REQ = "fix the flaky login test in payments";
-    $("typed").textContent = REQ.slice(0, Math.round(REQ.length * clamp((t - 20.3) / 1.7)));
-    S("caret", { opacity: t > 20.3 && t < 22.1 ? 1 : ((t * 2) % 1 < .55 ? 1 : 0) });
-    const rank = inOut(seg(t, 22.4, 23.2));
-    [["w1", 92], ["w2", 3], ["w3", 2], ["w4", 3]].forEach(([id, v]) => { $(id).textContent = t < 22.4 ? "—" : Math.round(v * rank) + "%"; });
-    $("hPick").textContent = t >= 22.9 ? "Jev’s pick" : "Sessions";
-    $("r1").classList.toggle("sel", t >= 22.9);
-    key("kEnter", [t, 24.3], 914, 760);
-    const fly = seg(t, 24.6, 25.5), f = inOut(fly);
-    const fx0 = 760, fy0 = 360, fx1 = 1920 - 24, fy1 = 420;
-    show("flyer", fly > 0 && fly < 1 ? 1 : 0, { left: `${fx0 + (fx1 - fx0) * f}px`, top: `${fy0 + (fy1 - fy0) * f - Math.sin(f * Math.PI) * 120}px` });
-
-    words("sub", t < 24.5 ? "Jev knows where it goes." : "Sent, word for word, to the right agent.",
-      t >= 22.6 && t < 26 ? out(seg(t, 22.6, 23.0)) * (1 - out(seg(t, 25.6, 26))) : 0, 960);
-
-    // ── 6 · the phone (26–31) ──────────────────────────────────────
-    const ph = out(seg(t, 26.2, 26.9)) * (1 - out(seg(t, 30.6, 31.1)));
-    show("phone", ph, { left: "760px", top: `${170 + (1 - ph) * 80}px`, transform: `rotate(${(1 - ph) * 4}deg)` });
-    const tapV = seg(t, 28.4, 28.55) * (1 - seg(t, 28.75, 29.1));
-    show("tap", tapV, { left: "805px", top: "392px", transform: `scale(${.6 + .4 * tapV})` });
-    $("po1").classList.toggle("hit", t > 28.5 && t < 30.8);
-
-
-    // ── 7 · the end card (31–36) ───────────────────────────────────
-    // The headline: one per scene, in and out.
-    const scenes = [[4.3, 9.0, "You run a dozen agents.", 130], [9.2, 13.0, "Each one wants you.", 130], [13.5, 18.8, "Reflex keeps them at the edge.", 130],
-      [19.1, 26.0, "⌥⌥ — say what you want.", 120], [26.4, 31.0, "From anywhere.", 96], [32.0, 99, "One reflex to every coding agent.", 640]];
-    const sc = scenes.find(([a, b]) => t >= a - .05 && t < b) ?? scenes[0];
-    words("say", sc[2], t >= sc[0] - .05 && t < sc[1] ? out(seg(t, sc[0], sc[0] + .5)) * (1 - out(seg(t, sc[1] - .4, sc[1]))) : 0, sc[3]);
-    if (t >= 31.2) {
-      words("sub", "Free and open source · monotykamary.github.io/reflex · macOS 26", out(seg(t, 32.9, 33.6)), 760);
-    }
+    // headlines, one per scene
+    const scenes = [[3.2, 5.2, "Every agent starts with a question.", 200], [8.7, 14.3, "", 0], [14.4, 31.0, "Say what you want.", 60],
+      [31.0, 34.6, "Not sure? It shows its guess.", 60], [34.6, 39.2, "Then it keeps every agent in reach.", 120], [40.0, 99, "Say what. Reflex finds where.", 600]];
+    const scn = scenes.find(([a, b]) => t >= a && t < b);
+    words("say", scn ? scn[2] : "", scn ? fade(t, scn[0], scn[1], .45, .35) : 0, scn ? scn[3] : 0);
+    const subs = [[12.8, 14.3, "Reflex is in between.", 820], [41.0, 99, "reflex.farm · free and open source · for the Mac", 720]];
+    const sb = subs.find(([a, b]) => t >= a && t < b);
+    words("sub", sb ? sb[2] : "", sb ? fade(t, sb[0], sb[1], .45, .3) : 0, sb ? sb[3] : 0);
+    if (sb && sb[2] === "Reflex is in between.") S("sub", { fontSize: "54px", fontWeight: 700, color: "var(--ink)", letterSpacing: "-.03em" });
+    else S("sub", { fontSize: "", fontWeight: "", color: "", letterSpacing: "" });
   }
 
   window.film = { render, length: LEN, fps: 30 };

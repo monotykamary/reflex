@@ -55,7 +55,7 @@ tools=app/.build/artifacts/sparkle/Sparkle/bin
 updates=$(mktemp -d)
 cp "$dmg" "$updates/"
 "$tools/generate_appcast" --download-url-prefix "https://github.com/monotykamary/reflex/releases/download/v$version/" \
-  --link "https://monotykamary.github.io/reflex/" -o site/appcast.xml "$updates"
+  --link "https://reflex.farm/" -o site/appcast.xml "$updates"
 rm -rf "$updates"
 
 if [ -n "${PUBLISH:-}" ]; then
