@@ -165,6 +165,7 @@ struct CommandBar: View {
         .frame(maxHeight: .infinity, alignment: .top)
         .padding(20)
         .animation(Motion.pick(Motion.spring, reduce: reduce), value: model.phase)
+        .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.target)
         .onChange(of: model.focusTick) { _, _ in focused = true }
         .onChange(of: store.state.receipts) { _, _ in model.observe(store.state) }
         .onChange(of: store.state.pending) { _, _ in model.observe(store.state) }
@@ -179,13 +180,25 @@ struct CommandBar: View {
         VStack(spacing: 0) {
             HStack(spacing: 12) {
                 leading
-                TextField(placeholder, text: $model.text, axis: .vertical)
+                TextField("", text: $model.text, axis: .vertical)
                     .textFieldStyle(.plain)
                     .font(Type.field)
                     .lineLimit(1...6)
                     .focused($focused)
                     .onSubmit { model.submit(agents: store.state.agents) }
                     .onKeyPress(phases: .down) { press in key(press) }
+                    // Our own placeholder, so a new one blurs in instead of cutting.
+                    .background(alignment: .topLeading) {
+                        if model.text.isEmpty {
+                            Text(placeholder)
+                                .font(Type.field)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .id(placeholder)
+                                .transition(.blurSwap)
+                                .allowsHitTesting(false)
+                        }
+                    }
                     .opacity(model.phase == .typing ? 1 : 0.45)
                 trailing
             }
@@ -202,20 +215,24 @@ struct CommandBar: View {
     }
 
     @ViewBuilder private var leading: some View {
+        // One chip that stays put while ⇥ cycles: only its name crossfades.
         if let a = pinned {
             HStack(spacing: 6) {
                 Bead(status: a.status, size: 7)
                 Text(a.folder).font(Type.title).lineLimit(1)
+                    .id(a.pane)
+                    .transition(.blurSwap)
             }
             .padding(.horizontal, 10).padding(.vertical, 5)
             .glassEffect(.regular.tint(Tone.of(a.status).opacity(0.25)), in: Capsule())
             .glassEffectID("pin", in: glass)
-            .transition(.blurSwap)
+            .transition(.surface(reduce: reduce))
         } else {
             Image(systemName: "sparkle")
                 .font(.system(size: 16, weight: .medium))
                 .foregroundStyle(.secondary)
                 .symbolEffect(.pulse, isActive: model.phase == .routing && !reduce)
+                .transition(.surface(reduce: reduce))
         }
     }
 
@@ -298,6 +315,7 @@ struct CommandBar: View {
     private var chips: some View {
         VStack(alignment: .leading, spacing: 10) {
             if !store.state.agents.isEmpty {
+                ScrollViewReader { proxy in
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 6) {
                         ForEach(store.state.agents) { a in
@@ -313,8 +331,14 @@ struct CommandBar: View {
                                 .overlay(Capsule().strokeBorder(on ? Tone.of(a.status).opacity(0.55) : .clear, lineWidth: 1))
                             }
                             .buttonStyle(Pressable())
+                            .id(a.pane)
                         }
                     }
+                }
+                .onChange(of: model.target) { _, t in
+                    guard let t else { return }
+                    withAnimation(Motion.pick(Motion.swap, reduce: reduce)) { proxy.scrollTo(t, anchor: .center) }
+                }
                 }
             }
             HStack(spacing: 14) {
@@ -339,6 +363,7 @@ struct CommandBar: View {
                 .padding(.horizontal, 5).padding(.vertical, 1)
                 .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 4, style: .continuous))
             Text(what).font(Type.meta).foregroundStyle(.tertiary)
+                .contentTransition(.interpolate)
         }
     }
 

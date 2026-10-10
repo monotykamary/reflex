@@ -16,6 +16,9 @@ enum Motion {
     static let exit = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.16)
     /// Interruptible spring for layout that moves under the pointer.
     static let spring = Animation.spring(duration: 0.3, bounce: 0)
+    /// Content swapping in place under a frequent key (⇥ to pin): brief, so
+    /// it reads as continuity rather than a show.
+    static let swap = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.2)
     /// Tiny feedback (press, select).
     static let micro = Animation.timingCurve(0.23, 1, 0.32, 1, duration: 0.12)
     /// Something arrived: one soft bump, the only place a little bounce is earned.
