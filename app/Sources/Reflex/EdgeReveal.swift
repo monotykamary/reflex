@@ -51,6 +51,10 @@ final class EdgeReveal {
     private var tabHoverAt: TimeInterval?
     private var holdUntil: TimeInterval = 0
     private var lent: NSRunningApplication?
+    /// Where the pointer was when the rail opened. Until it moves, the rail
+    /// does not take the keyboard: a rail that slid out under a resting
+    /// pointer (a question arriving) must not swallow what you type elsewhere.
+    private var shownAt: NSPoint?
     private let debugDwell = ProcessInfo.processInfo.environment["REFLEX_DEBUG_DWELL"] != nil
     private let debugHover = ProcessInfo.processInfo.environment["REFLEX_DEBUG_HOVER"] != nil
 
@@ -123,6 +127,11 @@ final class EdgeReveal {
     /// the app you were in gets them back.
     private func takeKeys(_ under: Bool) {
         if othersKey() { lent = nil; return }
+        if let p0 = shownAt {
+            let p = NSEvent.mouseLocation
+            if hypot(p.x - p0.x, p.y - p0.y) < 4 { return }
+            shownAt = nil
+        }
         if under {
             guard !ours.contains(where: \.isKeyWindow) else { return }
             let front = NSWorkspace.shared.frontmostApplication
@@ -158,6 +167,7 @@ final class EdgeReveal {
         tabHoverAt = nil
         RailModel.shared.dwell = 0
         holdUntil = now + max(grace, hold)
+        if !RailModel.shared.visible { shownAt = NSEvent.mouseLocation }
         if !RailModel.shared.visible {
             RailModel.shared.visible = true
             onReveal()

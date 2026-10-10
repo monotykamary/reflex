@@ -69,6 +69,9 @@ struct Client {
 
     func answer(item: Int, key: String) async { await post("/api/answer", ["item": item, "key": key]) }
     func dismiss(_ item: Int) async { await post("/api/dismiss", ["item": item]) }
+    func note(pane: String, agent: String, title: String, body: String) async {
+        await post("/api/note", ["pane": pane, "agent": agent, "title": title, "body": body])
+    }
     func focus(_ pane: String) async { await post("/api/focus", ["pane": pane]) }
     /// Bring an earlier session back in a new herdr workspace (resume, fork
     /// or attach), then submit `text` there if it is not empty.

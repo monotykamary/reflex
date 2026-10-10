@@ -281,7 +281,10 @@ private struct Row: View {
     var open: () -> Void
     @State private var hover = false
 
-    private var tone: Color { Tone.ofItem(item.kind) }
+    private var tone: Color {
+        if item.pane.hasPrefix("bg:") { return item.title.hasPrefix("needs") ? Tone.blocked : Tone.done }
+        return Tone.ofItem(item.kind)
+    }
     private var gist: String { InboxText.gist(item.body) }
 
     var body: some View {

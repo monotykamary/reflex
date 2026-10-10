@@ -861,6 +861,7 @@ type Ep is Data:
   ESide{}
   EFocus{}
   EPair{}
+  ENote{}
   EKeys{}
   EText{}
   EClose{}
@@ -891,6 +892,7 @@ def rows() -> List<&2, Row>:
     Row{"/api/side", ESide{}},
     Row{"/api/focus", EFocus{}},
     Row{"/api/pair", EPair{}},
+    Row{"/api/note", ENote{}},
     Row{"/api/keys", EKeys{}},
     Row{"/api/text", EText{}},
     Row{"/api/close", EClose{}},
@@ -1090,6 +1092,12 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.focus(Cfg.sock(cfg), Js.text_at(body, "pane"))
         ok(pane_json(ok_detail(r, "focused")))
+    # A note from the app (a background session finished or needs you):
+    # an inbox item that stays until you open or clear it.
+    case ENote{}:
+      do IO<String>:
+        r : String <- ask_text(chan, M.Post{M.INote{}, Js.text_at(body, "pane"), Js.text_at(body, "agent"), Js.text_at(body, "title"), Js.text_at(body, "body"), []})
+        ok(r)
     case EKeys{}:
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.sock(cfg), Js.text_at(body, "pane"), Js.text_at(body, "key"))

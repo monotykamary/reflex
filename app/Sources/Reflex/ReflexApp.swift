@@ -166,13 +166,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     }
                 }
             default:
-                if let a = Store.shared.state.agents.first {
+                let want = ProcessInfo.processInfo.environment["REFLEX_DEMO_PANE"]
+                if let a = Store.shared.state.agents.first(where: { $0.pane == want }) ?? Store.shared.state.agents.first {
                     self.showPane(a.pane)
                     // Dev: with another app in front, switch to it from the bar.
                     if ProcessInfo.processInfo.environment["REFLEX_DEMO_SWITCH"] != nil {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
                             self.toggleBar()
-                            self.command.text = "reflex"
+                            self.command.text = ProcessInfo.processInfo.environment["REFLEX_DEMO_SWITCH_TEXT"] ?? "reflex"
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.command.submit() }
                         }
                     }
@@ -349,6 +350,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // A pairing code never outlives the app that made it.
         Pairing.shared.stop()
         KeepAwake.shared.start()
+        BackgroundWatch.shared.start()
         Store.shared.watching = { [weak self] in
             self?.popouts.first { $0.value.isKeyWindow }?.key
         }
@@ -711,6 +713,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func showPane(_ pane: String) {
+        // A background session's note: attach it in herdr (then it is a pane).
+        if pane.hasPrefix("bg:") {
+            if InboxModel.shared.shown { hideInbox() }
+            BackgroundWatch.open(pane)
+            return
+        }
         Recents.shared.touch(pane)
         Store.shared.seen(pane)
         edge.hide(returnFocus: false)

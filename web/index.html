@@ -364,8 +364,10 @@
     if (ups.length) {
       h += `<div class="section"><div class="label">Updates <span class="n">${ups.length}</span><button class="act" data-clearall>Clear</button></div><div class="group">`;
       h += ups.map((i) => { const g = gist(i.body);
-        return `<div class="row${fresh("u" + i.id)}" data-open="${esc(i.pane)}" role="button">
-          ${glyph(i.kind === "ready" || i.kind === "reply" ? "done" : "idle")}
+        // A background session's note (pane "bg:…") is opened from the Mac.
+        const bg = i.pane.startsWith("bg:");
+        return `<div class="row${fresh("u" + i.id)}"${bg ? "" : ` data-open="${esc(i.pane)}" role="button"`}>
+          ${glyph(bg ? (i.title.startsWith("needs") ? "blocked" : "done") : i.kind === "ready" || i.kind === "reply" ? "done" : "idle")}
           <div class="text"><div class="t1">${esc(i.agent)}</div><div class="t2">${esc(i.title)}</div>${g ? `<div class="gist">${esc(g)}</div>` : ""}</div>
           <span class="side">${ago(i.at)}</span>
           <button class="x" data-dismiss="${i.id}" aria-label="Clear">${xIcon}</button></div>`; }).join("") + `</div></div>`;
