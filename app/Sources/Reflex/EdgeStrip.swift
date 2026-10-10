@@ -5,9 +5,10 @@ import SwiftUI
 //   tab       While an agent is active, a small dark tab grows out of the edge:
 //             a spinning ring per working agent, amber for waiting, green for
 //             done. Hover it to open the rail.
-//   rail      A column of dark round buttons — inbox, agents, Ask / Settings /
-//             Guide, more — and, when something waits on you, its question as
-//             a card you answer with 1, 2 or 3.
+//   rail      A column of round glass buttons — inbox, the agents' dots, Ask /
+//             Settings, more — and beside it, in its own window, the question
+//             waiting on you (answer with 1, 2 or 3) or, once you click the
+//             dots, every agent.
 //
 // With nothing active there is no tab: rest on the edge for half a second.
 
@@ -23,8 +24,12 @@ final class RailModel: ObservableObject {
     /// Beside the buttons: the question, the agent list, or whichever fits.
     enum Panel { case auto, question, agents }
     @Published var panel: Panel = .auto
-    /// The open rail's size, measured; its window is made to fit it.
-    @Published var footprint: CGSize = .zero
+    /// The dot under the pointer, whose status shows beside the column.
+    @Published var hoverDot: String?
+    /// Measured sizes of the open column and of what sits beside it; each
+    /// window is made to fit its own.
+    @Published var columnSize: CGSize = .zero
+    @Published var sideSize: CGSize = .zero
 }
 
 // MARK: - Shared pieces
@@ -138,26 +143,21 @@ private struct PillButton: View {
 }
 
 // MARK: - The rail
+//
+// Two windows: the button column (and the tab) in one that never changes
+// size while the rail is open, and what sits beside it — the question card,
+// the agent list, a dot's status pill — in a second, sized to its content.
+// So nothing in the column can shift when the side content comes and goes,
+// and neither window is ever larger than what it shows.
 
-struct Rail: View {
-    @ObservedObject var store = Store.shared
-    @ObservedObject var rail = RailModel.shared
-    @ObservedObject var settings = Settings.shared
-    @ObservedObject var inbox = InboxModel.shared
-    @Environment(\.accessibilityReduceMotion) private var reduce
-    @Namespace private var glass
-    /// The dot under the pointer, which shows its status beside it.
-    @State private var hoverDot: String?
-    var openInbox: () -> Void
-    var openAgent: (AgentInfo) -> Void
-    /// Open the command bar, pinned to an agent when one is given.
-    var openBar: (AgentInfo?) -> Void
-    var reveal: (AgentInfo) -> Void
-    var openSettings: () -> Void
-    var restart: () -> Void
-    var openLog: () -> Void
-    var quit: () -> Void
+/// What sits beside the column.
+enum RailSideMode: Equatable {
+    case none, question, agents
+    /// A hovered dot's status pill, at that dot's row.
+    case pill(index: Int, agent: AgentInfo)
+}
 
+extension Rail {
     /// The button column alone: 40 pt buttons, the badge's overhang, the edge margin.
     static let columnWidth: CGFloat = 60
 
@@ -169,27 +169,74 @@ struct Rail: View {
         inbox.filter { ($0.kind == "ask" || $0.kind == "route") && !$0.options.isEmpty }
     }
 
-    private var questions: [ItemInfo] { Rail.questions(store.state.inbox) }
-
-    private var card: ItemInfo? {
-        questions.indices.contains(rail.cardIndex) ? questions[rail.cardIndex] : questions.first
+    static func card(_ rail: RailModel, _ inbox: [ItemInfo]) -> ItemInfo? {
+        let q = questions(inbox)
+        return q.indices.contains(rail.cardIndex) ? q[rail.cardIndex] : q.first
     }
 
-    /// What sits beside the buttons: the waiting question, or — only once you
-    /// click the dots — every agent. Nothing while the inbox is open beside it.
-    private var showing: RailModel.Panel {
-        if inbox.shown { return .auto }
-        switch rail.panel {
-        case .agents where !store.state.agents.isEmpty: return .agents
-        default: return card != nil ? .question : .auto
+    /// The waiting question; every agent only once you click the dots; a
+    /// pill while a dot is hovered; nothing while the inbox is open.
+    @MainActor static func side(_ rail: RailModel, _ store: Store, inboxShown: Bool) -> RailSideMode {
+        guard rail.visible, !inboxShown else { return .none }
+        let agents = store.state.agents
+        if rail.panel == .agents && !agents.isEmpty { return .agents }
+        if rail.panel != .agents, let pane = rail.hoverDot, let i = agents.prefix(10).firstIndex(where: { $0.pane == pane }) {
+            return .pill(index: i, agent: agents[i])
         }
+        return card(rail, store.state.inbox) != nil ? .question : .none
     }
+
+    /// With the pointer over the rail: 1–9 answer the card, ⇥ shows the next
+    /// one, U takes back the last send.
+    @MainActor static func key(_ press: KeyPress) -> KeyPress.Result {
+        let rail = RailModel.shared, store = Store.shared
+        guard rail.visible else { return .ignored }
+        if press.characters.lowercased() == "u", let p = store.state.pending.last {
+            Task { await Client.local.cancel(p.id); await Store.shared.refresh() }
+            return .handled
+        }
+        guard side(rail, store, inboxShown: InboxModel.shared.shown) == .question else { return .ignored }
+        let qs = questions(store.state.inbox)
+        if press.key == .tab, qs.count > 1 {
+            rail.cardIndex = (rail.cardIndex + 1) % qs.count
+            return .handled
+        }
+        guard let c = card(rail, store.state.inbox), press.characters.count == 1,
+              c.options.contains(where: { $0.key == press.characters }) else { return .ignored }
+        Task { await Client.local.answer(item: c.id, key: press.characters); await Store.shared.refresh() }
+        return .handled
+    }
+
+    /// Top of the column to the centre of dot `i` (see `column`).
+    static func dotCenter(_ i: Int) -> CGFloat { 40 + 10 + 6 + 28 * CGFloat(i) + 14 }
+}
+
+/// The tab, and the open column.
+struct Rail: View {
+    @ObservedObject var store = Store.shared
+    @ObservedObject var rail = RailModel.shared
+    @ObservedObject var settings = Settings.shared
+    @ObservedObject var inbox = InboxModel.shared
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    @Namespace private var glass
+    var openInbox: () -> Void
+    var openBar: (AgentInfo?) -> Void
+    var openSettings: () -> Void
+    var restart: () -> Void
+    var openLog: () -> Void
+    var quit: () -> Void
+
+    private var side: RailSideMode { Rail.side(rail, store, inboxShown: inbox.shown) }
 
     var body: some View {
         GlassEffectContainer(spacing: 14) {
             ZStack(alignment: .trailing) {
                 if rail.visible {
-                    open
+                    column
+                        .padding(.trailing, 10)
+                        .padding(.vertical, 12)
+                        .fixedSize()
+                        .onGeometryChange(for: CGSize.self) { $0.size } action: { rail.columnSize = $0 }
                         .transition(.asymmetric(
                             insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 0.97, y: 0, blur: 4), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))
                                 .combined(with: .offset(x: reduce ? 0 : 18)),
@@ -202,34 +249,16 @@ struct Rail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .animation(rail.visible ? Motion.enter : Motion.exit, value: rail.visible)
         .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
-        .animation(Motion.enter, value: showing)
         .environment(\.colorScheme, .dark)
         // One look whether or not the rail has the keys: it takes them while the
         // pointer is over it, and glass would otherwise change as they come and go.
         .environment(\.controlActiveState, .inactive)
         .focusable()
         .focusEffectDisabled()
-        .onKeyPress(phases: .down) { press in key(press) }
-        .onChange(of: rail.visible) { _, open in if !open { rail.panel = .auto } }
-    }
-
-    /// With the pointer over the rail, 1–9 answer the card; ⇥ shows the next one.
-    private func key(_ press: KeyPress) -> KeyPress.Result {
-        guard rail.visible else { return .ignored }
-        if press.characters.lowercased() == "u", let p = store.state.pending.last {
-            Task { await Client.local.cancel(p.id); await Store.shared.refresh() }
-            return .handled
+        .onKeyPress(phases: .down) { Rail.key($0) }
+        .onChange(of: rail.visible) { _, open in
+            if !open { rail.panel = .auto; rail.hoverDot = nil }
         }
-        guard showing == .question else { return .ignored }
-        if press.key == .tab, questions.count > 1 {
-            rail.cardIndex = (rail.cardIndex + 1) % questions.count
-            return .handled
-        }
-        guard let c = card, press.characters.count == 1, c.options.contains(where: { $0.key == press.characters }) else {
-            return .ignored
-        }
-        Task { await Client.local.answer(item: c.id, key: press.characters); await Store.shared.refresh() }
-        return .handled
     }
 
     // MARK: Tab
@@ -248,44 +277,12 @@ struct Rail: View {
         .glassEffectID("agents", in: glass)
     }
 
-    // MARK: Open rail
-
-    private var open: some View {
-        HStack(alignment: .center, spacing: 12) {
-            switch showing {
-            case .question:
-                if let q = card {
-                    VStack(spacing: 10) {
-                        QuestionCard(item: q, count: questions.count, index: rail.cardIndex,
-                                     agent: store.state.agents.first { $0.pane == q.pane },
-                                     pending: store.state.pending.first { $0.item == q.id },
-                                     openAgent: openAgent,
-                                     showAgents: store.state.agents.isEmpty ? nil : { rail.panel = .agents })
-                        KeyHint(keys: q.options.prefix(3).map(\.key))
-                    }
-                    .transition(.surface(reduce: reduce))
-                }
-            case .agents:
-                AgentList(agents: store.state.agents, pulses: store.pulses, waiting: questions.count,
-                          open: openAgent, ask: { openBar($0) }, reveal: reveal,
-                          showQuestion: { rail.panel = .question })
-                    .transition(.surface(reduce: reduce))
-            case .auto:
-                EmptyView()
-            }
-            column
-        }
-        .padding(.trailing, 10)
-        .padding(.vertical, 12)
-        .fixedSize()
-        // Room for a hovered dot's status pill, which hangs off the column.
-        .padding(.leading, hoverDot != nil && showing == .auto ? 200 : 0)
-        .onGeometryChange(for: CGSize.self) { $0.size } action: { rail.footprint = $0 }
-    }
+    // MARK: Column
 
     private func toggleAgents() {
         if inbox.shown { InboxModel.shared.shown = false }
-        rail.panel = showing == .agents ? .auto : .agents
+        rail.panel = side == .agents ? .auto : .agents
+        rail.hoverDot = nil
     }
 
     private var column: some View {
@@ -307,7 +304,7 @@ struct Rail: View {
 
             if !store.state.agents.isEmpty {
                 // The dots: click for every agent's details, click again to put them away.
-                VStack(spacing: 2) {
+                VStack(spacing: 0) {
                     ForEach(store.state.agents.prefix(10)) { a in
                         Button(action: toggleAgents) {
                             AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
@@ -315,17 +312,9 @@ struct Rail: View {
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(Pressable())
-                        .onHover { h in hoverDot = h ? a.pane : (hoverDot == a.pane ? nil : hoverDot) }
-                        .overlay(alignment: .trailing) {
-                            if hoverDot == a.pane && showing != .agents && !inbox.shown {
-                                StatusPill(agent: a)
-                                    .fixedSize()
-                                    .offset(x: -48)
-                                    .transition(.opacity.combined(with: .offset(x: 6)))
-                                    .allowsHitTesting(false)
-                            }
+                        .onHover { h in
+                            rail.hoverDot = h ? a.pane : (rail.hoverDot == a.pane ? nil : rail.hoverDot)
                         }
-                        .animation(Motion.micro, value: hoverDot)
                         .accessibilityLabel("\(a.kind) in \(a.folder), \(StatusPill.word(a.status))")
                     }
                     if store.state.agents.count > 10 {
@@ -341,9 +330,9 @@ struct Rail: View {
                     }
                 }
                 .padding(.vertical, 6)
-                .glassEffect(.rail.interactive(), in: Capsule())
+                .glassEffect(.rail, in: Capsule())
                 .glassEffectID("agents", in: glass)
-                .help(showing == .agents ? "Hide agents" : "Show agents")
+                .help(side == .agents ? "Hide agents" : "Show agents")
             }
 
             VStack(spacing: 0) {
@@ -369,6 +358,73 @@ struct Rail: View {
             .fixedSize()
             .glassEffect(.rail.interactive(), in: Circle())
             .help("More")
+        }
+    }
+}
+
+/// Beside the column, in its own window: the question card, the agent list,
+/// or a hovered dot's pill. Only this animates when it changes.
+struct RailSide: View {
+    @ObservedObject var store = Store.shared
+    @ObservedObject var rail = RailModel.shared
+    @ObservedObject var inbox = InboxModel.shared
+    @Environment(\.accessibilityReduceMotion) private var reduce
+    var openAgent: (AgentInfo) -> Void
+    var openBar: (AgentInfo?) -> Void
+    var reveal: (AgentInfo) -> Void
+
+    private var mode: RailSideMode { Rail.side(rail, store, inboxShown: inbox.shown) }
+    private var questions: [ItemInfo] { Rail.questions(store.state.inbox) }
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            content
+                // 12 pt to the column; the same vertical margins as the column.
+                .padding(.trailing, 12)
+                .padding(.vertical, 12)
+                .fixedSize()
+                .onGeometryChange(for: CGSize.self) { $0.size } action: { rail.sideSize = $0 }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .animation(Motion.enter, value: mode)
+        .environment(\.colorScheme, .dark)
+        .environment(\.controlActiveState, .inactive)
+        .focusable()
+        .focusEffectDisabled()
+        .onKeyPress(phases: .down) { Rail.key($0) }
+    }
+
+    @ViewBuilder private var content: some View {
+        switch mode {
+        case .question:
+            if let q = Rail.card(rail, store.state.inbox) {
+                VStack(spacing: 10) {
+                    QuestionCard(item: q, count: questions.count, index: rail.cardIndex,
+                                 agent: store.state.agents.first { $0.pane == q.pane },
+                                 pending: store.state.pending.first { $0.item == q.id },
+                                 openAgent: openAgent,
+                                 showAgents: store.state.agents.isEmpty ? nil : { rail.panel = .agents })
+                    KeyHint(keys: q.options.prefix(3).map(\.key))
+                }
+                .transition(.surface(reduce: reduce))
+            }
+        case .agents:
+            AgentList(agents: store.state.agents, pulses: store.pulses, waiting: questions.count,
+                      open: openAgent, ask: { openBar($0) }, reveal: reveal,
+                      showQuestion: { rail.panel = .question })
+                .transition(.surface(reduce: reduce))
+        case .pill(let i, let a):
+            // Level with its dot: the same height as the column, pill at the dot's row.
+            VStack(spacing: 0) {
+                Color.clear.frame(height: max(0, Rail.dotCenter(i) - 13))
+                StatusPill(agent: a).fixedSize().frame(height: 26)
+                Spacer(minLength: 0)
+            }
+            .frame(height: max(26, rail.columnSize.height - 24), alignment: .top)
+            .transition(.opacity.combined(with: .offset(x: reduce ? 0 : 6)))
+            .animation(Motion.micro, value: i)
+        case .none:
+            Color.clear.frame(width: 0, height: 0)
         }
     }
 }

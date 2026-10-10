@@ -103,6 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "inbox": self.showInbox()
             case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
+            case "railclick":
+                // Dev: the rail as its column, then the dots "clicked" a moment later.
+                if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { RailModel.shared.panel = .agents }
             case "agents":
                 if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
                 RailModel.shared.panel = .agents
@@ -209,9 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func setupRail() {
         let view = Rail(openInbox: { [weak self] in self?.showInbox() },
-                        openAgent: { [weak self] a in self?.showPane(a.pane) },
                         openBar: { [weak self] a in self?.openBar(pinned: a) },
-                        reveal: { a in HerdrWindow.reveal(pane: a.pane) },
                         openSettings: { [weak self] in self?.showSettings() },
                         restart: { Daemon.shared.restart() },
                         openLog: { NSWorkspace.shared.open(Daemon.logURL) },
@@ -221,6 +223,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.ignoresMouseEvents = true
         strip = p
 
+        let sideView = RailSide(openAgent: { [weak self] a in self?.showPane(a.pane) },
+                                openBar: { [weak self] a in self?.openBar(pinned: a) },
+                                reveal: { a in HerdrWindow.reveal(pane: a.pane) })
+        let sp = Panels.floating(sideView, size: NSSize(width: 1, height: 1), key: true)
+        sp.level = .statusBar
+        sp.ignoresMouseEvents = true
+        side = sp
+
         let sl = Panels.floating(Sliver(), size: NSSize(width: 14, height: 120), key: false)
         sl.level = .statusBar
         sl.ignoresMouseEvents = true
@@ -228,9 +238,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         placeStrip()
         p.orderFrontRegardless()
+        sp.orderFrontRegardless()
         sl.orderFrontRegardless()
 
         edge.panel = { [weak self] in self?.strip }
+        edge.side = { [weak self] in
+            guard let w = self?.side, !w.ignoresMouseEvents else { return nil }
+            return w
+        }
         edge.sliver = { [weak self] in self?.sliver }
         edge.tabShown = { [weak self] in self?.tabShown ?? false }
         edge.anchor = { [weak self] in
@@ -264,11 +279,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     self.placeStrip()
                 }
             }.store(in: &bag)
-        // The open rail's window follows what it shows, so its transparent
-        // part never covers the inbox or the apps beside it.
-        RailModel.shared.$footprint.removeDuplicates().sink { [weak self] _ in
-            DispatchQueue.main.async { self?.placeStrip() }
-        }.store(in: &bag)
+        // Each window follows what it shows, so no transparent part of either
+        // covers the inbox or the apps beside the rail.
+        let r = RailModel.shared
+        Publishers.MergeMany(r.$panel.map { _ in () }.eraseToAnyPublisher(),
+                             r.$hoverDot.map { _ in () }.eraseToAnyPublisher(),
+                             r.$cardIndex.map { _ in () }.eraseToAnyPublisher(),
+                             r.$columnSize.map { _ in () }.eraseToAnyPublisher(),
+                             r.$sideSize.map { _ in () }.eraseToAnyPublisher())
+            .sink { [weak self] in self?.schedulePlace() }.store(in: &bag)
+        InboxModel.shared.$shown.sink { [weak self] _ in self?.schedulePlace() }.store(in: &bag)
+        Store.shared.$state.map { Rail.questions($0.inbox).map(\.id) }.removeDuplicates()
+            .sink { [weak self] _ in self?.schedulePlace() }.store(in: &bag)
         Settings.shared.$showStrip.dropFirst().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeStrip() }
         }.store(in: &bag)
@@ -278,40 +300,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }.store(in: &bag)
     }
 
-    /// The tab is a sliver of panel at the edge; the open rail is a wider one.
-    private var shrinkTask: DispatchWorkItem?
+    private var side: KeyPanel?
+    private var placeQueued = false
+    private var sideFit = 0
 
+    /// Coalesce: many changes in one turn of the run loop, one placement.
+    private func schedulePlace() {
+        guard !placeQueued else { return }
+        placeQueued = true
+        DispatchQueue.main.async { [weak self] in
+            self?.placeQueued = false
+            self?.placeStrip()
+        }
+    }
+
+    /// The column window sits at the edge; the side window, sized to its
+    /// content, sits just left of it. Windows grow at once and shrink only
+    /// after the old content has faded out.
     private func placeStrip() {
         guard let p = strip else { return }
         let s = (railScreen ?? NSScreen.main)?.visibleFrame ?? Panels.screen
         let y0 = railY ?? s.midY
-        var size: NSSize
-        if RailModel.shared.visible {
-            // Fit what the rail shows (plus room for a hovered dot's pill).
-            // Grow at once; shrink only after the old content has faded out.
-            let f = RailModel.shared.footprint
-            size = f == .zero ? NSSize(width: 430, height: min(s.height, 640))
-                : NSSize(width: ceil(f.width), height: min(s.height, ceil(f.height)))
-            let cur = p.frame.size
-            if p.isVisible && (size.width < cur.width - 1 || size.height < cur.height - 1) && cur.width > 31 {
-                let target = size
-                shrinkTask?.cancel()
-                shrinkTask = DispatchWorkItem { [weak self] in
-                    guard let self, RailModel.shared.visible, RailModel.shared.footprint == f else { return }
-                    let y = min(max(y0 - target.height / 2, s.minY), s.maxY - target.height)
-                    p.setFrame(NSRect(x: s.maxX - target.width, y: y, width: target.width, height: target.height), display: true)
-                }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: shrinkTask!)
-                // Keep growing in the other dimension, if any.
-                size = NSSize(width: max(size.width, cur.width), height: max(size.height, cur.height))
-                if size == cur { return }
-            }
+        func centred(_ size: NSSize, right: CGFloat) -> NSRect {
+            let y = min(max(y0 - size.height / 2, s.minY), s.maxY - size.height)
+            return NSRect(x: right - size.width, y: y, width: size.width, height: size.height)
+        }
+
+        let rail = RailModel.shared
+        let column: NSRect
+        if rail.visible {
+            let c = rail.columnSize
+            let size = c == .zero ? NSSize(width: Rail.columnWidth, height: 300) : NSSize(width: ceil(c.width), height: min(s.height, ceil(c.height)))
+            column = centred(size, right: s.maxX)
         } else {
             let n = CGFloat(max(1, min(8, Rail.active(Store.shared.state.agents).count)))
-            size = NSSize(width: 30, height: 42 + 22 * n - 11)
+            column = centred(NSSize(width: 30, height: 42 + 22 * n - 11), right: s.maxX)
         }
-        let y = min(max(y0 - size.height / 2, s.minY), s.maxY - size.height)
-        p.setFrame(NSRect(x: s.maxX - size.width, y: y, width: size.width, height: size.height), display: true)
+        if p.frame != column { p.setFrame(column, display: true) }
+
+        guard let sp = side else { return }
+        let mode = Rail.side(rail, Store.shared, inboxShown: InboxModel.shared.shown)
+        sideFit += 1
+        let ticket = sideFit
+        if mode == .none {
+            // Let the content fade, then get out of the way entirely.
+            sp.ignoresMouseEvents = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
+                guard self?.sideFit == ticket else { return }
+                sp.setFrame(NSRect(x: column.minX - 1, y: column.midY, width: 1, height: 1), display: false)
+            }
+            return
+        }
+        // A pill only labels a dot; it never takes clicks.
+        if case .pill = mode { sp.ignoresMouseEvents = true } else { sp.ignoresMouseEvents = false }
+        let m = rail.sideSize
+        let want = m == .zero ? NSSize(width: 420, height: min(s.height, 640)) : NSSize(width: ceil(m.width), height: min(s.height, ceil(m.height)))
+        let target = centred(want, right: column.minX)
+        let cur = sp.frame
+        if cur.width >= target.width - 1 && cur.height >= target.height - 1 && cur.maxX == target.maxX && cur.width > 1 {
+            // Shrinking: wait for the old content's exit, keep the right edge put.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
+                guard self?.sideFit == ticket else { return }
+                sp.setFrame(target, display: true)
+            }
+        } else {
+            let grow = cur.width > 1 && cur.maxX == target.maxX
+                ? centred(NSSize(width: max(cur.width, target.width), height: max(cur.height, target.height)), right: column.minX)
+                : target
+            sp.setFrame(grow, display: true)
+            if grow != target {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.22) { [weak self] in
+                    guard self?.sideFit == ticket else { return }
+                    sp.setFrame(target, display: true)
+                }
+            }
+        }
     }
 
     // MARK: Command bar — shown instantly (used all day; no entrance animation)

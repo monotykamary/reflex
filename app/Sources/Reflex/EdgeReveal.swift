@@ -23,6 +23,8 @@ final class EdgeReveal {
     /// Anchor the rail at a height on a screen.
     var place: (_ screen: NSScreen, _ y: CGFloat) -> Void = { _, _ in }
     var panel: () -> NSWindow? = { nil }
+    /// The window beside the column (question card, agent list), when it takes clicks.
+    var side: () -> NSWindow? = { nil }
     var sliver: () -> NSWindow? = { nil }
     var tabShown: () -> Bool = { false }
     var anchor: () -> (NSScreen, CGFloat)? = { nil }
@@ -61,12 +63,13 @@ final class EdgeReveal {
             return
         }
         if rail.visible {
-            let frame = panel()?.frame ?? .zero
-            let over = frame.contains(p)
-            if over || frame.insetBy(dx: -deadzone.width, dy: -deadzone.height).contains(p) || keepOpen() {
+            let windows = [panel(), side()].compactMap { $0 }
+            let under = windows.first { $0.frame.contains(p) }
+            let near = windows.contains { $0.frame.insetBy(dx: -deadzone.width, dy: -deadzone.height).contains(p) }
+            if under != nil || near || keepOpen() {
                 holdUntil = max(holdUntil, now + grace)
             }
-            takeKeys(over)
+            takeKeys(under)
             if now > holdUntil { hide() }
             return
         }
@@ -103,21 +106,26 @@ final class EdgeReveal {
         }
     }
 
-    /// Over the rail: it takes the keys. Off it: the app you were in gets them back.
-    private func takeKeys(_ over: Bool) {
-        guard let w = panel() else { return }
+    /// Over the rail: the window under the pointer takes the keys. Off it:
+    /// the app you were in gets them back.
+    private func takeKeys(_ under: NSWindow?) {
         if othersKey() { lent = nil; return }
-        if over && !w.isKeyWindow {
-            let front = NSWorkspace.shared.frontmostApplication
-            lent = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
+        if let w = under {
+            guard !w.isKeyWindow else { return }
+            if !ours.contains(where: \.isKeyWindow) {
+                let front = NSWorkspace.shared.frontmostApplication
+                lent = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
+            }
             w.makeKey()
-        } else if !over && w.isKeyWindow {
+        } else if ours.contains(where: \.isKeyWindow) {
             returnKeys()
         }
     }
 
+    private var ours: [NSWindow] { [panel(), side()].compactMap { $0 } }
+
     private func returnKeys() {
-        guard let w = panel(), w.isKeyWindow else { return }
+        guard let w = ours.first(where: \.isKeyWindow) else { return }
         if let app = lent { app.activate() } else { w.resignKey() }
         lent = nil
     }
