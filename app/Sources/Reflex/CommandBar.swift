@@ -111,7 +111,6 @@ final class CommandModel: ObservableObject {
     /// The user chose a row (keys or a deliberate click): Jev stops moving it.
     @Published var userPicked = false
     /// The folder the user chose with the chooser, offered on top.
-    @Published var chosenFolder: String?
     /// Naming a new folder: ⏎ on the New folder row asks first.
     @Published var naming = false
     @Published var newName = ""
@@ -125,6 +124,8 @@ final class CommandModel: ObservableObject {
     private var disarm: Task<Void, Never>?
 
     var close: () -> Void = {}
+    /// Show the bar again (after the folder chooser was cancelled).
+    var reopen: () -> Void = {}
     /// Open an agent's terminal.
     var openPane: (String) -> Void = { _ in }
     var openSetup: (Onboarding.Step) -> Void = { _ in }
@@ -172,7 +173,6 @@ final class CommandModel: ObservableObject {
         thinking = false
         selection = nil
         userPicked = false
-        chosenFolder = nil
         naming = false
         newName = ""
         sendWhenReady = false
@@ -462,7 +462,7 @@ final class CommandModel: ObservableObject {
         let s = Store.shared.state
         var h = Hasher()
         h.combine(text); h.combine(listText); h.combine(harness); h.combine(resumeOnly); h.combine(sideForced)
-        h.combine(newForced); h.combine(chosenFolder); h.combine(jevText); h.combine(jevStamp)
+        h.combine(newForced); h.combine(jevText); h.combine(jevStamp)
         h.combine(local.map(\.path)); h.combine(attachments.count); h.combine(s.folders > 0)
         h.combine(s.agents.map { $0.pane + $0.status + $0.title })
         h.combine(SessionArchive.shared.sessions.count); h.combine(Recents.shared.sorted(s.agents).map(\.pane))
@@ -498,14 +498,9 @@ final class CommandModel: ObservableObject {
         }.map(\.element)
         out += sessions
         if !side {
-            // Folders: the chosen one, Jev's, then the local index's — once each.
+            // Folders: Jev's, then the local index's — once each.
             var seen = Set<String>()
             var folders: [Candidate] = []
-            if let c = chosenFolder {
-                seen.insert(c)
-                folders.append(Candidate(id: "f:" + c, kind: .folder, title: leaf(c), detail: "new \(kind) · \(c.abbreviatingHome) · chosen",
-                                         bp: bp(for: "f:" + c), path: c))
-            }
             for r in (jevText == request ? jev?.ranked ?? [] : []) where r.action.type == "spawn" {
                 guard let c = r.action.cwd, seen.insert(c).inserted else { continue }
                 folders.append(Candidate(id: "f:" + c, kind: .folder, title: leaf(c), detail: "new \(kind) · \(c.abbreviatingHome)", bp: r.bp, path: c))
@@ -769,10 +764,18 @@ final class CommandModel: ObservableObject {
     /// Any folder: a chooser, and the session starts there — with your request
     /// when you typed one, otherwise empty, its terminal open for you. One
     /// outside the project roots joins the projects.
+    ///
+    /// The chooser takes focus, and the bar resets when it loses focus: so the
+    /// request (words, images, agent, Jev's pick) is taken first, and used
+    /// after. Cancelling brings the bar back as it was.
     func chooseFolder() {
         if text.hasPrefix("/") { text = "" }
-        let asking = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        let images = attachments
+        let chosenHarness = harness
         let kind = harness ?? Settings.shared.harness
+        let asking = !words.isEmpty || !images.isEmpty
+        let jevPick = pick.flatMap { p in jevText == words ? (p == "new" ? "a new project folder" : rows.first { $0.id == p }.map { describe($0, kind: kind) }) : nil }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -781,14 +784,22 @@ final class CommandModel: ObservableObject {
         panel.message = asking ? "Choose the folder to start this request in." : "Choose a folder to start a new \(kind) session in."
         panel.directoryURL = URL(fileURLWithPath: Settings.shared.newFolderParent)
         AppDelegate.activateSelf()
-        guard panel.runModal() == .OK, let url = panel.url else { focusTick += 1; return }
+        guard panel.runModal() == .OK, let url = panel.url else {
+            reopen()
+            text = words
+            attachments = images
+            harness = chosenHarness
+            focusTick += 1
+            return
+        }
         let path = url.path
         Settings.shared.addFolder(path)
-        chosenFolder = path
-        selection = "f:" + path
-        userPicked = true
-        let folder = Candidate(id: "f:" + path, kind: .folder, title: leaf(path), detail: "", path: path)
-        send(to: folder, open: !asking)
+        if !words.isEmpty {
+            let target = "a new \(kind) session in \(Memory.short(path))"
+            Memory.shared.sent(words, to: target)
+            if let jevPick, jevPick != target { Memory.shared.corrected(words, jev: jevPick, chose: target) }
+        }
+        spawn(in: path, kind: kind, text: Attachments.prompt(words, images), open: !asking)
     }
 
     /// Esc: leave naming, then clear a failure, then close.
