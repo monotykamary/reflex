@@ -766,23 +766,29 @@ final class CommandModel: ObservableObject {
         nudge()
     }
 
-    /// Any folder: a chooser. One outside the project roots joins the projects.
+    /// Any folder: a chooser, and the session starts there — with your request
+    /// when you typed one, otherwise empty, its terminal open for you. One
+    /// outside the project roots joins the projects.
     func chooseFolder() {
         if text.hasPrefix("/") { text = "" }
+        let asking = !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+        let kind = harness ?? Settings.shared.harness
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.canCreateDirectories = true
         panel.prompt = "Start Here"
-        panel.message = "Choose the folder to start this session in."
+        panel.message = asking ? "Choose the folder to start this request in." : "Choose a folder to start a new \(kind) session in."
         panel.directoryURL = URL(fileURLWithPath: Settings.shared.newFolderParent)
         AppDelegate.activateSelf()
         guard panel.runModal() == .OK, let url = panel.url else { focusTick += 1; return }
-        Settings.shared.addFolder(url.path)
-        chosenFolder = url.path
-        selection = "f:" + url.path
+        let path = url.path
+        Settings.shared.addFolder(path)
+        chosenFolder = path
+        selection = "f:" + path
         userPicked = true
-        focusTick += 1
+        let folder = Candidate(id: "f:" + path, kind: .folder, title: leaf(path), detail: "", path: path)
+        send(to: folder, open: !asking)
     }
 
     /// Esc: leave naming, then clear a failure, then close.

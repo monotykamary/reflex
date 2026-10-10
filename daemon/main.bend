@@ -444,13 +444,22 @@ def PTry.ok(st: PTry) -> Bool:
     case PTry{settled, ok, detail}:
       ok
 
+# Started with nothing to say (a folder chosen with the bar empty): the agent
+# is ready for you in its terminal; there is no prompt to deliver.
+def prompt_if(empty: Bool, +cfg: Cfg, +pane: String, +text: String) -> IO(PTry):
+  match empty:
+    case True{}:
+      IO.pure(PTry, PTry{True{}, True{}, ""})
+    case False{}:
+      prompt_retry(860n, Cfg.sock(cfg), pane, text, PTry{False{}, False{}, ""})
+
 def spawned(+cfg: Cfg, +cwd: String, +name: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
   match r:
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
     case Done{v}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        +st : PTry <- prompt_retry(860n, Cfg.sock(cfg), pane, text, PTry{False{}, False{}, ""})
+        +st : PTry <- prompt_if(String.is_empty(String.trim(text)), cfg, pane, text)
         record_use(PTry.ok(st), cfg, cwd)
         return spawn_result(name, pane, st)
 
