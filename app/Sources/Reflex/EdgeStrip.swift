@@ -24,6 +24,10 @@ final class RailModel: ObservableObject {
     /// Beside the buttons: the question, the agent list, or whichever fits.
     enum Panel { case auto, question, agents }
     @Published var panel: Panel = .auto
+    /// Typed while the pointer is on the agent list: filters it.
+    @Published var filter = ""
+    /// The pointer is on the rail: its glass deepens (see `RailDepth`).
+    @Published var hovering = false
     /// The dot under the pointer, whose status shows beside the column.
     @Published var hoverDot: String?
     /// Measured sizes of the open column and of what sits beside it; each
@@ -111,19 +115,29 @@ private struct RoundButton<Label: View>: View {
     var help: String
     var action: () -> Void
     @ViewBuilder var label: Label
-    @State private var hover = false
     var body: some View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
-                .background(Color.white.opacity(hover ? 0.16 : 0), in: Circle())
+                .modifier(RailDepth(shape: Circle()))
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
         .glassEffect(.rail.interactive(), in: Circle())
-        .scaleEffect(hover ? 1.05 : 1)
-        .onHover { h in withAnimation(Motion.spring) { hover = h } }
         .help(help)
+    }
+}
+
+/// The rail's glass is grey at rest and deepens to near-black while the
+/// pointer is on it — faded, never switched. (The windows never become key,
+/// so macOS's own instant active/inactive change of glass cannot happen.)
+struct RailDepth<S: Shape>: ViewModifier {
+    var shape: S
+    @ObservedObject private var rail = RailModel.shared
+    func body(content: Content) -> some View {
+        content
+            .background(Color.black.opacity(rail.hovering ? 0.5 : 0), in: shape)
+            .animation(rail.hovering ? Motion.enter : Motion.exit, value: rail.hovering)
     }
 }
 
@@ -138,10 +152,6 @@ private struct PillButton: View {
                 .font(.system(size: 14, weight: .regular))
                 .foregroundStyle(hover ? Ink.text : Ink.dim)
                 .frame(width: 40, height: 34)
-                .background {
-                    Capsule().fill(Color.white.opacity(hover ? 0.14 : 0)).padding(.horizontal, 4).padding(.vertical, 1)
-                }
-                .scaleEffect(hover ? 1.04 : 1)
                 .contentShape(Rectangle())
         }
         .buttonStyle(Pressable())
@@ -203,7 +213,18 @@ extension Rail {
             Task { await Client.local.cancel(p.id); await Store.shared.refresh() }
             return .handled
         }
-        guard side(rail, store, inboxShown: InboxModel.shared.shown) == .question else { return .ignored }
+        let mode = side(rail, store, inboxShown: InboxModel.shared.shown)
+        if mode == .agents {
+            if press.key == .escape { rail.filter = ""; return .handled }
+            if press.key == .delete { if !rail.filter.isEmpty { rail.filter.removeLast() }; return .handled }
+            let c = press.characters
+            if c.count == 1, let ch = c.first, ch.isLetter || ch.isNumber || ch == " " || ch == "-" || ch == "_" || ch == "." {
+                rail.filter.append(ch)
+                return .handled
+            }
+            return .ignored
+        }
+        guard mode == .question else { return .ignored }
         let qs = questions(store.state.inbox)
         if press.key == .tab, qs.count > 1 {
             rail.cardIndex = (rail.cardIndex + 1) % qs.count
@@ -265,7 +286,7 @@ struct Rail: View {
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { Rail.key($0) }
         .onChange(of: rail.visible) { _, open in
-            if !open { rail.panel = .auto; rail.hoverDot = nil }
+            if !open { rail.panel = .auto; rail.hoverDot = nil; rail.filter = "" }
         }
     }
 
@@ -322,15 +343,9 @@ struct Rail: View {
                         Button(action: toggleAgents) {
                             AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
                                 .frame(width: 40, height: 28)
-                                .background {
-                                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                                        .fill(Color.white.opacity(rail.hoverDot == a.pane ? 0.16 : 0))
-                                        .padding(.horizontal, 5)
-                                }
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(Pressable())
-                        .animation(Motion.micro, value: rail.hoverDot == a.pane)
                         .onHover { h in
                             if h {
                                 rail.hoverDot = a.pane
@@ -357,6 +372,7 @@ struct Rail: View {
                     }
                 }
                 .padding(.vertical, 6)
+                .modifier(RailDepth(shape: Capsule()))
                 .glassEffect(.rail, in: Capsule())
                 .glassEffectID("agents", in: glass)
                 .help(side == .agents ? "Hide agents" : "Show agents")
@@ -367,6 +383,7 @@ struct Rail: View {
                 PillButton(symbol: "gearshape", help: "Settings", action: openSettings)
             }
             .padding(.vertical, 4)
+            .modifier(RailDepth(shape: Capsule()))
             .glassEffect(.rail, in: Capsule())
 
             Menu {
@@ -377,6 +394,7 @@ struct Rail: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.dim)
                     .frame(width: 40, height: 40)
+                    .modifier(RailDepth(shape: Circle()))
                     .contentShape(Circle())
             }
             .menuStyle(.button)
@@ -481,6 +499,7 @@ private struct StatusPill: View {
         .font(.system(size: 12, weight: .medium))
         .lineLimit(1)
         .padding(.horizontal, 10).padding(.vertical, 6)
+        .modifier(RailDepth(shape: Capsule()))
         .glassEffect(.rail, in: Capsule())
     }
 }
@@ -498,7 +517,8 @@ private struct AgentList: View {
     var reveal: (AgentInfo) -> Void
     var showQuestion: () -> Void
     @State private var rowsHeight: CGFloat = 0
-    @State private var query = ""
+    @ObservedObject private var rail = RailModel.shared
+    private var query: String { rail.filter }
 
     /// Past this many agents a filter appears; the list is built for dozens.
     static let filterAt = 12
@@ -557,13 +577,20 @@ private struct AgentList: View {
             }
             .padding(.horizontal, 12).padding(.top, 9).padding(.bottom, 3)
 
-            if agents.count > AgentList.filterAt {
+            // Type while the pointer is on the list to filter it (no field to click).
+            if agents.count > AgentList.filterAt || !query.isEmpty {
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass").font(.system(size: 10, weight: .medium)).foregroundStyle(Ink.dim)
-                    TextField("", text: $query, prompt: Text("Filter \(agents.count) agents").foregroundStyle(Ink.dim))
-                        .textFieldStyle(.plain)
-                        .font(.system(size: 11.5))
+                    if query.isEmpty {
+                        Text("Type to filter \(agents.count) agents").foregroundStyle(Ink.dim)
+                    } else {
+                        Text(query).foregroundStyle(Ink.text)
+                        + Text(" · esc to clear").foregroundStyle(Ink.dim)
+                    }
+                    Spacer(minLength: 0)
                 }
+                .font(.system(size: 11.5))
+                .lineLimit(1)
                 .padding(.horizontal, 8).padding(.vertical, 4)
                 .background(Color.white.opacity(0.07), in: Capsule())
                 .padding(.horizontal, 8).padding(.bottom, 3)
@@ -597,6 +624,7 @@ private struct AgentList: View {
             .frame(height: min(max(rowsHeight, 30), 520))
         }
         .frame(width: 340)
+        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 16, style: .continuous)))
         .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
@@ -778,6 +806,7 @@ private struct QuestionCard: View {
         }
         .padding(16)
         .frame(width: 340)
+        .modifier(RailDepth(shape: RoundedRectangle(cornerRadius: 20, style: .continuous)))
         .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Motion.enter, value: pending?.id)
     }
@@ -804,6 +833,7 @@ private struct KeyHint: View {
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 14).padding(.vertical, 8)
+        .modifier(RailDepth(shape: Capsule()))
         .glassEffect(.rail, in: Capsule())
     }
 }
@@ -826,5 +856,24 @@ struct Sliver: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .padding(.trailing, 2)
         .animation(.linear(duration: 0.05), value: rail.dwell)
+    }
+}
+
+// MARK: - Keys
+
+/// An invisible window that holds the keyboard while the pointer is on the
+/// rail, so the rail's own windows never become key — becoming key would
+/// switch their glass to its darker active look instantly.
+struct RailKeys: View {
+    @FocusState private var focused: Bool
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)
+            .focusable()
+            .focused($focused)
+            .focusEffectDisabled()
+            .onKeyPress(phases: .down) { Rail.key($0) }
+            .onAppear { focused = true }
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in focused = true }
     }
 }

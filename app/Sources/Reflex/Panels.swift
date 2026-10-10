@@ -18,6 +18,12 @@ final class KeyPanel: NSPanel {
     }
 }
 
+/// Clicks act on the first press, even in a panel that never becomes key
+/// (the rail): no click is spent just focusing the window.
+final class FirstClickHost<V: View>: NSHostingView<V> {
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+}
+
 enum Panels {
     static func floating<V: View>(_ view: V, size: NSSize, key: Bool) -> KeyPanel {
         // Non-activating even when key: like Spotlight, the panel takes keystrokes
@@ -34,7 +40,7 @@ enum Panels {
         p.hasShadow = false
         p.hidesOnDeactivate = false
         p.isMovableByWindowBackground = false
-        let host = NSHostingView(rootView: view)
+        let host = FirstClickHost(rootView: view)
         host.sizingOptions = []
         host.frame = NSRect(origin: .zero, size: size)
         host.autoresizingMask = [.width, .height]

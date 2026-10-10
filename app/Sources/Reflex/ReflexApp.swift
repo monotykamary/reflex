@@ -218,15 +218,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         restart: { Daemon.shared.restart() },
                         openLog: { NSWorkspace.shared.open(Daemon.logURL) },
                         quit: { NSApp.terminate(nil) })
-        let p = Panels.floating(view, size: NSSize(width: 30, height: 100), key: true)
+        // Neither rail window ever becomes key (see RailKeys); clicks still land.
+        let p = Panels.floating(view, size: NSSize(width: 30, height: 100), key: false)
         p.level = .statusBar
         p.ignoresMouseEvents = true
         strip = p
 
+        let kc = Panels.floating(RailKeys(), size: NSSize(width: 1, height: 1), key: true)
+        kc.level = .statusBar
+        kc.ignoresMouseEvents = true
+        kc.alphaValue = 0
+        railKeys = kc
+
         let sideView = RailSide(openAgent: { [weak self] a in self?.showPane(a.pane) },
                                 openBar: { [weak self] a in self?.openBar(pinned: a) },
                                 reveal: { a in HerdrWindow.reveal(pane: a.pane) })
-        let sp = Panels.floating(sideView, size: NSSize(width: 1, height: 1), key: true)
+        let sp = Panels.floating(sideView, size: NSSize(width: 1, height: 1), key: false)
         sp.level = .statusBar
         sp.ignoresMouseEvents = true
         side = sp
@@ -240,8 +247,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         p.orderFrontRegardless()
         sp.orderFrontRegardless()
         sl.orderFrontRegardless()
+        kc.orderFrontRegardless()
 
         edge.panel = { [weak self] in self?.strip }
+        edge.keys = { [weak self] in self?.railKeys }
         edge.side = { [weak self] in
             guard let w = self?.side, !w.ignoresMouseEvents else { return nil }
             return w
@@ -327,7 +336,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func clickAway(at p: NSPoint, in window: NSWindow?) {
-        let mine = [strip, side, inbox].compactMap { $0 }
+        let mine = [strip, side, railKeys, inbox].compactMap { $0 }
         if let window, mine.contains(where: { $0 === window }) { return }
         if InboxModel.shared.shown, let ib = inbox, !ib.frame.contains(p) {
             hideInbox()
@@ -339,6 +348,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var side: KeyPanel?
+    private var railKeys: KeyPanel?
     private var placeQueued = false
     private var sideFit = 0
 

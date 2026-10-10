@@ -31,6 +31,8 @@ final class EdgeReveal {
     var panel: () -> NSWindow? = { nil }
     /// The window beside the column (question card, agent list), when it takes clicks.
     var side: () -> NSWindow? = { nil }
+    /// The invisible window that takes the keys while the pointer is on the rail.
+    var keys: () -> NSWindow? = { nil }
     var sliver: () -> NSWindow? = { nil }
     var tabShown: () -> Bool = { false }
     var anchor: () -> (NSScreen, CGFloat)? = { nil }
@@ -46,6 +48,7 @@ final class EdgeReveal {
     private var holdUntil: TimeInterval = 0
     private var lent: NSRunningApplication?
     private let debugDwell = ProcessInfo.processInfo.environment["REFLEX_DEBUG_DWELL"] != nil
+    private let debugHover = ProcessInfo.processInfo.environment["REFLEX_DEBUG_HOVER"] != nil
 
     private var now: TimeInterval { ProcessInfo.processInfo.systemUptime }
 
@@ -75,6 +78,8 @@ final class EdgeReveal {
             if under != nil || near || keepOpen() {
                 holdUntil = max(holdUntil, now + grace)
             }
+            let hovering = under != nil || debugHover
+            if rail.hovering != hovering { rail.hovering = hovering }
             takeKeys(under)
             if now > holdUntil { hide() }
             return
@@ -116,19 +121,17 @@ final class EdgeReveal {
     /// the app you were in gets them back.
     private func takeKeys(_ under: NSWindow?) {
         if othersKey() { lent = nil; return }
-        if let w = under {
-            guard !w.isKeyWindow else { return }
-            if !ours.contains(where: \.isKeyWindow) {
-                let front = NSWorkspace.shared.frontmostApplication
-                lent = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
-            }
-            w.makeKey()
+        if under != nil {
+            guard !ours.contains(where: \.isKeyWindow) else { return }
+            let front = NSWorkspace.shared.frontmostApplication
+            lent = front?.processIdentifier == ProcessInfo.processInfo.processIdentifier ? nil : front
+            keys()?.makeKey()
         } else if ours.contains(where: \.isKeyWindow) {
             returnKeys()
         }
     }
 
-    private var ours: [NSWindow] { [panel(), side()].compactMap { $0 } }
+    private var ours: [NSWindow] { [panel(), side(), keys()].compactMap { $0 } }
 
     private func returnKeys() {
         guard let w = ours.first(where: \.isKeyWindow) else { return }
@@ -167,6 +170,7 @@ final class EdgeReveal {
         let rail = RailModel.shared
         guard rail.visible else { return }
         if returnFocus { returnKeys() } else { lent = nil }
+        rail.hovering = false
         rail.visible = false
         panel()?.ignoresMouseEvents = !tabShown()
     }
