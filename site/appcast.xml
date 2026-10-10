@@ -3,6 +3,16 @@
     <channel>
         <title>Reflex</title>
         <item>
+            <title>0.1.3</title>
+            <pubDate>Sun, 11 Oct 2026 02:41:59 +0700</pubDate>
+            <link>https://reflex.farm/</link>
+            <sparkle:version>69</sparkle:version>
+            <sparkle:shortVersionString>0.1.3</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.3/Reflex-0.1.3.dmg" length="4560179" type="application/octet-stream" sparkle:edSignature="vD6qwLOA01OGiA7O9iNJCLA/QTiC65m7CjTM7rzEZRuaRuEv1s4HTVU/XnVVUwh5Uj6t9LLfqs8/hQcSo9hFBQ=="/>
+        </item>
+        <item>
             <title>0.1.2</title>
             <pubDate>Sun, 11 Oct 2026 02:16:34 +0700</pubDate>
             <link>https://reflex.farm/</link>
@@ -21,16 +31,6 @@
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.1/Reflex-0.1.1.dmg" length="4552159" type="application/octet-stream" sparkle:edSignature="RrnLltxuT+oFdgEZuTmM0ryOYKxtsFvaj69pXXCwlbCv7Vy6ky+Y+SL90Wr3pgOhMLepYNzh0vZvo6MLaVP/BQ=="/>
-        </item>
-        <item>
-            <title>0.1.0</title>
-            <pubDate>Sun, 11 Oct 2026 00:16:08 +0700</pubDate>
-            <link>https://reflex.farm/</link>
-            <sparkle:version>60</sparkle:version>
-            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.0/Reflex-0.1.0.dmg" length="5387658" type="application/octet-stream" sparkle:edSignature="MEaDW5FlsJbCuBMxrNu4cvmPKytUBxIYTp96G3s/2ds+0gsOFRBGzPGyeQKlBsL1X1y2Y03w+Ff3p4G+w6BTBw=="/>
         </item>
     </channel>
 </rss>
