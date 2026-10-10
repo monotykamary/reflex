@@ -527,6 +527,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if bar == nil {
             let p = Panels.floating(CommandBar(model: command), size: NSSize(width: 720, height: 560), key: true)
             p.onEscape = { [weak self] in self?.command.escape() }
+            p.onPaste = { [weak self] in self?.command.attach(Attachments.read(.general)) ?? false }
             p.onResign = { [weak self] in
                 guard let self, let b = self.bar, b.isVisible else { return }
                 switch self.command.phase {

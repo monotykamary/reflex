@@ -133,10 +133,25 @@ final class CommandModel: ObservableObject {
         }
     }
 
+    /// Images pasted or dropped in: they go to the agent with the prompt.
+    @Published var attachments: [Attachment] = []
+
+    /// ⌘V or a drop with images: they become attachments. False when there
+    /// were none (the paste is text, for the field).
+    @discardableResult
+    func attach(_ found: [Attachment]) -> Bool {
+        guard !found.isEmpty else { return false }
+        attachments += found
+        focusTick += 1
+        schedule()
+        return true
+    }
+
     func reset() {
         debounce?.cancel()
         generation += 1
         text = ""
+        attachments = []
         phase = .typing
         harness = nil
         resumeOnly = false
@@ -174,7 +189,7 @@ final class CommandModel: ObservableObject {
     /// only ever opens a session — it is never sent anywhere.
     var mode: Mode {
         if resumeOnly { return .search }
-        if sideForced || newForced || harness != nil { return .ask }
+        if sideForced || newForced || harness != nil || !attachments.isEmpty { return .ask }
         return CommandModel.looksLikeProse(request) ? .ask : .search
     }
 
@@ -274,7 +289,7 @@ final class CommandModel: ObservableObject {
 
     /// Backspace on an empty field takes the last token off.
     func dropToken() -> Bool {
-        if resumeOnly { resumeOnly = false } else if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else { return false }
+        if !attachments.isEmpty { attachments.removeLast() } else if resumeOnly { resumeOnly = false } else if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else { return false }
         schedule()
         return true
     }
@@ -588,6 +603,7 @@ final class CommandModel: ObservableObject {
 
     func send(to c: Candidate, open: Bool = false) {
         let words = request
+        let full = Attachments.prompt(words, attachments)
         let kind = harness ?? Settings.shared.harness
         if mode == .ask, ![.command, .chooseFolder, .ask].contains(c.kind), c.kind != .newFolder || naming {
             remember(words, sentTo: c, kind: kind)
@@ -601,7 +617,7 @@ final class CommandModel: ObservableObject {
             Task {
                 do {
                     if side {
-                        let r = try await Client.local.side(pane: a.pane, text: words)
+                        let r = try await Client.local.side(pane: a.pane, text: full)
                         if let e = r.error ?? r.route?.error { return fail(e) }
                         if r.route?.decision == "choose" {
                             return fail("\(a.kind) has no side channel: remove /btw to send it as a prompt.")
@@ -609,7 +625,7 @@ final class CommandModel: ObservableObject {
                         done(label)
                     } else {
                         Recents.shared.touch(a.pane)
-                        let p = try await Client.local.send(pane: a.pane, text: words, label: label)
+                        let p = try await Client.local.send(pane: a.pane, text: full, label: label)
                         await watch(p.id, label: label)
                     }
                     if open { openPane(a.pane) }
@@ -617,7 +633,7 @@ final class CommandModel: ObservableObject {
             }
         case .folder:
             guard let path = c.path else { return }
-            spawn(in: path, kind: kind, text: words, open: open)
+            spawn(in: path, kind: kind, text: full, open: open)
         case .newFolder:
             // Rare by design: name it first, then ⏎ again to create.
             if !naming {
@@ -629,7 +645,7 @@ final class CommandModel: ObservableObject {
             guard !name.isEmpty else { return }
             let path = (Settings.shared.newFolderParent as NSString).appendingPathComponent(name)
             naming = false
-            spawn(in: path, kind: kind, text: words, isNew: true, open: open)
+            spawn(in: path, kind: kind, text: full, isNew: true, open: open)
         case .chooseFolder:
             chooseFolder()
         case .command:
@@ -639,7 +655,7 @@ final class CommandModel: ObservableObject {
         case .resume:
             guard let p = c.past else { return }
             // From search: just bring it back. From a request: bring it back and send it.
-            resume(p, mode: nil, text: mode == .ask ? words : "", open: open)
+            resume(p, mode: nil, text: mode == .ask ? full : "", open: open)
         }
     }
 
@@ -805,6 +821,9 @@ struct CommandBar: View {
             .padding(.horizontal, 18)
             .padding(.vertical, 16)
         }
+        .onDrop(of: [.fileURL, .image], isTargeted: nil) { _ in
+            model.attach(Attachments.read(NSPasteboard(name: .drag)))
+        }
         // Over the field's bottom edge, taking no room: nothing shifts when Jev starts reading.
         .overlay(alignment: .bottom) {
             if model.thinking {
@@ -822,6 +841,7 @@ struct CommandBar: View {
         if model.sideForced { return "Ask on the side…" }
         if model.newForced { return "What's the new project for?" }
         if model.resumeOnly { return "Find an earlier session…" }
+        if !model.attachments.isEmpty { return "Say what to do with \(model.attachments.count == 1 ? "it" : "them")…" }
         if let h = model.harness { return "Ask a new \(h) session, or your agents…" }
         return "Search sessions, or ask your agents…"
     }
@@ -832,7 +852,18 @@ struct CommandBar: View {
             if model.newForced { token("/new", Tone.done) }
             if model.sideForced { token("/btw", Tone.blocked) }
             if model.resumeOnly { token("/resume", Tone.working) }
+            ForEach(model.attachments) { a in
+                Image(nsImage: a.thumb)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: CommandBar.lineHeight + 6, height: CommandBar.lineHeight - 4)
+                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.15)))
+                    .help(a.url.lastPathComponent + " — goes to the agent with your request (⌫ removes it)")
+                    .transition(.surface(reduce: reduce))
+            }
         }
+        .animation(Motion.enter, value: model.attachments)
     }
 
     private func token(_ label: String, _ tint: Color) -> some View {

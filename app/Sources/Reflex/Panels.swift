@@ -12,6 +12,14 @@ final class KeyPanel: NSPanel {
     override var canBecomeKey: Bool { keyable }
     override var canBecomeMain: Bool { false }
     override func cancelOperation(_ sender: Any?) { onEscape?() }
+    /// ⌘V before the text field sees it: true when the panel took the paste
+    /// (images), false to paste as usual.
+    var onPaste: (() -> Bool)?
+    override func performKeyEquivalent(with e: NSEvent) -> Bool {
+        if e.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, e.charactersIgnoringModifiers == "v",
+           onPaste?() == true { return true }
+        return super.performKeyEquivalent(with: e)
+    }
     override func resignKey() {
         super.resignKey()
         onResign?()

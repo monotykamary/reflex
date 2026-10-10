@@ -190,6 +190,19 @@ def start_agent(sock: String, name: String, kind: String, pane: String) -> IO(Re
 def close_pane(sock: String, pane: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "pane.close", Js.obj([Js.kv("pane_id", Js.str(pane))]), 5000)
 
+def status_of(r: Result<&1, &1, U32 & String, J.JSON>) -> String:
+  match r:
+    case Done{v}:
+      Js.as_text(Js.path(["pane", "agent_status"], Some{v}))
+    case Fail{e}:
+      ""
+
+# The agent status Herdr has for a pane ("idle", "working", "blocked", …).
+def pane_status(sock: String, pane: String) -> IO(String):
+  do IO<String>:
+    r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "pane.get", Js.obj([Js.kv("pane_id", Js.str(pane))]), 3000)
+    return status_of(r)
+
 # Literal text into a pane, no Enter (the phone's keyboard, typed live).
 def send_text(sock: String, pane: String, text: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "pane.send_text", Js.obj([Js.kv("pane_id", Js.str(pane)), Js.kv("text", Js.str(text))]), 5000)

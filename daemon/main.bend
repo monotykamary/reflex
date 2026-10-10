@@ -350,13 +350,16 @@ def name_suffix(r: Result<&1, &1, U32 & String, U32>) -> String:
 def agent_name(+id: U32, r: Result<&1, &1, U32 & String, U32>) -> String:
   "rx" ++ U32.show(id) ++ "-" ++ name_suffix(r)
 
-# A freshly started agent can refuse its first prompt for a moment
-# (agent_not_ready) while Herdr registers it; retry that, and only that.
+# A freshly started agent refuses prompts (agent_not_ready) until it is
+# ready: a moment while Herdr registers it — or as long as it waits on you,
+# like Claude's "Do you trust this folder?" in a new folder (Herdr types
+# nothing into that dialog; it refuses). Retry that, and only that, for up
+# to ten minutes, so the request goes in once you answer.
 type PTry is Data:
   PTry{settled: Bool, ok: Bool, detail: String}
 
 def retryable(+msg: String) -> Bool:
-  String.contains(msg, "agent_not_ready") || String.contains(msg, "not an active")
+  String.contains(msg, "agent_not_ready") || String.contains(msg, "not an active") || String.contains(msg, "agent_blocked")
 
 def ptry_of(r: Result<&1, &1, U32 & String, J.JSON>) -> PTry:
   match r:
@@ -365,15 +368,51 @@ def ptry_of(r: Result<&1, &1, U32 & String, J.JSON>) -> PTry:
     case Fail{(code, +msg)}:
       PTry{Core.bool_not(retryable(msg)), False{}, msg}
 
+def prompt_now(+sock: String, +pane: String, +text: String) -> IO(PTry):
+  do IO<PTry>:
+    r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(sock, pane, text)
+    return ptry_of(r)
+
+def ready_status(+s: String) -> Bool:
+  String.eq(s, "idle") || String.eq(s, "done")
+
+def prompt_when.settled(ok: Bool, +sock: String, +pane: String, +text: String, st: PTry) -> IO(PTry):
+  match ok:
+    case True{}:
+      prompt_now(sock, pane, text)
+    case False{}:
+      IO.pure(PTry, st)
+
+def prompt_when.ready(ready: Bool, +sock: String, +pane: String, +text: String, st: PTry) -> IO(PTry):
+  match ready:
+    case True{}:
+      do IO<PTry>:
+        IO.sleep(1500)
+        again : String <- Herdr.pane_status(sock, pane)
+        prompt_when.settled(ready_status(again), sock, pane, text, st)
+    case False{}:
+      IO.pure(PTry, st)
+
+# Refused before (it was not ready, or waiting on you): send only once it has
+# been idle for a moment. Right after a dialog closes Herdr may take a prompt
+# the agent's input never sees.
+def prompt_held(first: Bool, +sock: String, +pane: String, +text: String, st: PTry) -> IO(PTry):
+  match first:
+    case True{}:
+      prompt_now(sock, pane, text)
+    case False{}:
+      do IO<PTry>:
+        s : String <- Herdr.pane_status(sock, pane)
+        prompt_when.ready(ready_status(s), sock, pane, text, st)
+
 def prompt_step(+sock: String, +pane: String, +text: String, st: PTry) -> IO(PTry):
   match st:
     case PTry{True{}, ok, detail}:
       IO.pure(PTry, PTry{True{}, ok, detail})
-    case PTry{False{}, ok, detail}:
+    case PTry{False{}, ok, +detail}:
       do IO<PTry>:
         IO.sleep(700)
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(sock, pane, text)
-        return ptry_of(r)
+        prompt_held(String.is_empty(detail), sock, pane, text, PTry{False{}, ok, detail})
 
 def prompt_retry(fuel: Nat, +sock: String, +pane: String, +text: String, st: PTry) -> IO(PTry):
   match fuel:
@@ -398,7 +437,7 @@ def spawn_result(+name: String, +pane: String, st: PTry) -> Result<&1, &1, U32 &
     case PTry{settled, True{}, detail}:
       Done{"started " ++ name ++ " in " ++ pane}
     case PTry{settled, False{}, detail}:
-      Fail{(1, "started " ++ name ++ " but could not prompt it: " ++ detail)}
+      Fail{(1, "started " ++ name ++ " but could not give it your request (" ++ detail ++ ") — is it still waiting on you?")}
 
 def PTry.ok(st: PTry) -> Bool:
   match st:
@@ -411,7 +450,7 @@ def spawned(+cfg: Cfg, +cwd: String, +name: String, +pane: String, +text: String
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
     case Done{v}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        +st : PTry <- prompt_retry(15n, Cfg.sock(cfg), pane, text, PTry{False{}, False{}, ""})
+        +st : PTry <- prompt_retry(860n, Cfg.sock(cfg), pane, text, PTry{False{}, False{}, ""})
         record_use(PTry.ok(st), cfg, cwd)
         return spawn_result(name, pane, st)
 
@@ -1015,6 +1054,7 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case EAnswer{}:
       do IO<String>:
+        IO.print("answer item " ++ U32.show(Js.as_u32(Js.get(body, "item"), 0)) ++ " key " ++ Js.text_at(body, "key") ++ " from " ++ Http.Req.header(req, "user-agent"))
         r : String <- ask_text(chan, M.Answer{Js.as_u32(Js.get(body, "item"), 0), Js.text_at(body, "key")})
         ok(r)
     case EDismiss{}:
