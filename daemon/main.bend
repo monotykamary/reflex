@@ -651,7 +651,10 @@ def busy_of.r(r: Result<&1, &1, U32 & String, J.JSON>) -> String:
   match r:
     case Done{+v}:
       # "busy" during a turn; "shell" after it, while a background shell runs.
-      busy_pick(String.eq(Js.text_at(v, "status"), "busy") || String.eq(Js.text_at(v, "status"), "shell"), Js.text_at(v, "sessionId"))
+      # A session parked into a background job (parkedJobId) keeps the
+      # "busy" it had when it was parked — its work runs in that job, which
+      # reports itself — so its own "busy" is not believed.
+      busy_pick((String.eq(Js.text_at(v, "status"), "busy") && String.is_empty(Js.text_at(v, "parkedJobId"))) || String.eq(Js.text_at(v, "status"), "shell"), Js.text_at(v, "sessionId"))
     case Fail{e}:
       ""
 
