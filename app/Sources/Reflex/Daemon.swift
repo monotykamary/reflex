@@ -16,7 +16,7 @@ final class Daemon: ObservableObject {
     private lazy var loginPath: String = Daemon.readLoginPath()
 
     var baseURL: URL { URL(string: "http://127.0.0.1:\(Settings.shared.port)")! }
-    var token: String { Settings.token }
+    var token: String { Settings.daemonToken }
 
     /// Where bundled resources live: the app's Resources, or REFLEX_DEV_ROOT.
     static var resources: URL {
@@ -74,9 +74,14 @@ final class Daemon: ObservableObject {
         env["REFLEX_TOKEN"] = token
         env["REFLEX_EXIT_WITH_PARENT"] = "1"
         env["REFLEX_PORT"] = String(s.port)
-        env["REFLEX_BIND"] = s.remote ? "0.0.0.0" : "127.0.0.1"
+        // The phone remote: with Tailscale in userspace mode, tailnet traffic
+        // already arrives on localhost — stay there, reachable from your
+        // tailnet only. Otherwise listen on the network.
+        env["REFLEX_BIND"] = s.remote && !(Tailnet.detect()?.userspace ?? false) ? "0.0.0.0" : "127.0.0.1"
         env["REFLEX_HARNESS"] = s.harness
-        env["REFLEX_THRESHOLD"] = String(s.threshold)
+        // How sure Jev must be to act alone: Reflex's own calibration, not a
+        // dial — below it, the bar shows its best guess for you to confirm.
+        env["REFLEX_THRESHOLD"] = "6000"
         env["REFLEX_UNDO_MS"] = "0"
         env["REFLEX_FOLDERS_FILE"] = Settings.foldersFile.path
         env["REFLEX_ROOTS"] = s.roots

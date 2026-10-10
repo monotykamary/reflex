@@ -55,7 +55,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: return "How Reflex starts, where it shows up, and the agent new sessions use."
         case .rail: return "The tab and rail at the right edge of your screen."
         case .terminal: return "Font and colours for agent terminals."
-        case .routing: return "Jev decides where each request goes. Pick its provider and how sure it must be."
+        case .routing: return "Jev decides where each request goes. Pick its provider; it learns from your choices."
         case .projects: return "The folders Reflex can start new sessions in."
         case .phone: return "Answer your agents from your phone."
         case .setup: return "Everything Reflex needs, checked live."
@@ -69,7 +69,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .general: return "login startup dock cmd tab hotkey option double agent harness claude codex pi daemon reflexd restart log appearance light dark keep awake caffeinate sleep battery display"
         case .rail: return "edge tab rail hover delay rest questions surface visible sliver"
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
-        case .routing: return "jev provider api key keychain credential confidence threshold typesafe openrouter vercel test"
+        case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
@@ -718,11 +718,25 @@ private struct RoutingPane: View {
                 }
                 VStack(alignment: .leading, spacing: 6) {
                     RowLabel("Credential command", "Instead of a key: a JSON argv that prints one. Takes precedence over the key.")
-                    TextField("", text: $s.jevCredentialCommand, prompt: Text("[\"op\", \"read\", \"op://…\"]"), axis: .vertical)
-                        .font(.system(size: 11.5, design: .monospaced))
-                        .multilineTextAlignment(.leading)
-                        .lineLimit(1...4)
-                        .textFieldStyle(.roundedBorder)
+                    // Code reads from the left: a text editor, not a Form text
+                    // field (which a grouped Form aligns to the right).
+                    ZStack(alignment: .topLeading) {
+                        TextEditor(text: $s.jevCredentialCommand)
+                            .font(.system(size: 11.5, design: .monospaced))
+                            .scrollContentBackground(.hidden)
+                            .autocorrectionDisabled()
+                            .padding(.horizontal, 4).padding(.vertical, 6)
+                        if s.jevCredentialCommand.isEmpty {
+                            Text("[\"op\", \"read\", \"op://…\"]")
+                                .font(.system(size: 11.5, design: .monospaced))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 9).padding(.vertical, 6)
+                                .allowsHitTesting(false)
+                        }
+                    }
+                    .frame(height: 62)
+                    .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Color.primary.opacity(0.1)))
                 }
                 if let pi = Settings.piCredentialCommand, s.jevCredentialCommand != pi {
                     LabeledContent {
@@ -733,16 +747,6 @@ private struct RoutingPane: View {
                 }
             }
             Section {
-                LabeledContent {
-                    HStack {
-                        Slider(value: Binding(get: { Double(s.threshold) }, set: { s.threshold = Int($0) }), in: 3000...9500, step: 250)
-                            .frame(width: 180)
-                        Text("\(s.threshold / 100)%").monospacedDigit().frame(width: 40, alignment: .trailing)
-                    }
-                } label: {
-                    RowLabel("Confidence to act", "Below this, Reflex asks you to pick 1, 2 or 3 instead of routing on its own.")
-                }
-            } footer: {
                 HStack {
                     Spacer()
                     Button("Apply & Restart reflexd") { Daemon.shared.restart(); onboarding.test() }
@@ -884,16 +888,36 @@ private struct ProjectsPane: View {
 
 private struct PhonePane: View {
     @ObservedObject var s = Settings.shared
+    @ObservedObject var tailnet = TailnetState.shared
+
+    private var reach: String {
+        guard s.remote else { return "Off: the phone link doesn't work; only this Mac can reach reflexd." }
+        guard let t = tailnet.current else { return "reflexd listens on your network." }
+        return t.userspace ? "Reachable from your tailnet only — Tailscale delivers it to this Mac's localhost."
+                           : "reflexd listens on your network; your phone reaches it over Tailscale."
+    }
+
     var body: some View {
         Form {
             Section { PaneHeader(pane: .phone) }
             Section {
                 Toggle(isOn: Binding(get: { s.remote }, set: { s.remote = $0; Daemon.shared.restart() })) {
-                    RowLabel("Allow the phone remote", s.remote ? "reflexd listens on your network." : "Off: reflexd only listens on this Mac.")
+                    RowLabel("Allow the phone remote", reach)
+                }
+                LabeledContent {
+                    if let t = tailnet.current {
+                        Text(t.host ?? "").font(.system(size: 11.5, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                    } else {
+                        Text(tailnet.checked ? "Not found" : "Looking…").foregroundStyle(.secondary)
+                    }
+                } label: {
+                    RowLabel("Tailscale", tailnet.current.map { $0.userspace ? "Running headless (userspace networking)." : "Running." }
+                             ?? "Install Tailscale on this Mac and your phone for a private link that works anywhere.")
                 }
             }
+            .onAppear { tailnet.refresh() }
             if s.remote {
-                let url = Remote.url(port: s.port, token: Settings.token)
+                let url = Remote.url(port: s.port, token: Settings.token, tailnet: tailnet.current)
                 Section {
                     HStack(alignment: .top, spacing: 16) {
                         if let img = Remote.qr(url) {
@@ -903,10 +927,10 @@ private struct PhonePane: View {
                         VStack(alignment: .leading, spacing: 8) {
                             Text("Scan with your phone's camera, then add the page to your home screen.")
                             Text(url).font(.system(size: 11, design: .monospaced)).textSelection(.enabled).foregroundStyle(.secondary)
-                            Label(Remote.preferredIsTailscale ? "Over Tailscale: encrypted end to end." : "No Tailscale address: this LAN link is not encrypted.",
-                                  systemImage: Remote.preferredIsTailscale ? "lock.fill" : "exclamationmark.triangle.fill")
+                            Label(tailnet.current != nil ? "Over Tailscale: encrypted end to end." : "No Tailscale: this LAN link is not encrypted.",
+                                  systemImage: tailnet.current != nil ? "lock.fill" : "exclamationmark.triangle.fill")
                                 .font(.system(size: 11.5))
-                                .foregroundStyle(Remote.preferredIsTailscale ? Color.secondary : Tone.blocked)
+                                .foregroundStyle(tailnet.current != nil ? Color.secondary : Tone.blocked)
                         }
                     }
                     LabeledContent {
@@ -1077,10 +1101,10 @@ enum Remote {
         return parts.count == 4 && parts[0] == 100 && (64...127).contains(parts[1])
     }
 
-    static var preferredIsTailscale: Bool { addresses.first.map(isTailscale) ?? false }
-
-    static func url(port: Int, token: String) -> String {
-        "http://\(addresses.first ?? "127.0.0.1"):\(port)/?t=\(token)"
+    /// The phone link: the tailnet name when Tailscale runs here, else
+    /// this Mac's first LAN address.
+    static func url(port: Int, token: String, tailnet: Tailnet?) -> String {
+        "http://\(tailnet?.host ?? addresses.first ?? "127.0.0.1"):\(port)/?t=\(token)"
     }
 
     static func qr(_ text: String) -> NSImage? {

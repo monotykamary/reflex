@@ -6,7 +6,7 @@ struct Client {
     var base: URL
     var token: String
 
-    static var local: Client { Client(base: URL(string: "http://127.0.0.1:\(Settings.shared.port)")!, token: Settings.token) }
+    static var local: Client { Client(base: URL(string: "http://127.0.0.1:\(Settings.shared.port)")!, token: Settings.daemonToken) }
 
     private func request(_ path: String, body: [String: Any]? = nil) -> URLRequest {
         var r = URLRequest(url: URL(string: path, relativeTo: base)!)

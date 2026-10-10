@@ -2,230 +2,406 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#0f1115">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
+<meta name="theme-color" content="#f4f4f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0c0c0d" media="(prefers-color-scheme: dark)">
 <meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Reflex">
 <title>Reflex</title>
 <style>
-  /* "Meniscus" on the web: glass for chrome, solid surfaces for content,
-     ease-out motion under 250ms, nothing animated that you trigger by habit. */
+  /* Reflex on the phone. The Mac app's language: quiet neutral surfaces
+     (Raycast's recipe: the text colour at low opacity for fills and hairlines),
+     one status colour per state, motion that is fast, ease-out, and never
+     replayed by a refresh. */
   :root {
-    --bg: #eef0f3; --panel: rgba(255,255,255,.86); --glass: rgba(255,255,255,.55); --ink: #15171c; --mute: #646a75; --line: rgba(20,22,28,.08);
-    --blue: #5b8cff; --amber: #ffb021; --green: #40d187; --grey: #a3a7ae; --violet: #9e7bff; --red: #e5484d;
-    --mono: ui-monospace, "SF Mono", Menlo, monospace;
+    --bg: #f4f4f5; --surface: #ffffff; --raise: rgba(0,0,0,.04); --line: rgba(0,0,0,.08); --hair: rgba(0,0,0,.06);
+    --ink: #16161a; --ink2: rgba(22,22,26,.62); --ink3: rgba(22,22,26,.4);
+    --blue: #3b6cf6; --amber: #e08a00; --green: #1f9d5c; --grey: #9a9aa2; --violet: #7c5cf0; --red: #e5484d;
+    --shadow: 0 1px 2px rgba(0,0,0,.04), 0 8px 24px rgba(0,0,0,.04);
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", system-ui, sans-serif;
+    --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
     --out: cubic-bezier(0.23, 1, 0.32, 1);
+    --r: 16px;
+    --vvh: 100dvh;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #0c0d10; --panel: rgba(28,30,36,.92); --glass: rgba(40,43,50,.5); --ink: #eceef2; --mute: #8d93a0; --line: rgba(255,255,255,.08); --grey: #5d626c; }
+    :root {
+      --bg: #0c0c0d; --surface: #171719; --raise: rgba(255,255,255,.05); --line: rgba(255,255,255,.09); --hair: rgba(255,255,255,.06);
+      --ink: #ededef; --ink2: rgba(237,237,239,.6); --ink3: rgba(237,237,239,.38);
+      --blue: #6e94ff; --amber: #ffb224; --green: #3dd68c; --grey: #6f6f78; --violet: #a58bff;
+      --shadow: none;
+    }
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; background: var(--bg); color: var(--ink);
-    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Inter", system-ui, sans-serif; }
-  body { padding: env(safe-area-inset-top) 16px calc(104px + env(safe-area-inset-bottom)); max-width: 720px; margin: 0 auto;
-    background: radial-gradient(1200px 600px at 100% -10%, color-mix(in srgb, var(--blue) 14%, transparent), transparent 60%), var(--bg);
-    background-attachment: fixed; }
-  header { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 10px; margin: 0 -16px; padding: 14px 16px 10px;
-    background: var(--glass); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border-bottom: 1px solid var(--line); }
-  header h1 { font-size: 17px; margin: 0; letter-spacing: -0.01em; }
-  header .health { margin-left: auto; font-size: 12px; color: var(--mute); font-variant-numeric: tabular-nums; }
-  h2 { font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em; color: var(--mute); margin: 20px 2px 8px; font-weight: 600; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--grey); }
-  .working { background: var(--blue); box-shadow: 0 0 8px var(--blue); animation: breathe 1.4s ease-in-out infinite alternate; }
-  .blocked { background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 28%, transparent), 0 0 8px var(--amber); }
-  .done { background: var(--green); box-shadow: 0 0 8px var(--green); } .idle { background: var(--grey); } .unknown { background: var(--grey); opacity: .5; }
-  .route { background: var(--violet); box-shadow: 0 0 8px var(--violet); }
-  @keyframes breathe { from { opacity: 1 } to { opacity: .5 } }
-  .agents { display: grid; gap: 6px; }
-  .agent { display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 14px; padding: 11px 12px; cursor: pointer; min-width: 0; }
-  .agent .who { font-weight: 600; white-space: nowrap; }
-  .agent .where { color: var(--mute); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 13px; margin-bottom: 8px;
-    box-shadow: 0 6px 18px rgba(0,0,0,.06); }
-  .card.new, .agent.new, .pending.new { animation: rise .24s var(--out) both; }
-  @keyframes rise { from { opacity: 0; transform: translateY(6px) scale(.98); filter: blur(3px) } }
-  .card .top { display: flex; gap: 8px; align-items: center; }
-  .card .agent-name { font-weight: 600; }
-  .card .title { color: var(--mute); font-size: 13px; }
-  .card .x { margin-left: auto; background: none; border: 0; color: var(--mute); font-size: 18px; cursor: pointer; padding: 0 4px; }
-  .card pre { font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; margin: 9px 0 0;
-    max-height: 220px; overflow: auto; color: var(--ink); background: color-mix(in srgb, var(--ink) 5%, transparent); border-radius: 10px; padding: 9px; }
-  .opts { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
-  button { transition: transform .12s var(--out); }
+  html { background: var(--bg); }
+  body { margin: 0; color: var(--ink); background: var(--bg); font: 15px/1.4 var(--sans); -webkit-font-smoothing: antialiased;
+    -webkit-text-size-adjust: 100%; overscroll-behavior-y: none; }
+  button { font: inherit; color: inherit; border: 0; background: none; padding: 0; cursor: pointer; touch-action: manipulation; }
   button:active { transform: scale(.97); }
-  .opts button, .btn { text-align: left; border: 1px solid var(--line); background: color-mix(in srgb, var(--ink) 4%, transparent); color: var(--ink);
-    border-radius: 12px; padding: 10px 11px; font: inherit; cursor: pointer; display: flex; gap: 10px; align-items: center; }
-  .key { font: 700 11px/18px ui-rounded, -apple-system, sans-serif; min-width: 18px; height: 18px; text-align: center; border-radius: 5px;
-    background: color-mix(in srgb, var(--tone, var(--blue)) 18%, transparent); color: var(--ink); flex: none; }
-  .pending { position: relative; overflow: hidden; display: flex; align-items: center; gap: 10px; background: var(--panel); border: 1px solid var(--line);
-    border-radius: 14px; padding: 11px 12px; margin-bottom: 6px; }
-  .pending .label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pending button { border: 0; background: var(--ink); color: var(--bg); border-radius: 9px; padding: 6px 11px; font: inherit; font-weight: 600; cursor: pointer; }
-  .pending .drain { position: absolute; left: 0; bottom: 0; height: 2px; background: var(--blue); width: 100%; transform-origin: left;
-    animation: drain linear forwards; }
-  @keyframes drain { from { transform: scaleX(var(--from, 1)) } to { transform: scaleX(0) } }
-  .receipt { font-size: 13px; color: var(--mute); padding: 3px 2px; overflow-wrap: anywhere; }
-  .receipt.bad { color: var(--red); }
-  .empty { color: var(--mute); font-size: 14px; padding: 18px 0; text-align: center; }
-  form.ask { position: fixed; left: 0; right: 0; bottom: 0; padding: 10px 16px calc(10px + env(safe-area-inset-bottom));
-    background: var(--glass); backdrop-filter: blur(24px) saturate(1.6); -webkit-backdrop-filter: blur(24px) saturate(1.6); border-top: 1px solid var(--line); }
-  form.ask .row { display: flex; gap: 8px; max-width: 720px; margin: 0 auto; }
-  form.ask textarea { flex: 1; resize: none; border: 1px solid var(--line); background: var(--panel); color: var(--ink);
-    border-radius: 22px; padding: 11px 15px; font: inherit; min-height: 44px; max-height: 140px; }
-  form.ask button { border: 0; background: var(--ink); color: var(--bg); border-radius: 22px; width: 44px; font: 600 18px/1 inherit; }
-  .toast { margin: 10px 0 0; padding: 11px 13px; border-radius: 14px; background: var(--panel); border: 1px solid var(--line); font-size: 14px;
-    animation: rise .22s var(--out) both; }
-  dialog { border: 0; border-radius: 20px; padding: 0; width: min(720px, calc(100vw - 24px)); background: var(--panel); color: var(--ink);
-    box-shadow: 0 24px 60px rgba(0,0,0,.3); }
-  dialog[open] { animation: rise .22s var(--out) both; }
-  dialog::backdrop { background: rgba(0,0,0,.35); backdrop-filter: blur(4px); }
-  dialog .head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 8px; }
-  dialog .head b { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  dialog .tools { display: flex; gap: 8px; padding: 0 12px 10px; border-bottom: 1px solid var(--line); }
-  dialog .tools .btn, dialog .head .btn { padding: 6px 10px; font-size: 13px; }
-  /* A terminal keeps its columns: no wrapping, scroll sideways like the real thing. */
-  dialog pre { font: 10.5px/1.38 var(--mono); white-space: pre; margin: 0; padding: 12px; max-height: 62vh; overflow: auto;
-    background: var(--term-bg, #1a1b26); color: var(--term-fg, #c0caf5); }
-  dialog select { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 9px; padding: 5px 8px; font: inherit; font-size: 12px; max-width: 40vw; }
-  dialog .send { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--line); }
-  dialog input { flex: 1; border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 12px; padding: 10px 12px; font: inherit; min-width: 0; }
-  .lock { text-align: center; padding: 60px 16px; color: var(--mute); }
+  button { transition: transform .12s var(--out), background-color .15s var(--out), opacity .15s var(--out); }
+
+  /* ---------- home ---------- */
+  .home { max-width: 640px; margin: 0 auto; padding: 0 16px calc(96px + env(safe-area-inset-bottom)); }
+  .top { position: sticky; top: 0; z-index: 3; display: flex; align-items: center; gap: 10px;
+    margin: 0 -16px; padding: calc(env(safe-area-inset-top) + 12px) 16px 12px;
+    background: color-mix(in srgb, var(--bg) 82%, transparent); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); }
+  .top h1 { margin: 0; font-size: 22px; font-weight: 700; letter-spacing: -.02em; }
+  .chip { margin-left: auto; display: inline-flex; align-items: center; gap: 7px; height: 28px; padding: 0 11px; border-radius: 99px;
+    background: var(--raise); color: var(--ink2); font-size: 12.5px; font-weight: 500; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .chip.bad { color: var(--amber); }
+  .section { margin-top: 18px; }
+  .section > .label { display: flex; align-items: baseline; gap: 6px; padding: 0 4px 8px; font-size: 13px; font-weight: 600; color: var(--ink2); }
+  .section > .label .n { color: var(--ink3); font-variant-numeric: tabular-nums; font-weight: 500; }
+  .section > .label .act { margin-left: auto; color: var(--ink3); font-weight: 500; font-size: 13px; }
+  .group { background: var(--surface); border-radius: var(--r); box-shadow: var(--shadow); overflow: hidden;
+    border: 1px solid var(--hair); }
+  .row { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 10px 14px; text-align: left; }
+  .row + .row::before { content: ""; position: absolute; top: 0; left: 46px; right: 0; height: 1px; background: var(--hair); }
+  .row:active { transform: none; background: var(--raise); }
+  .row .text { flex: 1; min-width: 0; }
+  .row .t1 { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.005em; }
+  .row .t2 { margin-top: 1px; font-size: 13px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .row .gist { margin-top: 4px; font-size: 13px; line-height: 1.38; color: var(--ink2); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .row .side { color: var(--ink3); font-size: 12.5px; font-variant-numeric: tabular-nums; flex: none; align-self: flex-start; padding-top: 2px; }
+  .chev { width: 8px; height: 13px; flex: none; opacity: .3; }
+  .x { flex: none; width: 30px; height: 30px; margin: -4px -6px -4px 0; border-radius: 99px; display: grid; place-items: center; color: var(--ink3); align-self: flex-start; }
+  .x:active { background: var(--raise); }
+
+  /* status glyphs, as on the Mac */
+  .g { width: 20px; height: 20px; flex: none; display: grid; place-items: center; }
+  .g i { display: block; width: 9px; height: 9px; border-radius: 50%; background: var(--grey); }
+  .g.working i { width: 14px; height: 14px; background: none; border: 2px solid color-mix(in srgb, var(--blue) 22%, transparent);
+    border-top-color: var(--blue); animation: spin .9s linear infinite; }
+  .g.blocked i { background: var(--amber); box-shadow: 0 0 0 4px color-mix(in srgb, var(--amber) 22%, transparent); }
+  .g.done i { background: var(--green); }
+  .g.idle i { background: none; border: 1.5px solid var(--grey); width: 10px; height: 10px; }
+  .g.route i { background: var(--violet); }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* questions */
+  .q { background: var(--surface); border-radius: var(--r); box-shadow: var(--shadow); border: 1px solid var(--hair); padding: 14px 14px 8px; }
+  .q + .q { margin-top: 10px; }
+  .q .head { display: flex; align-items: center; gap: 10px; }
+  .q .who { flex: 1; min-width: 0; }
+  .q .who b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .q .who span { font-size: 13px; color: var(--ink2); }
+  .q .open { font-size: 13px; font-weight: 600; color: var(--blue); padding: 6px 2px 6px 8px; }
+  .q .gist { margin: 10px 0 4px; font-size: 13.5px; line-height: 1.42; color: var(--ink2); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+  .opts { margin: 8px -6px 0; }
+  .opt { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 48px; padding: 8px 6px; border-radius: 12px; text-align: left; font-size: 15px; }
+  .opt:active { background: var(--raise); transform: none; }
+  .key { flex: none; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 8px; display: grid; place-items: center;
+    font: 600 13px/1 var(--sans); font-variant-numeric: tabular-nums; background: color-mix(in srgb, var(--amber) 16%, transparent); color: var(--amber); }
+  .q.route .key { background: color-mix(in srgb, var(--violet) 16%, transparent); color: var(--violet); }
+  .sent { display: flex; align-items: center; gap: 8px; min-height: 44px; font-size: 14px; color: var(--ink2); }
+
+  .empty { padding: 26px 16px; text-align: center; color: var(--ink2); font-size: 14px; }
+  .empty b { display: block; color: var(--ink); font-size: 15px; margin-bottom: 2px; }
+  .allclear { display: flex; align-items: center; gap: 12px; padding: 14px; }
+  .allclear svg { flex: none; color: var(--green); }
+  .allclear b { display: block; font-size: 15px; }
+  .allclear span { font-size: 13px; color: var(--ink2); }
+  .activity { padding: 4px 4px 0; }
+  .activity div { font-size: 12.5px; color: var(--ink3); padding: 3px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .activity .bad { color: var(--red); }
+
+  /* the composer */
+  .dock { position: fixed; z-index: 4; left: 0; right: 0; bottom: 0; padding: 10px 12px calc(10px + env(safe-area-inset-bottom));
+    background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(20px) saturate(1.5); -webkit-backdrop-filter: blur(20px) saturate(1.5); }
+  .compose { max-width: 640px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; background: var(--surface); border: 1px solid var(--line);
+    border-radius: 24px; padding: 5px 5px 5px 16px; box-shadow: var(--shadow); }
+  .compose textarea { flex: 1; min-width: 0; border: 0; outline: 0; resize: none; background: none; color: var(--ink); font: 16px/1.35 var(--sans);
+    padding: 8px 0; max-height: 132px; }
+  .compose textarea::placeholder { color: var(--ink3); }
+  .send { flex: none; width: 36px; height: 36px; border-radius: 99px; display: grid; place-items: center; background: var(--ink); color: var(--bg); }
+  .send:disabled { opacity: .18; }
+  .toast { max-width: 640px; margin: 0 auto 8px; display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 14px; border-radius: 14px;
+    background: var(--surface); border: 1px solid var(--line); box-shadow: var(--shadow); font-size: 14px; animation: rise .22s var(--out) both; }
+  .toast span { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .toast button { font-weight: 600; color: var(--blue); padding: 4px 2px; }
+  .toast.bad span { color: var(--red); }
+  .new { animation: rise .24s var(--out) both; }
+  @keyframes rise { from { opacity: 0; transform: translateY(6px); } }
+
+  .lock { min-height: 80dvh; display: grid; place-items: center; text-align: center; color: var(--ink2); padding: 24px; }
+  .lock b { display: block; color: var(--ink); font-size: 17px; margin-bottom: 6px; }
+
+  /* ---------- a session ---------- */
+  .session { position: fixed; z-index: 10; left: 0; top: 0; width: 100%; height: var(--vvh); display: flex; flex-direction: column;
+    background: var(--term-bg, #1a1b26); color: var(--term-fg, #c0caf5);
+    transform: translateX(100%); visibility: hidden; transition: transform .28s var(--out), visibility 0s linear .28s; }
+  .session.on { transform: none; visibility: visible; transition: transform .28s var(--out); }
+  .bar { display: flex; align-items: center; gap: 4px; padding: calc(env(safe-area-inset-top) + 6px) 8px 8px;
+    background: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000); border-bottom: 1px solid rgba(255,255,255,.06); }
+  .bar .back { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 99px; }
+  .bar .back:active, .bar .more:active { background: rgba(255,255,255,.08); }
+  .bar .title { flex: 1; min-width: 0; text-align: center; }
+  .bar .title b { display: block; font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar .title span { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; opacity: .65; }
+  .bar .title .g { width: 12px; height: 12px; }
+  .bar .title .g i { width: 7px; height: 7px; }
+  .bar .title .g.working i { width: 10px; height: 10px; border-width: 1.5px; }
+  .bar .more { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 99px; }
+  .term { flex: 1; min-height: 0; overflow: auto; -webkit-overflow-scrolling: touch; padding: 10px 10px 14px; overscroll-behavior: contain; }
+  .term pre { margin: 0; font: var(--fs, 11px)/1.36 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 8; font-variant-ligatures: none; }
+  .term.fit pre { white-space: pre; overflow-wrap: normal; line-height: 1.3; }
+  .term.typing { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 55%, transparent); }
+  .keys { display: flex; gap: 5px; padding: 8px 8px; overflow-x: auto; scrollbar-width: none; background: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000);
+    border-top: 1px solid rgba(255,255,255,.06); }
+  .keys::-webkit-scrollbar { display: none; }
+  .k { flex: 1 0 auto; min-width: 34px; height: 38px; padding: 0 8px; border-radius: 10px; display: grid; place-items: center;
+    background: rgba(255,255,255,.08); color: inherit; font: 600 13px/1 var(--sans); }
+  .k:active { background: rgba(255,255,255,.18); transform: scale(.95); }
+  .k.on { background: var(--blue); color: #fff; }
+  .k.num { background: color-mix(in srgb, var(--amber) 22%, transparent); color: var(--amber); }
+  .k.sep { min-width: 1px; width: 1px; padding: 0; background: rgba(255,255,255,.1); margin: 6px 2px; }
+  .sdock { padding: 6px 10px calc(8px + env(safe-area-inset-bottom)); background: color-mix(in srgb, var(--term-bg, #1a1b26) 88%, #000); }
+  .sdock .compose { background: rgba(255,255,255,.07); border-color: rgba(255,255,255,.08); box-shadow: none; }
+  .sdock .compose textarea { color: inherit; }
+  .sdock .compose textarea::placeholder { color: currentColor; opacity: .4; }
+  .sdock .send { background: var(--term-fg, #c0caf5); color: var(--term-bg, #1a1b26); }
+  .kbd { flex: none; width: 36px; height: 36px; border-radius: 99px; display: grid; place-items: center; opacity: .75; }
+  .kbd:active { background: rgba(255,255,255,.1); }
+  .live { display: flex; align-items: center; gap: 10px; min-height: 46px; padding: 0 6px 0 14px; border-radius: 24px; background: color-mix(in srgb, var(--blue) 22%, transparent); font-size: 14px; }
+  .live span { flex: 1; }
+  .live button { font-weight: 600; padding: 8px 12px; border-radius: 99px; background: rgba(255,255,255,.12); }
+  .ghost { position: fixed; left: 0; bottom: 0; width: 1px; height: 1px; opacity: 0; border: 0; padding: 0; font-size: 16px; }
+  .menu { position: absolute; right: 10px; top: calc(env(safe-area-inset-top) + 50px); z-index: 2; min-width: 220px; padding: 6px; border-radius: 14px;
+    background: color-mix(in srgb, var(--term-bg, #1a1b26) 70%, #2a2a30); border: 1px solid rgba(255,255,255,.1); box-shadow: 0 12px 40px rgba(0,0,0,.4);
+    transform-origin: top right; animation: pop .18s var(--out) both; }
+  .menu[hidden] { display: none; }
+  @keyframes pop { from { opacity: 0; transform: scale(.96); } }
+  .menu button, .menu label { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 42px; padding: 0 10px; border-radius: 9px; font-size: 14.5px; text-align: left; }
+  .menu button:active { background: rgba(255,255,255,.08); transform: none; }
+  .menu select { appearance: none; -webkit-appearance: none; border: 0; background: rgba(255,255,255,.08); color: inherit; font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 8px; max-width: 140px; }
+  .menu hr { border: 0; height: 1px; background: rgba(255,255,255,.08); margin: 4px 6px; }
+
   @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
-    .pending .drain { animation-duration: inherit !important; }
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; }
+    .g.working i { animation: none; border-color: var(--blue); }
   }
 </style>
 </head>
 <body>
-<header>
-  <span class="dot" id="hdot"></span>
-  <h1>Reflex</h1>
-  <span class="health" id="health">connecting…</span>
-</header>
-<div id="app"></div>
-<form class="ask" id="ask">
-  <div class="row">
-    <textarea id="text" rows="1" placeholder="Ask your agents…" autocomplete="off"></textarea>
-    <button type="submit" aria-label="Send">↑</button>
+<main class="home" id="home"></main>
+<div class="dock" id="dock">
+  <div id="toast"></div>
+  <form class="compose" id="ask">
+    <textarea id="askText" rows="1" placeholder="Ask your agents…" enterkeyhint="send" autocomplete="off"></textarea>
+    <button class="send" id="askSend" type="submit" aria-label="Send" disabled>
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+  </form>
+</div>
+
+<section class="session" id="session" aria-hidden="true">
+  <div class="bar">
+    <button class="back" id="back" aria-label="Back">
+      <svg width="11" height="18" viewBox="0 0 11 18" fill="none"><path d="M9 2 2 9l7 7" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </button>
+    <div class="title"><b id="sTitle"></b><span><span class="g" id="sGlyph"><i></i></span><span id="sStatus"></span></span></div>
+    <button class="more" id="more" aria-label="More">
+      <svg width="18" height="4" viewBox="0 0 18 4" fill="currentColor"><circle cx="2" cy="2" r="2"/><circle cx="9" cy="2" r="2"/><circle cx="16" cy="2" r="2"/></svg>
+    </button>
   </div>
-</form>
-<dialog id="pane">
-  <div class="head"><span class="dot" id="pdot"></span><b id="ptitle"></b>
-    <button class="btn" id="pclose" aria-label="Close">✕</button></div>
-  <div class="tools"><select id="ptheme" aria-label="Terminal theme"></select>
-    <button class="btn" id="pfocus">Focus in herdr</button></div>
-  <pre id="ptext"></pre>
-  <form class="send" id="psend"><input id="pinput" placeholder="Message this agent (prefix btw for a side question)"><button class="btn" type="submit">Send</button></form>
-</dialog>
+  <div class="menu" id="menu" hidden>
+    <label>Theme <select id="theme"></select></label>
+    <button id="fit">Fit whole width <span id="fitState"></span></button>
+    <hr>
+    <button id="focus">Show in herdr on the Mac</button>
+  </div>
+  <div class="term" id="term"><pre id="screen"></pre></div>
+  <div class="keys" id="keys"></div>
+  <div class="sdock" id="sdock"></div>
+  <textarea class="ghost" id="ghost" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Type into the terminal"></textarea>
+</section>
+
 <script>
 (() => {
+  // ---------- plumbing ----------
   const qs = new URLSearchParams(location.search);
   let token = qs.get("t") || "";
   try { if (token) localStorage.setItem("reflex.token", token); else token = localStorage.getItem("reflex.token") || ""; } catch (e) {}
   if (qs.get("t")) history.replaceState(null, "", location.pathname + location.hash);
-
   const $ = (id) => document.getElementById(id);
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const store = { get: (k, d) => { try { return localStorage.getItem(k) ?? d; } catch (e) { return d; } },
+                  set: (k, v) => { try { localStorage.setItem(k, v); } catch (e) {} } };
   const api = async (path, body) => {
-    const r = await fetch(path, { method: body ? "POST" : "GET", headers: { authorization: "Bearer " + token },
+    const r = await fetch(path, { method: body ? "POST" : "GET", headers: { authorization: "Bearer " + token, "content-type": "application/json" },
       body: body ? JSON.stringify(body) : undefined, cache: "no-store" });
     if (r.status === 401) throw new Error("token");
     return r.json();
   };
-  let state = null, toast = "", openPane = null;
-  const seen = new Set();
-  // Only things that just appeared animate in; a re-render never replays motion.
-  const fresh = (key) => { if (seen.has(key)) return ""; seen.add(key); return " new"; };
-  const tone = { ask: "var(--amber)", ready: "var(--green)", reply: "var(--green)", route: "var(--violet)", note: "var(--grey)" };
-  const home = (p) => p.replace(/^\/Users\/[^/]+/, "~");
 
-  function render() {
-    const app = $("app");
-    if (!token) { app.innerHTML = `<div class="lock">Open this page from the QR code in Reflex's settings.</div>`; return; }
-    if (!state) return;
+  let state = null, offline = false;
+  const seen = new Set();
+  // Only what just appeared animates in; a refresh never replays motion.
+  const fresh = (k) => (seen.has(k) ? "" : (seen.add(k), " new"));
+  const leaf = (p) => (p || "").split("/").filter(Boolean).pop() || p || "";
+  const word = { working: "Working", blocked: "Needs you", done: "Done", idle: "Idle" };
+  const norm = (s) => (word[s] ? s : "idle");
+  const ago = (ms) => { const s = Math.max(0, Math.round(((state?.now ?? Date.now()) - ms) / 1000));
+    return s < 10 ? "now" : s < 60 ? s + "s" : s < 3600 ? Math.floor(s / 60) + "m" : s < 86400 ? Math.floor(s / 3600) + "h" : Math.floor(s / 86400) + "d"; };
+  const glyph = (s) => `<span class="g ${s}"><i></i></span>`;
+  const chev = `<svg class="chev" viewBox="0 0 8 13" fill="none"><path d="m1.5 1.5 5 5-5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+  const xIcon = `<svg width="11" height="11" viewBox="0 0 11 11"><path d="m1.5 1.5 8 8m0-8-8 8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>`;
+
+  // The end of an agent's screen as prose: no rules, prompts, status lines or hard wraps.
+  function gist(body) {
+    const out = []; let cur = "";
+    const flush = () => { const t = cur.trim(); if (t) out.push(t); cur = ""; };
+    for (const raw of String(body || "").replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").split("\n")) {
+      const t = raw.trim();
+      if (!t || /^[─━═—\-_│┃╭╮╰╯┌┐└┘├┤┬┴┼\s]+$/.test(t)) { flush(); continue; }
+      if (/^[❯>›$]\s*$/.test(t)) { flush(); continue; }
+      if (/^[*✻✽✶✳✢·⏵⎿]\s*\S+ for \d|esc to interrupt|\? for shortcuts|^⏵⏵|bypass permissions|accept edits/i.test(t)) { flush(); continue; }
+      const text = t.replace(/^[⏺●•]\s+/, "");
+      if (cur && (raw.startsWith(" ") || !cur.endsWith("."))) cur += " " + text; else { flush(); cur = text; }
+    }
+    flush();
+    return out.slice(-2).join(" ");
+  }
+
+  // ---------- home ----------
+  const asks = (i) => i.options && i.options.length;
+  function renderHome() {
+    const home = $("home");
+    if (!token) { home.innerHTML = `<div class="lock"><div><b>Open Reflex from your Mac</b>Scan the code in Reflex → Settings → Phone.</div></div>`; $("dock").hidden = true; return; }
+    if (!state) { home.innerHTML = `<header class="top"><h1>Reflex</h1><span class="chip">${offline ? "Can't reach your Mac" : "Connecting…"}</span></header>`; return; }
     const s = state;
-    $("hdot").className = "dot " + (s.herdr ? "done" : "blocked");
-    $("health").textContent = s.herdr ? `${s.agents.length} agents · ${s.folders} folders` : "herdr not reachable";
-    let h = toast ? `<div class="toast">${esc(toast)}</div>` : "";
-    if (s.pending.length) {
-      h += `<h2>Sending</h2>` + s.pending.map((p) => `<div class="pending${fresh("p" + p.id)}"><span class="label">${esc(p.label.replace(/^→ /, ""))}</span>
-</div>`).join("");
+    const qs = s.inbox.filter(asks), ups = s.inbox.filter((i) => !asks(i));
+    const working = s.agents.filter((a) => a.status === "working").length;
+    let h = `<header class="top"><h1>Reflex</h1>${offline ? `<span class="chip bad">Offline</span>`
+      : !s.herdr ? `<span class="chip bad">herdr isn't running</span>`
+      : `<span class="chip">${glyph(working ? "working" : s.agents.length ? "done" : "idle")}${working ? `${working} working` : `${s.agents.length} agent${s.agents.length === 1 ? "" : "s"}`}</span>`}</header>`;
+
+    // Questions first: they wait on you.
+    if (qs.length) {
+      h += `<div class="section"><div class="label">Needs you <span class="n">${qs.length}</span></div>`;
+      h += qs.map((i) => {
+        const a = s.agents.find((x) => x.pane === i.pane);
+        const pend = s.pending.find((p) => p.item === i.id);
+        const g = gist(i.body);
+        return `<div class="q${i.kind === "route" ? " route" : ""}${fresh("q" + i.id)}">
+          <div class="head">${glyph(i.kind === "route" ? "route" : "blocked")}
+            <div class="who"><b>${esc(i.title || i.agent)}</b><span>${esc(i.agent)}</span></div>
+            ${i.pane ? `<button class="open" data-open="${esc(i.pane)}">Open</button>` : ""}</div>
+          ${g ? `<div class="gist">${esc(g)}</div>` : ""}
+          ${pend ? `<div class="sent">${glyph("working")} ${esc(pend.label.replace(/^→ /, ""))}</div>`
+            : `<div class="opts">${i.options.map((o) => `<button class="opt" data-item="${i.id}" data-key="${esc(o.key)}"><span class="key">${esc(o.key)}</span><span>${esc(o.label)}</span></button>`).join("")}</div>`}
+        </div>`;
+      }).join("") + `</div>`;
     }
-    h += `<h2>Inbox</h2>`;
-    h += s.inbox.length ? s.inbox.map((i) => `<div class="card${fresh("i" + i.id)}" style="--tone:${tone[i.kind] || "var(--blue)"}">
-        <div class="top"><span class="dot ${i.kind === "ask" ? "blocked" : i.kind === "ready" || i.kind === "reply" ? "done" : i.kind === "route" ? "route" : "idle"}"></span>
-          <span class="agent-name">${esc(i.agent)}</span><span class="title">${esc(i.title)}</span>
-          <button class="x" data-dismiss="${i.id}" aria-label="Dismiss">×</button></div>
-        ${i.body ? `<pre>${esc(i.body)}</pre>` : ""}
-        ${i.options.length ? `<div class="opts">${i.options.map((o) => `<button data-item="${i.id}" data-key="${esc(o.key)}"><span class="key">${esc(o.key)}</span><span>${esc(o.label)}</span></button>`).join("")}</div>` : ""}
-      </div>`).join("") : `<div class="empty">✓ All clear — nothing needs you.</div>`;
-    h += `<h2>Agents</h2><div class="agents">` + (s.agents.length ? s.agents.map((a) => `<div class="agent${fresh("a" + a.pane)}" data-pane="${esc(a.pane)}">
-        <span class="dot ${esc(a.status)}"></span><span class="who">${esc(a.kind)}</span>
-        <span class="where">${esc(home(a.cwd))}${a.title ? " · " + esc(a.title) : ""}</span></div>`).join("")
-      : `<div class="empty">No agents running in herdr.</div>`) + `</div>`;
-    if (s.receipts.length) {
-      h += `<h2>Recent</h2>` + s.receipts.slice(0, 8).map((r) => `<div class="receipt ${r.ok ? "" : "bad"}">${r.ok ? "✓" : "✗"} ${esc(r.label)} — ${esc(r.detail)}</div>`).join("");
+
+    // Agents: waiting, working, done, idle.
+    const order = { blocked: 0, working: 1, done: 2, idle: 3 };
+    const agents = [...s.agents].sort((a, b) => order[norm(a.status)] - order[norm(b.status)]);
+    h += `<div class="section"><div class="label">Agents ${agents.length ? `<span class="n">${agents.length}</span>` : ""}</div>`;
+    h += agents.length ? `<div class="group">` + agents.map((a) => `<button class="row${fresh("a" + a.pane)}" data-open="${esc(a.pane)}">
+        ${glyph(norm(a.status))}
+        <div class="text"><div class="t1">${esc(a.title || `${a.kind} · ${leaf(a.cwd)}`)}</div>
+          <div class="t2">${esc(a.kind)} · ${esc(leaf(a.cwd))} · ${word[norm(a.status)]}</div></div>${chev}</button>`).join("") + `</div>`
+      : `<div class="group"><div class="empty"><b>No agents running</b>Ask below and Jev starts one in the right project.</div></div>`;
+    h += `</div>`;
+
+    // Updates: what finished or answered while you were away.
+    if (ups.length) {
+      h += `<div class="section"><div class="label">Updates <span class="n">${ups.length}</span><button class="act" data-clearall>Clear</button></div><div class="group">`;
+      h += ups.map((i) => { const g = gist(i.body);
+        return `<div class="row${fresh("u" + i.id)}" data-open="${esc(i.pane)}" role="button">
+          ${glyph(i.kind === "ready" || i.kind === "reply" ? "done" : "idle")}
+          <div class="text"><div class="t1">${esc(i.agent)}</div><div class="t2">${esc(i.title)}</div>${g ? `<div class="gist">${esc(g)}</div>` : ""}</div>
+          <span class="side">${ago(i.at)}</span>
+          <button class="x" data-dismiss="${i.id}" aria-label="Clear">${xIcon}</button></div>`; }).join("") + `</div></div>`;
+    } else if (!qs.length && s.agents.length) {
+      h += `<div class="section"><div class="group allclear">
+        <svg width="22" height="22" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="10" stroke="currentColor" stroke-width="1.6"/><path d="m6.5 11.2 3 3 6-6.4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <div><b>All clear</b><span>Nothing needs you right now.</span></div></div></div>`;
     }
-    app.innerHTML = h;
+
+    const recent = s.receipts.slice(0, 4);
+    if (recent.length) h += `<div class="section"><div class="label">Recently</div><div class="activity">${recent.map((r) =>
+      `<div class="${r.ok ? "" : "bad"}">${esc(r.label.replace(/^→ /, ""))} · ${esc(r.detail)}</div>`).join("")}</div></div>`;
+    home.innerHTML = h;
   }
 
   async function refresh() {
-    if (!token) return render();
-    try { state = await api("/api/state"); }
-    catch (e) { $("health").textContent = e.message === "token" ? "bad token" : "offline"; }
-    render();
+    if (!token) return renderHome();
+    try { state = await api("/api/state"); offline = false; }
+    catch (e) { offline = true; if (e.message === "token") { token = ""; store.set("reflex.token", ""); } }
+    renderHome();
+    if (open) renderSessionChrome();
   }
 
-  document.addEventListener("click", async (e) => {
-    const t = e.target.closest("[data-cancel],[data-dismiss],[data-item],[data-pane]");
-    if (!t) return;
-    if (t.dataset.cancel) await api("/api/cancel", { id: +t.dataset.cancel });
-    else if (t.dataset.dismiss) await api("/api/dismiss", { item: +t.dataset.dismiss });
-    else if (t.dataset.item) await api("/api/answer", { item: +t.dataset.item, key: t.dataset.key });
-    else if (t.dataset.pane) return showPane(t.dataset.pane);
-    refresh();
-  });
+  // Toast for what the composer did.
+  let toastTimer;
+  function toast(text, opts = {}) {
+    clearTimeout(toastTimer);
+    $("toast").innerHTML = text ? `<div class="toast${opts.bad ? " bad" : ""}"><span>${esc(text)}</span>${opts.pane ? `<button data-open="${esc(opts.pane)}">Open</button>` : ""}</div>` : "";
+    if (text && !opts.sticky) toastTimer = setTimeout(() => toast(""), 6000);
+  }
 
+  // The composer grows with its text; ⏎ sends (⇧⏎ for a new line).
+  function autosize(t) { t.style.height = "auto"; t.style.height = Math.min(t.scrollHeight, 132) + "px"; }
+  $("askText").addEventListener("input", (e) => { autosize(e.target); $("askSend").disabled = !e.target.value.trim(); });
+  $("askText").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("ask").requestSubmit(); } });
   $("ask").addEventListener("submit", async (e) => {
     e.preventDefault();
-    const text = $("text").value.trim();
+    const text = $("askText").value.trim();
     if (!text) return;
-    $("text").value = "";
-    toast = "Routing…"; render();
+    $("askText").value = ""; autosize($("askText")); $("askSend").disabled = true;
+    toast("Jev is choosing…", { sticky: true });
     try {
       const r = await api("/api/route", { text });
       const d = r.route || {};
-      toast = d.decision === "go" ? d.label.replace(/^→ /, "→ ") : d.decision === "choose" ? d.title + " (see Inbox)" : "Could not route: " + (d.error || r.error);
-    } catch (err) { toast = "Failed: " + err.message; }
+      if (d.decision === "go") toast(d.label ? d.label.replace(/^→ /, "Sent to ") : "Sent", { pane: d.action && d.action.pane });
+      else if (d.decision === "choose") toast("Jev isn't sure — pick one under Needs you");
+      else toast("Couldn't route: " + (d.error || r.error || "no answer"), { bad: true });
+    } catch (err) { toast("Couldn't reach your Mac", { bad: true }); }
     refresh();
-    setTimeout(() => { toast = ""; render(); }, 6000);
-  });
-  $("text").addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); $("ask").requestSubmit(); }
   });
 
-  // Terminal themes (Ghostty's palettes); Tokyo Night by default.
+  document.addEventListener("click", async (e) => {
+    const t = e.target.closest("[data-dismiss],[data-item],[data-open],[data-clearall]");
+    if (!t) return;
+    if (t.dataset.dismiss) { e.stopPropagation(); state.inbox = state.inbox.filter((i) => i.id !== +t.dataset.dismiss); renderHome(); await api("/api/dismiss", { item: +t.dataset.dismiss }); }
+    else if (t.dataset.item) await api("/api/answer", { item: +t.dataset.item, key: t.dataset.key });
+    else if (t.hasAttribute("data-clearall")) { const ids = state.inbox.filter((i) => !asks(i)).map((i) => i.id);
+      state.inbox = state.inbox.filter(asks); renderHome(); for (const id of ids) await api("/api/dismiss", { item: id }); }
+    else if (t.dataset.open) return openSession(t.dataset.open);
+    refresh();
+  });
+
+  // ---------- a session ----------
   const THEMES = {
-    "TokyoNight": ["#1a1b26", "#c0caf5", "#15161e #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #a9b1d6 #414868 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5"],
-    "TokyoNight Storm": ["#24283b", "#c0caf5", "#1d202f #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #a9b1d6 #414868 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5"],
-    "TokyoNight Moon": ["#222436", "#c8d3f5", "#1b1d2b #ff757f #c3e88d #ffc777 #82aaff #c099ff #86e1fc #828bb8 #444a73 #ff757f #c3e88d #ffc777 #82aaff #c099ff #86e1fc #c8d3f5"],
-    "TokyoNight Day": ["#e1e2e7", "#3760bf", "#e9e9ed #f52a65 #587539 #8c6c3e #2e7de9 #9854f1 #007197 #6172b0 #a1a6c5 #f52a65 #587539 #8c6c3e #2e7de9 #9854f1 #007197 #3760bf"],
+    "Tokyo Night": ["#1a1b26", "#c0caf5", "#15161e #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #a9b1d6 #414868 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5"],
+    "Tokyo Night Storm": ["#24283b", "#c0caf5", "#1d202f #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #a9b1d6 #414868 #f7768e #9ece6a #e0af68 #7aa2f7 #bb9af7 #7dcfff #c0caf5"],
+    "Tokyo Night Day": ["#e1e2e7", "#3760bf", "#e9e9ed #f52a65 #587539 #8c6c3e #2e7de9 #9854f1 #007197 #6172b0 #a1a6c5 #f52a65 #587539 #8c6c3e #2e7de9 #9854f1 #007197 #3760bf"],
     "Catppuccin Mocha": ["#1e1e2e", "#cdd6f4", "#45475a #f38ba8 #a6e3a1 #f9e2af #89b4fa #f5c2e7 #94e2d5 #bac2de #585b70 #f38ba8 #a6e3a1 #f9e2af #89b4fa #f5c2e7 #94e2d5 #a6adc8"],
     "Dracula": ["#282a36", "#f8f8f2", "#21222c #ff5555 #50fa7b #f1fa8c #bd93f9 #ff79c6 #8be9fd #f8f8f2 #6272a4 #ff6e6e #69ff94 #ffffa5 #d6acff #ff92df #a4ffff #ffffff"],
     "GitHub Light": ["#ffffff", "#1f2328", "#24292f #cf222e #116329 #4d2d00 #0969da #8250df #1b7c83 #6e7781 #57606a #a40e26 #1a7f37 #633c01 #218bff #a475f9 #3192aa #8c959f"],
   };
-  let themeName = "TokyoNight";
-  try { themeName = localStorage.getItem("reflex.theme") || themeName; } catch (e) {}
-  if (!THEMES[themeName]) themeName = "TokyoNight";
-  $("ptheme").innerHTML = Object.keys(THEMES).map((n) => `<option${n === themeName ? " selected" : ""}>${esc(n)}</option>`).join("");
-  $("ptheme").onchange = (e) => { themeName = e.target.value; try { localStorage.setItem("reflex.theme", themeName); } catch (err) {} paneTick(true); };
+  let themeName = store.get("reflex.theme", "Tokyo Night").replace("TokyoNight", "Tokyo Night");
+  if (!THEMES[themeName]) themeName = "Tokyo Night";
+  // Wrap (readable, the default) or fit every column (for TUIs that need them).
+  let fit = store.get("reflex.fit2", "0") === "1";
+  $("theme").innerHTML = Object.keys(THEMES).map((n) => `<option${n === themeName ? " selected" : ""}>${esc(n)}</option>`).join("");
+  $("theme").onchange = (e) => { themeName = e.target.value; store.set("reflex.theme", themeName); applyTheme(); tick(true); };
+  function applyTheme() {
+    const t = THEMES[themeName], el = $("session");
+    el.style.setProperty("--term-bg", t[0]); el.style.setProperty("--term-fg", t[1]);
+  }
+  applyTheme();
 
   const xterm = (n, pal) => {
     if (n < 16) return pal[n];
     if (n < 232) { n -= 16; const v = [0, 95, 135, 175, 215, 255]; return `rgb(${v[Math.floor(n / 36)]},${v[Math.floor(n / 6) % 6]},${v[n % 6]})`; }
     const g = 8 + (n - 232) * 10; return `rgb(${g},${g},${g})`;
   };
-  // SGR-colored text to HTML; other escapes (cursor moves, modes) are dropped.
+  // SGR colours to HTML; other escapes (cursor moves, modes) are dropped.
   function ansiHtml(text, theme) {
     const pal = theme[2].split(" ");
     let st = {}, out = "", last = 0;
@@ -264,44 +440,193 @@
     return out;
   }
 
-  async function showPane(pane) {
-    openPane = pane;
-    const a = state.agents.find((x) => x.pane === pane) || { kind: "agent", cwd: "", status: "unknown" };
-    $("ptitle").textContent = `${a.kind} · ${a.cwd.split("/").filter(Boolean).pop() || a.cwd}`;
-    $("pdot").className = "dot " + a.status;
-    $("pane").showModal();
-    paneTick();
+  // Fit the terminal's columns to the phone's width (readable size otherwise).
+  const charW = (() => { const c = document.createElement("canvas").getContext("2d"); c.font = "100px " + getComputedStyle(document.body).getPropertyValue("--mono");
+    return c.measureText("MMMMMMMMMM").width / 1000; })();
+  let cols = 80;
+  function fitFont() {
+    const w = $("term").clientWidth - 20;
+    const size = fit ? Math.max(5.5, Math.min(13, w / (cols * charW))) : 11;
+    $("screen").style.setProperty("--fs", size.toFixed(2) + "px");
+    $("term").classList.toggle("fit", fit);
+    $("fitState").textContent = fit ? "On" : "Off";
   }
-  let paneTimer = null;
-  async function paneTick(once) {
-    if (!openPane || !$("pane").open) return;
-    const t = THEMES[themeName];
-    $("ptext").style.setProperty("--term-bg", t[0]);
-    $("ptext").style.setProperty("--term-fg", t[1]);
-    try {
-      const r = await api("/api/pane?format=ansi&id=" + encodeURIComponent(openPane) + "&lines=150");
-      const pinned = $("ptext").scrollHeight - $("ptext").scrollTop - $("ptext").clientHeight < 40;
-      $("ptext").innerHTML = r.text ? ansiHtml(r.text, t) : esc(r.error || "");
-      if (pinned) $("ptext").scrollTop = $("ptext").scrollHeight;
-    } catch (e) {}
-    if (once !== true) { clearTimeout(paneTimer); paneTimer = setTimeout(paneTick, 1200); }
+  // Wrapped, a screen's padding and full-width rules would wrap into rows of
+  // nothing: trailing spaces go, and a rule is cut to the phone's width.
+  const ESC = /\x1b\[[0-9;?:]*[A-Za-z@]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r/g;
+  function tidy(text) {
+    const width = Math.floor(($("term").clientWidth - 20) / (11 * charW));
+    return text.split("\n").map((line) => {
+      line = line.replace(/ +((?:\x1b\[[0-9;]*m)*)$/, "$1");
+      const plain = line.replace(ESC, "");
+      if (plain.length > width && /^[\s─━═—_\-]+$/.test(plain)) {
+        let seen = 0, out = "";
+        for (const part of line.split(/(\x1b\[[0-9;?:]*[A-Za-z@])/)) {
+          if (part.startsWith("\x1b")) { out += part; continue; }
+          const take = part.slice(0, Math.max(0, width - seen)); out += take; seen += take.length;
+        }
+        return out;
+      }
+      return line;
+    }).join("\n");
   }
-  $("pclose").onclick = () => { openPane = null; $("pane").close(); };
-  $("pfocus").onclick = () => api("/api/focus", { pane: openPane });
-  $("psend").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const text = $("pinput").value.trim();
-    if (!text) return;
-    $("pinput").value = "";
-    const side = /^\/?btw\b/i.test(text);
-    await api(side ? "/api/side" : "/api/send", { pane: openPane, text, label: "agent" });
-    refresh();
-  });
 
-  refresh().then(() => {
-    const m = /^#pane=(.+)$/.exec(location.hash);
-    if (m && state) showPane(decodeURIComponent(m[1]));
+  let open = null, timer = null, live = false, ctrl = false, busy = false;
+  const agentOf = (pane) => state?.agents.find((a) => a.pane === pane);
+
+  function renderSessionChrome() {
+    const a = agentOf(open) || { kind: "terminal", cwd: "", status: "idle", title: "" };
+    const s = norm(a.status);
+    $("sTitle").textContent = a.title || (a.cwd ? `${a.kind} · ${leaf(a.cwd)}` : "Terminal");
+    $("sGlyph").className = "g " + s;
+    $("sStatus").textContent = [a.kind, leaf(a.cwd), word[s]].filter(Boolean).join(" · ");
+    // The key bar: what a TUI needs that a phone keyboard lacks; answers when it asks.
+    const nums = s === "blocked" ? ["1", "2", "3"].map((n) => `<button class="k num" data-k="${n}">${n}</button>`).join("") + `<span class="k sep"></span>` : "";
+    const keys = nums + [["esc", "esc"], ["tab", "⇥"], ["up", "↑"], ["down", "↓"], ["left", "←"], ["right", "→"], ["enter", "⏎"], ["ctrl+c", "^C"], ["ctrl", "ctrl"]]
+      .map(([k, l]) => `<button class="k${k === "ctrl" && ctrl ? " on" : ""}" data-k="${k}">${l}</button>`).join("");
+    if ($("keys").dataset.sig !== keys) { $("keys").innerHTML = keys; $("keys").dataset.sig = keys; }
+    const dock = live
+      ? `<div class="live"><span>Typing into the terminal</span><button data-live>Done</button></div>`
+      : `<form class="compose" id="msg"><textarea id="msgText" rows="1" placeholder="${agentOf(open) ? `Message ${esc(a.kind)}…` : "Run a command…"}" enterkeyhint="send" autocomplete="off"></textarea>
+          <button class="kbd" type="button" data-live aria-label="Type into the terminal">
+            <svg width="20" height="14" viewBox="0 0 20 14" fill="none"><rect x=".9" y=".9" width="18.2" height="12.2" rx="2.6" stroke="currentColor" stroke-width="1.5"/><path d="M4 4.5h1.5M8 4.5h1.5M12 4.5h1.5M16 4.5h0M4 7.5h1.5M8 7.5h1.5M12 7.5h1.5M6 10.3h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+          <button class="send" type="submit" aria-label="Send" disabled><svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg></button></form>`;
+    if ($("sdock").dataset.mode !== String(live)) { $("sdock").innerHTML = dock; $("sdock").dataset.mode = String(live); wireMessage(); }
+    $("term").classList.toggle("typing", live);
+  }
+
+  function wireMessage() {
+    const f = $("msg"); if (!f) return;
+    const t = $("msgText"), b = f.querySelector(".send");
+    t.addEventListener("input", () => { autosize(t); b.disabled = !t.value.trim(); });
+    t.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); f.requestSubmit(); } });
+    f.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = t.value.trim(); if (!text) return;
+      t.value = ""; autosize(t); b.disabled = true;
+      const side = /^\/?btw\b/i.test(text);
+      try { await api(side ? "/api/side" : "/api/send", { pane: open, text, label: "phone" }); } catch (err) {}
+      soon();
+    });
+  }
+
+  async function openSession(pane) {
+    if (!pane) return;
+    open = pane; live = false; ctrl = false;
+    $("sdock").dataset.mode = "";
+    renderSessionChrome();
+    $("screen").innerHTML = "";
+    $("session").classList.add("on"); $("session").setAttribute("aria-hidden", "false");
+    if (location.hash !== "#pane=" + encodeURIComponent(pane)) history.pushState({ pane }, "", "#pane=" + encodeURIComponent(pane));
+    // Opening a session reads its notifications (Jev's routing questions stay).
+    const ids = (state?.inbox || []).filter((i) => i.pane === pane && i.kind !== "route").map((i) => i.id);
+    if (ids.length) { state.inbox = state.inbox.filter((i) => !ids.includes(i.id)); renderHome(); ids.forEach((id) => api("/api/dismiss", { item: id }).catch(() => {})); }
+    pinned = true;
+    tick();
+  }
+  function closeSession(fromPop) {
+    open = null; setLive(false);
+    $("menu").hidden = true;
+    $("session").classList.remove("on"); $("session").setAttribute("aria-hidden", "true");
+    clearTimeout(timer);
+    if (!fromPop && location.hash.startsWith("#pane=")) history.back();
+  }
+  $("back").onclick = () => closeSession(false);
+  window.addEventListener("popstate", () => { const m = /^#pane=(.+)$/.exec(location.hash); if (m) openSession(decodeURIComponent(m[1])); else if (open) closeSession(true); });
+
+  let pinned = true;
+  $("term").addEventListener("scroll", () => { const el = $("term"); pinned = el.scrollHeight - el.scrollTop - el.clientHeight < 30; }, { passive: true });
+  async function tick(once) {
+    if (!open || busy) return;
+    busy = true;
+    try {
+      const r = await api("/api/pane?format=ansi&id=" + encodeURIComponent(open) + "&lines=200");
+      const text = r.text || "";
+      const plain = text.replace(/\x1b\[[0-9;?:]*[A-Za-z@]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r/g, "");
+      cols = Math.min(240, Math.max(40, ...plain.split("\n").map((l) => l.replace(/\s+$/, "").length)));
+      fitFont();
+      $("screen").innerHTML = text ? ansiHtml(fit ? text : tidy(text), THEMES[themeName]) : `<span style="opacity:.5">${esc(r.error || "Nothing on screen yet.")}</span>`;
+      if (pinned) $("term").scrollTop = $("term").scrollHeight;
+    } catch (e) {}
+    busy = false;
+    if (once !== true) { clearTimeout(timer); timer = setTimeout(tick, document.hidden ? 4000 : 600); }
+  }
+  // After a key or message, look again at once — the reply is what you want to see.
+  function soon() { setTimeout(() => tick(true), 120); setTimeout(() => tick(true), 450); }
+
+  // Keys and typed text go out in order, one at a time.
+  let chain = Promise.resolve(), pendingText = "", textTimer = null;
+  const send = (path, body) => { chain = chain.then(() => api(path, body).catch(() => {})).then(soon); };
+  function key(k) {
+    if (!open) return;
+    flushText();
+    send("/api/keys", { pane: open, key: k });
+  }
+  function typed(s) {
+    if (!open || !s) return;
+    if (ctrl && /^[a-z]$/i.test(s)) { ctrl = false; renderSessionChrome(); return key("ctrl+" + s.toLowerCase()); }
+    pendingText += s;
+    clearTimeout(textTimer); textTimer = setTimeout(flushText, 35);
+  }
+  function flushText() {
+    clearTimeout(textTimer);
+    if (!pendingText) return;
+    const t = pendingText; pendingText = "";
+    send("/api/text", { pane: open, text: t });
+  }
+
+  $("keys").addEventListener("click", (e) => {
+    const b = e.target.closest("[data-k]"); if (!b) return;
+    const k = b.dataset.k;
+    if (k === "ctrl") { ctrl = !ctrl; renderSessionChrome(); if (!live) setLive(true); return; }
+    if (/^[0-9]$/.test(k)) return typed(k);
+    key(k);
+    if (live) $("ghost").focus({ preventScroll: true });
   });
+  // Keep the keyboard up while tapping keys.
+  $("keys").addEventListener("pointerdown", (e) => { if (live) e.preventDefault(); });
+
+  // Live typing: a hidden field takes the phone keyboard; every keystroke goes
+  // to the terminal as it is typed. A two-space sentinel lets Backspace register.
+  const ghost = $("ghost"), SENT = "  ";
+  function setLive(on) {
+    live = on; if (!on) ctrl = false;
+    renderSessionChrome();
+    if (on) { ghost.value = SENT; ghost.focus({ preventScroll: true }); ghost.setSelectionRange(2, 2); }
+    else ghost.blur();
+  }
+  $("sdock").addEventListener("click", (e) => { if (e.target.closest("[data-live]")) setLive(!live); });
+  $("term").addEventListener("click", () => { if (live) ghost.focus({ preventScroll: true }); });
+  ghost.addEventListener("input", (e) => {
+    const t = e.inputType || "";
+    if (t === "deleteContentBackward") key("backspace");
+    else if (t === "insertLineBreak" || t === "insertParagraph") key("enter");
+    else if (e.data) typed(e.data);
+    else { const v = ghost.value.replace(/^ {0,2}/, ""); if (v) typed(v); }
+    ghost.value = SENT; ghost.setSelectionRange(2, 2);
+  });
+  ghost.addEventListener("keydown", (e) => {
+    const map = { Enter: "enter", Tab: "tab", Escape: "esc", ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
+    if (map[e.key]) { e.preventDefault(); key(map[e.key]); }
+    else if (e.ctrlKey && /^[a-z]$/i.test(e.key)) { e.preventDefault(); key("ctrl+" + e.key.toLowerCase()); }
+  });
+  ghost.addEventListener("blur", () => { if (live) setTimeout(() => { if (live && document.activeElement !== ghost && !document.activeElement?.closest?.("#keys")) setLive(false); }, 250); });
+
+  // Menu.
+  $("more").onclick = (e) => { e.stopPropagation(); $("menu").hidden = !$("menu").hidden; };
+  document.addEventListener("click", (e) => { if (!$("menu").hidden && !e.target.closest("#menu,#more")) $("menu").hidden = true; });
+  $("fit").onclick = () => { fit = !fit; store.set("reflex.fit2", fit ? "1" : "0"); fitFont(); tick(true); };
+  $("focus").onclick = () => { $("menu").hidden = true; api("/api/focus", { pane: open }); toast("Shown in herdr on your Mac"); };
+
+  // The keyboard takes room: the session fits what is left of the screen.
+  const vv = window.visualViewport;
+  const fitViewport = () => { document.documentElement.style.setProperty("--vvh", (vv ? vv.height : innerHeight) + "px"); if (open) { fitFont(); if (pinned) $("term").scrollTop = $("term").scrollHeight; } };
+  if (vv) { vv.addEventListener("resize", fitViewport); vv.addEventListener("scroll", () => window.scrollTo(0, 0)); }
+  window.addEventListener("resize", fitViewport);
+  fitViewport();
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(); if (open) tick(true); } });
+
+  refresh().then(() => { const m = /^#pane=(.+)$/.exec(location.hash); if (m && state) openSession(decodeURIComponent(m[1])); });
   setInterval(refresh, 1500);
 })();
 </script>

@@ -11,7 +11,6 @@ final class Settings: ObservableObject {
 
     @Published var roots: String { didSet { d.set(roots, forKey: "roots") } }
     @Published var harness: String { didSet { d.set(harness, forKey: "harness") } }
-    @Published var threshold: Int { didSet { d.set(threshold, forKey: "threshold") } }
     /// Saying this asks for a new project folder (rare by design; see the Ask bar).
     @Published var newKeyword: String { didSet { d.set(newKeyword, forKey: "newKeyword") } }
     /// Where new project folders are made. Empty: the first project root.
@@ -45,7 +44,6 @@ final class Settings: ObservableObject {
     private init() {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
         harness = d.string(forKey: "harness") ?? "claude"
-        threshold = d.object(forKey: "threshold") as? Int ?? 6000
         newKeyword = d.string(forKey: "newKeyword") ?? "new project"
         newRoot = d.string(forKey: "newRoot") ?? ""
         extraFolders = d.stringArray(forKey: "extraFolders") ?? []
@@ -134,6 +132,14 @@ final class Settings: ObservableObject {
                                        attributes: [.posixPermissions: 0o600])
         return t
     }
+
+    /// This launch's own token, for the Mac app alone (never leaves memory).
+    static let sessionToken: String = (0..<24).map { _ in String(format: "%02x", UInt8.random(in: 0...255)) }.joined()
+
+    /// What reflexd accepts: the phone link's token only while the phone
+    /// remote is on — otherwise a phone that still has the link (which a
+    /// userspace tailscaled can still deliver to localhost) gets nowhere.
+    static var daemonToken: String { Settings.shared.remote ? token : sessionToken }
 
     static func rotateToken() {
         cachedToken = nil

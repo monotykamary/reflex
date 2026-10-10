@@ -819,6 +819,8 @@ type Ep is Data:
   EHealth{}
   ESide{}
   EFocus{}
+  EKeys{}
+  EText{}
   EClose{}
   ESessions{}
   EResume{}
@@ -846,6 +848,8 @@ def rows() -> List<&2, Row>:
     Row{"/api/health", EHealth{}},
     Row{"/api/side", ESide{}},
     Row{"/api/focus", EFocus{}},
+    Row{"/api/keys", EKeys{}},
+    Row{"/api/text", EText{}},
     Row{"/api/close", EClose{}},
     Row{"/api/sessions", ESessions{}},
     Row{"/api/resume", EResume{}},
@@ -1018,6 +1022,14 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.focus(Cfg.sock(cfg), Js.text_at(body, "pane"))
         ok(pane_json(ok_detail(r, "focused")))
+    case EKeys{}:
+      do IO<String>:
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.sock(cfg), Js.text_at(body, "pane"), Js.text_at(body, "key"))
+        ok(pane_json(ok_detail(r, "pressed")))
+    case EText{}:
+      do IO<String>:
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.send_text(Cfg.sock(cfg), Js.text_at(body, "pane"), Js.text_at(body, "text"))
+        ok(pane_json(ok_detail(r, "typed")))
     case EClose{}:
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.close_pane(Cfg.sock(cfg), Js.text_at(body, "pane"))

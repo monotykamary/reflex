@@ -175,5 +175,9 @@ def start_agent(sock: String, name: String, kind: String, pane: String) -> IO(Re
 def close_pane(sock: String, pane: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "pane.close", Js.obj([Js.kv("pane_id", Js.str(pane))]), 5000)
 
+# Literal text into a pane, no Enter (the phone's keyboard, typed live).
+def send_text(sock: String, pane: String, text: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
+  call(sock, "pane.send_text", Js.obj([Js.kv("pane_id", Js.str(pane)), Js.kv("text", Js.str(text))]), 5000)
+
 def focus(sock: String, target: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "agent.focus", Js.obj([Js.kv("target", Js.str(target))]), 5000)
