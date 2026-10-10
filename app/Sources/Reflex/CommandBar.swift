@@ -585,7 +585,7 @@ final class CommandModel: ObservableObject {
         panel.prompt = "Start Here"
         panel.message = "Choose the folder to start this session in."
         panel.directoryURL = URL(fileURLWithPath: Settings.shared.newFolderParent)
-        NSApp.activate()
+        AppDelegate.activateSelf()
         guard panel.runModal() == .OK, let url = panel.url else { focusTick += 1; return }
         Settings.shared.addFolder(url.path)
         chosenFolder = url.path

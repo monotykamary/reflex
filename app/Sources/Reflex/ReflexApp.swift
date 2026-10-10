@@ -52,8 +52,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Onboarding.shared.refresh()
             SetupState.shared.update()
             // Back to where the user asked for it.
-            if let w = self?.onboarding, w.isVisible { NSApp.activate(); w.makeKeyAndOrderFront(nil) }
-            else if let w = self?.settings, w.isVisible { NSApp.activate(); w.makeKeyAndOrderFront(nil) }
+            if let w = self?.onboarding, w.isVisible { AppDelegate.activateSelf(); w.makeKeyAndOrderFront(nil) }
+            else if let w = self?.settings, w.isVisible { AppDelegate.activateSelf(); w.makeKeyAndOrderFront(nil) }
         }
         if !Settings.shared.onboarded && ProcessInfo.processInfo.environment["REFLEX_SHOW"] == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
@@ -82,6 +82,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     /// ⌘Tab or a Dock click with nothing open: bring back the terminals, or the inbox.
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if Date().timeIntervalSince(AppDelegate.selfActivatedAt) < 2 { return true }
         if !hasVisibleWindows {
             if let w = popouts.values.first {
                 bringForward(w)
@@ -149,6 +150,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             default:
                 if let a = Store.shared.state.agents.first {
                     self.showPane(a.pane)
+                    // Dev: with another app in front, switch to it from the bar.
+                    if ProcessInfo.processInfo.environment["REFLEX_DEMO_SWITCH"] != nil {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                            self.toggleBar()
+                            self.command.text = "reflex"
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { self.command.submit() }
+                        }
+                    }
                     // Dev: minimize it, then switch to it again as the bar would.
                     if ProcessInfo.processInfo.environment["REFLEX_DEMO_REOPEN"] != nil {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.popouts[a.pane]?.miniaturize(nil) }
@@ -582,7 +591,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if w.isMiniaturized { w.deminiaturize(nil) }
         if let group = w.tabGroup, group.selectedWindow !== w { group.selectedWindow = w }
         NSApp.unhide(nil)
-        NSApp.activate()
+        AppDelegate.activateSelf()
         w.makeKeyAndOrderFront(nil)
         // Activation is cooperative and may land a moment later — or not at
         // all while another app holds it: show the window regardless, then
@@ -595,8 +604,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
 
+    /// Make Reflex the active app. From the Ask bar or the rail — panels that
+    /// never activate Reflex — the app you were in is still active, and
+    /// cooperative activation may turn a plain request down; the window would
+    /// show, then lose to that app a moment later. So, when not active, also
+    /// ask Launch Services to open Reflex, as a Dock click does.
+    /// When activateSelf last went through Launch Services (its reopen
+    /// event is ours, not the user's).
+    static var selfActivatedAt = Date.distantPast
+
+    static func activateSelf() {
+        NSApp.activate()
+        guard !NSApp.isActive else { return }
+        selfActivatedAt = Date()
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = true
+        config.addsToRecentItems = false
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config)
+    }
+
     func showPane(_ pane: String) {
         edge.hide(returnFocus: false)
+        // The bar goes first, at once: left to fade while still key, it would
+        // hand focus back to the app it came from as it left.
+        if let b = bar, b.isVisible {
+            b.orderOut(nil)
+            command.reset()
+        }
         if let w = popouts[pane] {
             bringForward(w)
             return
@@ -627,7 +661,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         popouts[pane] = w
-        NSApp.activate()
+        AppDelegate.activateSelf()
         w.makeKeyAndOrderFront(nil)
         w.makeFirstResponder(session.view)
     }
@@ -658,7 +692,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         Onboarding.shared.begin(at: step)
         onboarding!.center()
-        NSApp.activate()
+        AppDelegate.activateSelf()
         onboarding!.makeKeyAndOrderFront(nil)
         // Seen even if macOS declines to activate Reflex (e.g. at login).
         onboarding!.orderFrontRegardless()
@@ -684,7 +718,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.center()
             settings = w
         }
-        NSApp.activate()
+        AppDelegate.activateSelf()
         settings!.makeKeyAndOrderFront(nil)
     }
 }
