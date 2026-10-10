@@ -312,6 +312,22 @@ final class CommandModel: ObservableObject {
         schedule()
     }
 
+    /// What sits before the text: the slash commands in force and the images.
+    enum Token: Hashable { case harness, newFolder, side, resume, image(UUID) }
+
+    /// The × on a token: take that one off.
+    func remove(_ t: Token) {
+        switch t {
+        case .harness: harness = nil
+        case .newFolder: newForced = false
+        case .side: sideForced = false
+        case .resume: resumeOnly = false
+        case .image(let id): attachments.removeAll { $0.id == id }
+        }
+        schedule()
+        focusTick += 1
+    }
+
     /// Backspace on an empty field takes the last token off.
     func dropToken() -> Bool {
         if !attachments.isEmpty { attachments.removeLast() } else if resumeOnly { resumeOnly = false } else if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else { return false }
@@ -933,32 +949,37 @@ struct CommandBar: View {
 
     private var tokens: some View {
         HStack(spacing: 6) {
-            if let h = model.harness { token("/" + h, Tone.route) }
-            if model.newForced { token("/new", Tone.done) }
-            if model.sideForced { token("/btw", Tone.blocked) }
-            if model.resumeOnly { token("/resume", Tone.working) }
+            if let h = model.harness { token("/" + h, Tone.route, .harness) }
+            if model.newForced { token("/new", Tone.done, .newFolder) }
+            if model.sideForced { token("/btw", Tone.blocked, .side) }
+            if model.resumeOnly { token("/resume", Tone.working, .resume) }
             ForEach(model.attachments) { a in
-                Image(nsImage: a.thumb)
-                    .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: CommandBar.lineHeight + 6, height: CommandBar.lineHeight - 4)
-                    .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-                    .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.15)))
-                    .help(a.url.lastPathComponent + " — goes to the agent with your request (⌫ removes it)")
-                    .transition(.surface(reduce: reduce))
+                Removable(remove: { model.remove(.image(a.id)) }) {
+                    Image(nsImage: a.thumb)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: CommandBar.lineHeight + 6, height: CommandBar.lineHeight - 4)
+                        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .overlay(RoundedRectangle(cornerRadius: 6, style: .continuous).strokeBorder(Color.primary.opacity(0.15)))
+                }
+                .help(a.url.lastPathComponent + " — goes to the agent with your request (× or ⌫ removes it)")
+                .transition(.surface(reduce: reduce))
             }
         }
         .animation(Motion.enter, value: model.attachments)
     }
 
-    private func token(_ label: String, _ tint: Color) -> some View {
-        Text(label)
-            .font(.system(size: 13, weight: .semibold, design: .rounded))
-            .padding(.horizontal, 9)
-            .frame(height: CommandBar.lineHeight - 4)
-            .background(tint.opacity(0.18), in: Capsule())
-            .overlay(Capsule().strokeBorder(tint.opacity(0.4), lineWidth: 1))
-            .transition(.surface(reduce: reduce))
+    private func token(_ label: String, _ tint: Color, _ t: CommandModel.Token) -> some View {
+        Removable(remove: { model.remove(t) }) {
+            Text(label)
+                .font(.system(size: 13, weight: .semibold, design: .rounded))
+                .padding(.horizontal, 9)
+                .frame(height: CommandBar.lineHeight - 4)
+                .background(tint.opacity(0.18), in: Capsule())
+                .overlay(Capsule().strokeBorder(tint.opacity(0.4), lineWidth: 1))
+        }
+        .help("\(label) — × or ⌫ removes it")
+        .transition(.surface(reduce: reduce))
     }
 
     @ViewBuilder private var trailing: some View {
@@ -995,7 +1016,6 @@ struct CommandBar: View {
         case .delete where press.modifiers.contains(.command) && model.selected?.kind == .session:
             model.closeSelected()
             return .handled
-        case .delete where model.text.isEmpty: return model.dropToken() ? .handled : .ignored
         default: break
         }
         if press.modifiers.contains(.control), press.characters == "n" { model.move(1); return .handled }
@@ -1274,5 +1294,34 @@ private struct CandidateRow: View, Equatable {
         case .resume:
             Image(systemName: candidate.past?.state == .running ? "moon.zzz.fill" : "clock.arrow.circlepath").foregroundStyle(Tone.working)
         }
+    }
+}
+
+/// A token with an × that appears on hover, at its top-right corner.
+private struct Removable<Content: View>: View {
+    var remove: () -> Void
+    @ViewBuilder var content: Content
+    @State private var hover = false
+
+    var body: some View {
+        content
+            .overlay(alignment: .topTrailing) {
+                if hover {
+                    Button(action: remove) {
+                        Image(systemName: "xmark")
+                            .font(.system(size: 7.5, weight: .bold))
+                            .foregroundStyle(.white)
+                            .frame(width: 15, height: 15)
+                            .background(Color.black.opacity(0.75), in: Circle())
+                            .overlay(Circle().strokeBorder(Color.white.opacity(0.35), lineWidth: 0.75))
+                            .contentShape(Circle())
+                    }
+                    .buttonStyle(Pressable())
+                    .offset(x: 5, y: -5)
+                    .transition(.scale(scale: 0.6).combined(with: .opacity))
+                    .help("Remove")
+                }
+            }
+            .onHover { h in withAnimation(Motion.micro) { hover = h } }
     }
 }

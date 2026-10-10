@@ -20,6 +20,16 @@ final class KeyPanel: NSPanel {
            onPaste?() == true { return true }
         return super.performKeyEquivalent(with: e)
     }
+    /// ⌫ before the text field sees it: true when the panel took it (the bar
+    /// removing a token from an empty field). Only a fresh press, never a held
+    /// key's repeats: deleting text stops at the empty field.
+    var onBackspace: (() -> Bool)?
+    override func sendEvent(_ e: NSEvent) {
+        if e.type == .keyDown, e.keyCode == 51, !e.isARepeat,
+           e.modifierFlags.intersection([.command, .option, .control, .shift]).isEmpty,
+           onBackspace?() == true { return }
+        super.sendEvent(e)
+    }
     override func resignKey() {
         super.resignKey()
         onResign?()
