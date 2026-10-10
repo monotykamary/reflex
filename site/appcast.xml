@@ -1,0 +1,16 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Reflex</title>
+        <item>
+            <title>0.1.0</title>
+            <pubDate>Sun, 11 Oct 2026 00:16:08 +0700</pubDate>
+            <link>https://reflex.farm/</link>
+            <sparkle:version>60</sparkle:version>
+            <sparkle:shortVersionString>0.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.0/Reflex-0.1.0.dmg" length="5387658" type="application/octet-stream" sparkle:edSignature="MEaDW5FlsJbCuBMxrNu4cvmPKytUBxIYTp96G3s/2ds+0gsOFRBGzPGyeQKlBsL1X1y2Y03w+Ff3p4G+w6BTBw=="/>
+        </item>
+    </channel>
+</rss>
