@@ -39,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusItem()
         setupRail()
         command.close = { [weak self] in self?.hideBar() }
+        command.openPane = { [weak self] pane in self?.showPane(pane) }
         command.openSetup = { [weak self] step in self?.showSettings(pane: step == .jev ? .routing : .setup) }
         SetupState.shared.start()
         hotkey = DoubleOption { [weak self] in

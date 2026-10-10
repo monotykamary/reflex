@@ -2,8 +2,12 @@ import AppKit
 import SwiftUI
 
 // ⌥⌥ opens the Ask bar — instantly: it is used all day, so it does not
-// animate in. It is a search list, Raycast-style: type, and the rows below
-// are where your words could go — live sessions, folders to start one in, a
+// animate in. Like Dia's bar it has two modes, told apart as you type:
+//
+//   search  a few words ("reflex", "jev fab") find a session; ⏎ opens its
+//           terminal. No Jev call: instant.
+//   ask     prose ("fix the flaky test in jev fabric") is a request: the
+//           list below is where it could go — live sessions, folders to start one in, a
 // new folder, any folder you choose. A local match fills the list at once;
 // Jev's ranking replaces it a moment after you stop typing, with its pick on
 // top. ⏎ sends to the selected row.
@@ -14,7 +18,7 @@ import SwiftUI
 
 /// A row in the Ask bar's list.
 struct Candidate: Identifiable, Equatable {
-    enum Kind: Equatable { case session, folder, newFolder, chooseFolder, command }
+    enum Kind: Equatable { case session, folder, newFolder, chooseFolder, command, ask }
     var id: String
     var kind: Kind
     var title: String
@@ -98,7 +102,12 @@ final class CommandModel: ObservableObject {
     /// When the rows last changed order (a click right after is ignored).
     private(set) var reorderedAt = Date.distantPast
 
+    /// Treat the text as a request even if it reads like a search.
+    @Published var forcedAsk = false
+
     var close: () -> Void = {}
+    /// Open an agent's terminal.
+    var openPane: (String) -> Void = { _ in }
     var openSetup: (Onboarding.Step) -> Void = { _ in }
     private var debounce: Task<Void, Never>?
     private var generation = 0
@@ -121,6 +130,7 @@ final class CommandModel: ObservableObject {
         harness = nil
         sideForced = false
         newForced = false
+        forcedAsk = false
         jev = nil
         jevText = ""
         thinking = false
@@ -143,6 +153,31 @@ final class CommandModel: ObservableObject {
     var commandQuery: String? {
         guard text.hasPrefix("/"), !text.contains(" ") else { return nil }
         return String(text.dropFirst()).lowercased()
+    }
+
+    enum Mode: Equatable { case search, ask }
+
+    /// Search unless the words read like a request (or a command says ask).
+    var mode: Mode {
+        if forcedAsk || sideForced || newForced || harness != nil { return .ask }
+        return CommandModel.looksLikeProse(request) ? .ask : .search
+    }
+
+    /// A request, not a lookup: four or more words; a phrase with sentence
+    /// punctuation; or a phrase that starts like an instruction or question.
+    nonisolated static func looksLikeProse(_ t: String) -> Bool {
+        let words = t.split(whereSeparator: \.isWhitespace)
+        guard let first = words.first?.lowercased() else { return false }
+        if words.count >= 4 { return true }
+        if words.count >= 2, t.contains(where: { "?!.,:;".contains($0) }) { return true }
+        let starts: Set<String> = [
+            "fix", "add", "make", "why", "what", "how", "when", "where", "who", "which", "can", "could", "should", "would",
+            "please", "run", "update", "write", "explain", "refactor", "remove", "delete", "create", "build", "test", "deploy",
+            "check", "review", "implement", "rename", "move", "help", "show", "tell", "find", "investigate", "debug", "btw",
+            "change", "set", "install", "upgrade", "bump", "release", "publish", "merge", "rebase", "commit", "push", "revert",
+            "is", "are", "does", "do", "did", "summarize", "summarise", "document", "clean", "optimize", "port", "migrate", "try",
+        ]
+        return words.count >= 2 && starts.contains(first)
     }
 
     var isSide: Bool {
@@ -170,6 +205,15 @@ final class CommandModel: ObservableObject {
         }
         if naming { naming = false }
         if case .failed = phase { phase = .typing }
+        if request.isEmpty { forcedAsk = false }
+        schedule()
+    }
+
+    /// From search: treat these words as a request after all.
+    func askInstead() {
+        guard !request.isEmpty else { return }
+        forcedAsk = true
+        userPicked = false
         schedule()
     }
 
@@ -214,7 +258,7 @@ final class CommandModel: ObservableObject {
             self.local = fs
             self.settle()
         }
-        guard commandQuery == nil, words.count >= 3 else {
+        guard commandQuery == nil, mode == .ask, words.count >= 3 else {
             thinking = false
             settle()
             return
@@ -280,6 +324,7 @@ final class CommandModel: ObservableObject {
 
     /// Jev's pick: what ⏎ sends to unless you choose otherwise.
     var pick: String? {
+        guard mode == .ask else { return nil }
         if newForced || (keywordHit && !request.isEmpty) { return "new" }
         guard !request.isEmpty, jevText == request, let r = jev, r.ok else { return nil }
         if let a = r.decision?.action, r.decision?.decision == "go" {
@@ -306,6 +351,7 @@ final class CommandModel: ObservableObject {
                 Candidate(id: "c:" + $0.token, kind: .command, title: $0.token, detail: $0.help, command: $0)
             }
         }
+        if mode == .search { return searchRows }
         let kind = harness ?? Settings.shared.harness
         let side = isSide
         var out: [Candidate] = []
@@ -349,6 +395,29 @@ final class CommandModel: ObservableObject {
         return out
     }
 
+    /// Search: sessions matching every word, waiting ones first; then "Ask".
+    private var searchRows: [Candidate] {
+        let q = request.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        let order = ["blocked": 0, "working": 1, "done": 2]
+        let hits = agents.filter { a in
+            let hay = "\(a.title) \(a.kind) \(a.folder) \(a.place) \(a.name)".lowercased()
+            return q.allSatisfy { hay.contains($0) }
+        }
+        .sorted { (order[$0.status] ?? 3) < (order[$1.status] ?? 3) }
+        var out = hits.map { a in
+            Candidate(id: "s:" + a.pane, kind: .session,
+                      title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
+                      detail: "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status), agent: a, path: a.cwd)
+        }
+        if !request.isEmpty {
+            let ask = Candidate(id: "ask", kind: .ask, title: "Ask “\(request)”",
+                                detail: "send it to a session, or start one — Jev routes it")
+            // Nothing matched: asking is the likely intent, so it leads.
+            if out.isEmpty { out.insert(ask, at: 0) } else { out.append(ask) }
+        }
+        return out
+    }
+
     var selected: Candidate? { rows.first { $0.id == selection } ?? rows.first }
 
     // MARK: Moving
@@ -378,6 +447,12 @@ final class CommandModel: ObservableObject {
         guard phase == .typing || isFailed else { return }
         if selected?.kind == .command, let c = selected?.command { apply(c); return }
         if selected?.kind == .chooseFolder { chooseFolder(); return }
+        if mode == .search {
+            guard let c = selected else { return }
+            if c.kind == .ask { askInstead(); return }
+            if let a = c.agent { openPane(a.pane); close() }
+            return
+        }
         guard !request.isEmpty else { return }
         if !userPicked && (thinking || debounce.map { !$0.isCancelled } == true && jevText != request && request.count >= 3) {
             sendWhenReady = true
@@ -393,7 +468,13 @@ final class CommandModel: ObservableObject {
         withAnimation(.linear(duration: 0.36)) { shake += 1 }
     }
 
-    func send(to c: Candidate) {
+    /// ⌘⏎ in ask mode: send, then open that agent's terminal to watch.
+    func sendAndOpen() {
+        guard mode == .ask, let c = selected else { return }
+        send(to: c, open: true)
+    }
+
+    func send(to c: Candidate, open: Bool = false) {
         let words = request
         let kind = harness ?? Settings.shared.harness
         switch c.kind {
@@ -415,11 +496,12 @@ final class CommandModel: ObservableObject {
                         let p = try await Client.local.send(pane: a.pane, text: words, label: label)
                         await watch(p.id, label: label)
                     }
+                    if open { openPane(a.pane) }
                 } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
             }
         case .folder:
             guard let path = c.path else { return }
-            spawn(in: path, kind: kind, text: words)
+            spawn(in: path, kind: kind, text: words, open: open)
         case .newFolder:
             // Rare by design: name it first, then ⏎ again to create.
             if !naming {
@@ -431,20 +513,23 @@ final class CommandModel: ObservableObject {
             guard !name.isEmpty else { return }
             let path = (Settings.shared.newFolderParent as NSString).appendingPathComponent(name)
             naming = false
-            spawn(in: path, kind: kind, text: words, isNew: true)
+            spawn(in: path, kind: kind, text: words, isNew: true, open: open)
         case .chooseFolder:
             chooseFolder()
         case .command:
             if let cmd = c.command { apply(cmd) }
+        case .ask:
+            askInstead()
         }
     }
 
-    private func spawn(in path: String, kind: String, text: String, isNew: Bool = false) {
+    private func spawn(in path: String, kind: String, text: String, isNew: Bool = false, open: Bool = false) {
         let label = "\(kind) in \((path as NSString).lastPathComponent)"
         phase = .sending((isNew ? "new folder · " : "") + label)
         Task {
             do {
-                _ = try await Client.local.spawn(cwd: path, kind: kind, text: text)
+                let p = try await Client.local.spawn(cwd: path, kind: kind, text: text)
+                if open { openWhenStarted(p.id) }
                 if isNew {
                     // The new folder is inside a root: the next index finds it.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { Task { await Client.local.reindex() } }
@@ -452,6 +537,23 @@ final class CommandModel: ObservableObject {
                 // Starting an agent takes a few seconds; a failure lands in the inbox.
                 done("Starting " + label)
             } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
+        }
+    }
+
+    /// A new session's pane is known once it has started ("started rx1-42 in
+    /// w7:p1"): open its terminal then. Gives up quietly after half a minute.
+    private func openWhenStarted(_ id: Int) {
+        let open = openPane
+        Task {
+            for _ in 0..<60 {
+                try? await Task.sleep(for: .milliseconds(500))
+                await Store.shared.refresh()
+                guard let r = Store.shared.state.receipts.first(where: { $0.id == id }) else { continue }
+                if r.ok, let range = r.detail.range(of: " in ", options: .backwards) {
+                    open(String(r.detail[range.upperBound...]).trimmingCharacters(in: .whitespaces))
+                }
+                return
+            }
         }
     }
 
@@ -562,10 +664,13 @@ struct CommandBar: View {
     private var field: some View {
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Image(systemName: "sparkle")
+                Image(systemName: model.mode == .search && model.commandQuery == nil ? "magnifyingglass" : "sparkle")
                     .font(.system(size: 16, weight: .medium))
                     .foregroundStyle(.secondary)
+                    .contentTransition(.symbolEffect(.replace))
                     .symbolEffect(.pulse, isActive: model.thinking && !reduce)
+                    .frame(width: 20)
+                    .help(model.mode == .search ? "Searching sessions — type a request to ask" : "Asking — Jev routes it")
                 tokens
                 TextField("", text: $model.text, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -606,7 +711,7 @@ struct CommandBar: View {
         if model.sideForced { return "Ask on the side…" }
         if model.newForced { return "What's the new project for?" }
         if let h = model.harness { return "Ask a new \(h) session, or your agents…" }
-        return "Ask your agents…"
+        return "Search sessions, or ask your agents…"
     }
 
     private var tokens: some View {
@@ -646,6 +751,10 @@ struct CommandBar: View {
         case .downArrow: model.move(1); return .handled
         case .upArrow: model.move(-1); return .handled
         case .tab: model.move(press.modifiers.contains(.shift) ? -1 : 1); return .handled
+        case .return where press.modifiers.contains(.command):
+            // Search: ask instead. Ask: send, then open the terminal.
+            if model.mode == .search { model.askInstead() } else { model.sendAndOpen() }
+            return .handled
         case .delete where model.text.isEmpty: return model.dropToken() ? .handled : .ignored
         default: break
         }
@@ -730,7 +839,8 @@ struct CommandBar: View {
         if i == 0 && c.id == model.pick { return model.unsure ? "Jev's best guess" : "Jev's pick" }
         func group(_ k: Candidate.Kind) -> String {
             switch k {
-            case .session: return model.isSide ? "Ask on the side" : "Sessions"
+            case .session: return model.mode == .search ? "Open a session" : (model.isSide ? "Ask on the side" : "Sessions")
+            case .ask: return "Ask"
             case .folder: return "Start in a folder"
             case .newFolder, .chooseFolder: return "Other"
             case .command: return "Commands"
@@ -777,12 +887,17 @@ struct CommandBar: View {
                     if j.ok {
                         Text(model.unsure ? "Jev isn't sure — ↑↓ to choose" : "Jev").foregroundStyle(.secondary)
                         if let ms = j.ms { Text(verbatim: "\(ms) ms").foregroundStyle(.tertiary).monospacedDigit() }
+                        hint("⌘⏎", "send & open")
                     } else {
                         Text(j.error ?? "Jev did not answer").foregroundStyle(Tone.blocked).lineLimit(1)
                     }
+                } else if model.mode == .search {
+                    hint("⏎", "open")
+                    if !model.request.isEmpty { hint("⌘⏎", "ask instead") }
+                    hint("/", "commands")
                 } else {
                     hint("↑↓", "choose")
-                    hint("⌘1–9", "send a row")
+                    hint("⌘⏎", "send & open")
                     hint("/", "commands")
                 }
             }
@@ -800,11 +915,14 @@ struct CommandBar: View {
     private func actionLabel(_ c: Candidate) -> String {
         let kind = model.harness ?? Settings.shared.harness
         switch c.kind {
-        case .session: return model.isSide ? "Ask on the side" : "Send to \(c.agent?.kind ?? "agent")"
+        case .session:
+            if model.mode == .search { return "Open terminal" }
+            return model.isSide ? "Ask on the side" : "Send to \(c.agent?.kind ?? "agent")"
         case .folder: return "Start \(kind) in \(c.title)"
         case .newFolder: return model.naming ? "Create folder and start" : "Name the new folder"
         case .chooseFolder: return "Choose…"
         case .command: return "Use \(c.title)"
+        case .ask: return "Ask Jev"
         }
     }
 }
@@ -886,6 +1004,8 @@ private struct CandidateRow: View {
             Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
         case .command:
             Image(systemName: "slash.circle").foregroundStyle(Tone.route)
+        case .ask:
+            Image(systemName: "sparkle").foregroundStyle(Tone.route)
         }
     }
 }
