@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
         if !hasVisibleWindows {
             if let w = popouts.values.first {
-                w.makeKeyAndOrderFront(nil)
+                bringForward(w)
             } else {
                 showInbox()
             }
@@ -146,7 +146,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                         Onboarding.shared.tryRoute()
                     }
                 }
-            default: if let a = Store.shared.state.agents.first { self.showPane(a.pane) }
+            default:
+                if let a = Store.shared.state.agents.first {
+                    self.showPane(a.pane)
+                    // Dev: minimize it, then switch to it again as the bar would.
+                    if ProcessInfo.processInfo.environment["REFLEX_DEMO_REOPEN"] != nil {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { self.popouts[a.pane]?.miniaturize(nil) }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { self.showPane(a.pane) }
+                    }
+                }
             }
         }
     }
@@ -566,11 +574,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: Agent terminals
 
+    /// An agent's terminal that is already open, brought to you wherever it
+    /// is: on another Space or behind a full-screen app (it moves here),
+    /// minimized, a background tab, or with Reflex not yet active.
+    private func bringForward(_ w: NSWindow) {
+        w.collectionBehavior.insert(.moveToActiveSpace)
+        if w.isMiniaturized { w.deminiaturize(nil) }
+        if let group = w.tabGroup, group.selectedWindow !== w { group.selectedWindow = w }
+        NSApp.unhide(nil)
+        NSApp.activate()
+        w.makeKeyAndOrderFront(nil)
+        // Activation is cooperative and may land a moment later — or not at
+        // all while another app holds it: show the window regardless, then
+        // make it key once Reflex is active.
+        w.orderFrontRegardless()
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
+            guard !w.isKeyWindow else { return }
+            NSRunningApplication.current.activate(options: [.activateAllWindows])
+            w.makeKeyAndOrderFront(nil)
+        }
+    }
+
     func showPane(_ pane: String) {
         edge.hide(returnFocus: false)
         if let w = popouts[pane] {
-            NSApp.activate()
-            w.makeKeyAndOrderFront(nil)
+            bringForward(w)
             return
         }
         let session = TerminalSession(pane: pane)
