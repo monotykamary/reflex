@@ -29,6 +29,8 @@ final class EdgeReveal {
     /// Anchor the rail at a height on a screen.
     var place: (_ screen: NSScreen, _ y: CGFloat) -> Void = { _, _ in }
     var panel: () -> NSWindow? = { nil }
+    /// The edge tab's own window.
+    var tab: () -> NSWindow? = { nil }
     /// The window beside the column (question card, agent list), when it takes clicks.
     var side: () -> NSWindow? = { nil }
     /// The invisible window that takes the keys while the pointer is on the rail.
@@ -91,9 +93,9 @@ final class EdgeReveal {
             return
         }
         // Hovering the tab opens the rail where the tab is.
-        if tabShown(), let f = panel()?.frame, f.insetBy(dx: -2, dy: -4).contains(p) {
+        if tabShown(), let f = tab()?.frame, f.insetBy(dx: -2, dy: -4).contains(p) {
             if let t = tabHoverAt {
-                if now - t >= tabIntent, let (s, y) = fallbackAnchor() { show(on: s, y: y) }
+                if now - t >= tabIntent, let s = screen(at: p) ?? NSScreen.main { show(on: s, y: f.midY) }
             } else {
                 tabHoverAt = now
             }
@@ -172,7 +174,7 @@ final class EdgeReveal {
         if returnFocus { returnKeys() } else { lent = nil }
         rail.hovering = false
         rail.visible = false
-        panel()?.ignoresMouseEvents = !tabShown()
+        panel()?.ignoresMouseEvents = true
     }
 
     /// A new question: open the rail where it is anchored, like a notification.

@@ -314,8 +314,6 @@ struct Rail: View {
                             insertion: .modifier(active: SurfaceFX(opacity: 0, scale: 0.97, y: 0, blur: 4), identity: SurfaceFX(opacity: 1, scale: 1, y: 0, blur: 0))
                                 .combined(with: .offset(x: reduce ? 0 : 18)),
                             removal: .opacity.combined(with: .offset(x: reduce ? 0 : 12))))
-                } else if !Rail.active(store.state.agents).isEmpty && settings.showStrip {
-                    tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
                 }
             }
         }
@@ -330,33 +328,6 @@ struct Rail: View {
         .onChange(of: rail.visible) { _, open in
             if !open { rail.panel = .auto; rail.hoverDot = nil; rail.filter = ""; rail.stateFilter = nil }
         }
-    }
-
-    // MARK: Tab
-
-    private var tab: some View {
-        VStack(spacing: 11) {
-            ForEach(Rail.dots(Rail.active(store.state.agents), limit: Rail.tabLimit)) { row in
-                switch row {
-                case .agent(let a):
-                    AgentGlyph(status: a.status, size: 11, pulse: store.pulses[a.pane] ?? 0)
-                        .transition(.scale(scale: 0.6).combined(with: .opacity))
-                case .state(let s, let n):
-                    // Many agents: the state, and how many are in it.
-                    VStack(spacing: 1) {
-                        AgentGlyph(status: s, size: 11)
-                        Text(verbatim: "\(n)").font(.system(size: 9, weight: .semibold, design: .rounded))
-                            .foregroundStyle(Ink.dim).contentTransition(.numericText(value: Double(n)))
-                    }
-                    .frame(height: 23)
-                    .transition(.opacity)
-                }
-            }
-        }
-        .padding(.vertical, 9 + 12)
-        .padding(.leading, 8)
-        .padding(.trailing, 7)
-        .raySurface(EdgeTabShape())
     }
 
     // MARK: Column
@@ -475,6 +446,54 @@ struct Rail: View {
             .help("More")
         }
     }
+}
+
+
+/// The edge tab, in its own window that stays where it is: opening the rail
+/// at another height fades the tab out here and the rail in there — nothing
+/// slides or jumps across the screen.
+struct RailTab: View {
+    @ObservedObject var store = Store.shared
+    @ObservedObject var rail = RailModel.shared
+    @ObservedObject var settings = Settings.shared
+    @Environment(\.accessibilityReduceMotion) private var reduce
+
+    var body: some View {
+        ZStack(alignment: .trailing) {
+            if !rail.visible && !Rail.active(store.state.agents).isEmpty && settings.showStrip {
+                tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
+        .animation(rail.visible ? Motion.exit : Motion.enter, value: rail.visible)
+        .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
+    }
+
+    private var tab: some View {
+        VStack(spacing: 11) {
+            ForEach(Rail.dots(Rail.active(store.state.agents), limit: Rail.tabLimit)) { row in
+                switch row {
+                case .agent(let a):
+                    AgentGlyph(status: a.status, size: 11, pulse: store.pulses[a.pane] ?? 0)
+                        .transition(.scale(scale: 0.6).combined(with: .opacity))
+                case .state(let s, let n):
+                    // Many agents: the state, and how many are in it.
+                    VStack(spacing: 1) {
+                        AgentGlyph(status: s, size: 11)
+                        Text(verbatim: "\(n)").font(.system(size: 9, weight: .semibold, design: .rounded))
+                            .foregroundStyle(Ink.dim).contentTransition(.numericText(value: Double(n)))
+                    }
+                    .frame(height: 23)
+                    .transition(.opacity)
+                }
+            }
+        }
+        .padding(.vertical, 9 + 12)
+        .padding(.leading, 8)
+        .padding(.trailing, 7)
+        .raySurface(EdgeTabShape())
+    }
+
 }
 
 /// Beside the column, in its own window: the question card, the agent list,

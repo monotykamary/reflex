@@ -138,7 +138,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
                 RailModel.shared.panel = .agents
             case "rail":
-                if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
+                // Dev: REFLEX_DEMO_TOP opens it near the top, away from the tab.
+                let top = ProcessInfo.processInfo.environment["REFLEX_DEMO_TOP"] != nil
+                if let s = NSScreen.main { self.edge.show(on: s, y: top ? s.visibleFrame.maxY - 140 : s.visibleFrame.midY, hold: 3600) }
                 // Dev: close it again, to watch the exit.
                 if ProcessInfo.processInfo.environment["REFLEX_DEMO_HIDE"] != nil {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { self.edge.hide() }
@@ -286,6 +288,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sp.ignoresMouseEvents = true
         side = sp
 
+        let tw = Panels.floating(RailTab(), size: NSSize(width: 30, height: 100), key: false)
+        tw.level = .statusBar
+        tw.ignoresMouseEvents = true
+        tabWindow = tw
+
         let sl = Panels.floating(Sliver(), size: NSSize(width: 14, height: 120), key: false)
         sl.level = .statusBar
         sl.ignoresMouseEvents = true
@@ -296,8 +303,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         sp.orderFrontRegardless()
         sl.orderFrontRegardless()
         kc.orderFrontRegardless()
+        tw.orderFrontRegardless()
 
         edge.panel = { [weak self] in self?.strip }
+        edge.tab = { [weak self] in self?.tabWindow }
         edge.keys = { [weak self] in self?.railKeys }
         edge.side = { [weak self] in
             guard let w = self?.side, !w.ignoresMouseEvents else { return nil }
@@ -323,7 +332,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Open: size up now. Closed: wait for the exit animation, then size down.
         RailModel.shared.$visible.removeDuplicates().sink { [weak self] open in
-            if !open { self?.railClosingUntil = Date().addingTimeInterval(0.24) }
+            if !open {
+                self?.railClosingUntil = Date().addingTimeInterval(0.24)
+                // The tab comes back where the rail was.
+                self?.tabY = self?.railY
+            }
             DispatchQueue.main.asyncAfter(deadline: .now() + (open ? 0 : 0.24)) {
                 guard RailModel.shared.visible == open else { return }
                 self?.placeStrip()
@@ -333,7 +346,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .removeDuplicates().sink { [weak self] _ in
                 DispatchQueue.main.async {
                     guard let self else { return }
-                    if !RailModel.shared.visible { self.strip?.ignoresMouseEvents = !self.tabShown }
                     self.placeStrip()
                 }
             }.store(in: &bag)
@@ -403,6 +415,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var side: KeyPanel?
+    /// The edge tab's own window, and where it sits (it stays put while the
+    /// rail opens elsewhere; it settles where the rail last was once closed).
+    private var tabWindow: KeyPanel?
+    private var tabY: CGFloat?
     /// Until when the rail's exit animation is still playing.
     private var railClosingUntil = Date.distantPast
     private var railKeys: KeyPanel?
@@ -432,13 +448,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let rail = RailModel.shared
+        // The tab: its own window, where it was — never moved while it shows.
+        if let tw = tabWindow {
+            if tabY == nil { tabY = y0 }
+            let ty = tabY ?? y0
+            let h = Rail.tabHeight(Store.shared.state.agents)
+            let y = min(max(ty - h / 2, s.minY), s.maxY - h)
+            let f = NSRect(x: s.maxX - 30, y: y, width: 30, height: h)
+            if tw.frame != f { tw.setFrame(f, display: true) }
+        }
         let column: NSRect
         if rail.visible {
             let c = rail.columnSize
             let size = c == .zero ? NSSize(width: Rail.columnWidth, height: 300) : NSSize(width: ceil(c.width), height: min(s.height, ceil(c.height)))
             column = centred(size, right: s.maxX)
         } else {
-            column = centred(NSSize(width: 30, height: Rail.tabHeight(Store.shared.state.agents)), right: s.maxX)
+            // Closed: the column's window is out of the way (the tab has its own).
+            column = centred(NSSize(width: 1, height: 1), right: s.maxX)
         }
         // Closing: the column fades out in its own window, so that window
         // keeps its size until the fade is done (the visible sink places it
