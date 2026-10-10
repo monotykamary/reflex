@@ -475,19 +475,24 @@ private struct AgentList: View {
 
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 0) {
+                    // Project headers only when there is more than one project;
+                    // with one, each row names its folder instead.
+                    let grouped = groups.count > 1
                     ForEach(groups, id: \.0) { folder, list in
-                        Text(folder.uppercased())
-                            .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
-                            .foregroundStyle(Ink.dim.opacity(0.75))
-                            .lineLimit(1)
-                            .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
+                        if grouped {
+                            Text(folder.uppercased())
+                                .font(.system(size: 9.5, weight: .semibold)).tracking(0.8)
+                                .foregroundStyle(Ink.dim.opacity(0.75))
+                                .lineLimit(1)
+                                .padding(.horizontal, 12).padding(.top, 6).padding(.bottom, 1)
+                        }
                         ForEach(list) { a in
-                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0,
+                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, showFolder: !grouped,
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                     }
                 }
-                .padding(.horizontal, 4).padding(.bottom, 6)
+                .padding(.horizontal, 4).padding(.top, groups.count > 1 ? 0 : 3).padding(.bottom, 6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
             }
             .scrollIndicators(.never)
@@ -504,6 +509,7 @@ private struct AgentList: View {
 private struct AgentRow: View {
     var agent: AgentInfo
     var pulse: Int
+    var showFolder = false
     var open: () -> Void
     var ask: () -> Void
     var reveal: () -> Void
@@ -512,12 +518,14 @@ private struct AgentRow: View {
     private var title: String { agent.title.isEmpty ? "\(agent.kind) · \(agent.folder)" : agent.title }
 
     private var subtitle: String {
+        let state: String
         switch agent.status {
-        case "working": return "\(agent.kind) · working"
-        case "blocked": return "\(agent.kind) · needs you"
-        case "done": return "\(agent.kind) · done, unread"
-        default: return "\(agent.kind) · idle"
+        case "working": state = "working"
+        case "blocked": state = "needs you"
+        case "done": state = "done, unread"
+        default: state = "idle"
         }
+        return ([agent.kind] + (showFolder ? [agent.folder] : []) + [state]).joined(separator: " · ")
     }
 
     var body: some View {
