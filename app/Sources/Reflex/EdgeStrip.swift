@@ -95,9 +95,9 @@ struct EdgeTabShape: Shape {
     }
 }
 
-/// Liquid Glass, darkened enough that white text reads over any wallpaper.
+/// Plain Liquid Glass: grey and frosted, the desktop showing through.
 extension Glass {
-    static var rail: Glass { .regular.tint(Color.black.opacity(0.68)) }
+    static var rail: Glass { .regular }
 }
 
 private struct RoundButton<Label: View>: View {
@@ -197,6 +197,9 @@ struct Rail: View {
         .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
         .animation(Motion.enter, value: showing)
         .environment(\.colorScheme, .dark)
+        // One look whether or not the rail has the keys: it takes them while the
+        // pointer is over it, and glass would otherwise change as they come and go.
+        .environment(\.controlActiveState, .inactive)
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { press in key(press) }
@@ -234,7 +237,7 @@ struct Rail: View {
         .padding(.vertical, 9 + 12)
         .padding(.leading, 8)
         .padding(.trailing, 7)
-        .glassEffect(.regular.tint(Color.black.opacity(0.72)), in: EdgeTabShape())
+        .glassEffect(.rail, in: EdgeTabShape())
         .glassEffectID("agents", in: glass)
     }
 

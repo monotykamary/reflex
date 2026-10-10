@@ -780,7 +780,7 @@ private struct EdgeStory: View {
                         }
                     }
                     .padding(.vertical, 9 + 12).padding(.leading, 8).padding(.trailing, 7)
-                    .glassEffect(.regular.tint(Color.black.opacity(0.72)), in: EdgeTabShape())
+                    .glassEffect(.rail, in: EdgeTabShape())
                     .transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
                 }
             }
