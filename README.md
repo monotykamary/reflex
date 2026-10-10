@@ -186,8 +186,12 @@ runtime are assumptions. `--verdict` re-checks with Bend's Lean-proven kernel.
   when you allow it, with a warning: that traffic is unencrypted.
 - Everything stays on your Mac: routing memory (`memory.json`), the index of
   earlier sessions (`sessions.tsv`), pasted images (a temporary folder). No
-  telemetry. Requests go to Jev's provider for routing only — your words, never
-  your files.
+  telemetry.
+- Routing sends Jev's provider your request with the short context Jev chooses
+  from: your live sessions' titles and last few screen lines, candidate
+  folders' names, descriptions and recent commit subjects, earlier
+  conversations' titles and last prompts, and where your recent requests went.
+  `POST /api/explain` shows exactly what would be sent. Images never are.
 - Side-question forks for Claude run read-only and are never saved.
 
 ## Development notes
