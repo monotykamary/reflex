@@ -513,9 +513,16 @@
   }
   const [a, b] = q.has("loop") ? q.get("loop").split(",").map(Number) : [0, G.length];
   const audio = q.has("play") ? new Audio("audio/score.wav") : null;
-  let start = performance.now();
   if (audio) addEventListener("click", () => { audio.currentTime = 0; audio.play(); }, { once: true });
-  (function loop(now) { render(audio && !audio.paused ? audio.currentTime : a + ((now - start) / 1000) % (b - a)); requestAnimationFrame(loop); })(start);
+  // The page embedding it can pause it while it's out of sight.
+  let clock = 0, last = performance.now(), paused = false;
+  addEventListener("message", (e) => { if (e.origin === location.origin && typeof e.data?.paused === "boolean") paused = e.data.paused; });
+  (function loop(now) {
+    if (!paused) clock += (now - last) / 1000;
+    last = now;
+    if (!paused) render(audio && !audio.paused ? audio.currentTime : a + clock % (b - a));
+    requestAnimationFrame(loop);
+  })(last);
 })();
 </script>
 </body>

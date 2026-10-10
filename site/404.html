@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not here — Reflex</title>
+<meta name="robots" content="noindex">
+<link rel="icon" href="/assets/favicon.png">
+<style>
+  :root { --bg: #08090c; --ink: #ededef; --ink2: rgba(237,237,239,.62); --line: rgba(255,255,255,.08);
+    --sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Inter", system-ui, sans-serif; --mono: ui-monospace, "SF Mono", Menlo, monospace; }
+  html { background: var(--bg); color-scheme: dark; }
+  body { margin: 0; min-height: 100vh; display: grid; place-items: center; color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; text-align: center; padding: 24px; box-sizing: border-box; }
+  img { width: 88px; height: 88px; }
+  h1 { font-size: clamp(40px, 7vw, 72px); letter-spacing: -.05em; line-height: 1.04; margin: 26px 0 0; }
+  p { color: var(--ink2); margin: 16px auto 0; max-width: 440px; }
+  code { font: 14px var(--mono); }
+  a { display: inline-flex; align-items: center; height: 46px; padding: 0 22px; margin-top: 30px; border-radius: 14px; background: var(--ink); color: var(--bg); font-weight: 600; text-decoration: none; }
+  a:focus-visible { outline: 2px solid #6e94ff; outline-offset: 3px; }
+</style>
+</head>
+<body><main>
+  <img src="/assets/icon-512.png" alt="">
+  <h1>Not in this folder.</h1>
+  <p>Reflex looked, but <code id="p"></code> isn’t here.</p>
+  <a href="/">Back to reflex.farm</a>
+</main>
+<script>document.getElementById("p").textContent = location.pathname;</script>
+</body>
+</html>

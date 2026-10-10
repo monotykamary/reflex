@@ -8,7 +8,14 @@
 <meta name="theme-color" content="#08090c">
 <meta property="og:title" content="Reflex — Say what. Reflex finds where.">
 <meta property="og:description" content="Say what you want. Reflex finds the folder for your coding agent — the nested repo, the parent, the conversation you already had. Free and open source, for the Mac.">
-<meta property="og:image" content="https://reflex.farm/assets/icon-512.png">
+<link rel="canonical" href="https://reflex.farm/">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://reflex.farm/">
+<meta property="og:image" content="https://reflex.farm/assets/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="The Reflex bot over the words: Say what. Reflex finds where.">
+<meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="assets/favicon.png">
 <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 <link rel="alternate" type="application/rss+xml" title="Reflex updates" href="appcast.xml">
@@ -43,7 +50,10 @@
   nav b { font-size: 16px; letter-spacing: -.01em; }
   nav .links { margin-left: auto; display: flex; gap: 22px; font-size: 14px; color: var(--ink2); }
   nav .links a:hover { color: var(--ink); }
-  @media (max-width: 560px) { nav .links a:not(:last-child) { display: none; } }
+  nav .get { height: 32px; padding: 0 14px; border-radius: 10px; background: var(--ink); color: var(--bg); font-weight: 600; font-size: 13px; display: inline-flex; align-items: center; }
+  nav .links .get:hover { color: var(--bg); background: #fff; }
+  @media (max-width: 640px) { nav .links a:not(.get) { display: none; } }
+  a:focus-visible, button:focus-visible, summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; border-radius: 10px; }
 
   .hero { padding: 84px 0 0; text-align: center; }
   .hero .icon { width: 92px; height: 92px; display: block; margin: 0 auto 30px; }
@@ -74,8 +84,8 @@
   code { font: 13px var(--mono); }
 
   /* The two extremes, and the middle. */
-  .three { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 48px; }
-  @media (max-width: 880px) { .three { grid-template-columns: 1fr; } }
+  .three { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 48px; }
+  @media (max-width: 880px) { .three { grid-template-columns: minmax(0, 1fr); } }
   .way { padding: 24px; border-radius: 20px; background: var(--surface); border: 1px solid var(--hair); display: flex; flex-direction: column; gap: 14px; }
   .way h3 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
   .way p { margin: 0; color: var(--ink2); font-size: 15px; }
@@ -125,6 +135,30 @@
   .req div::before { content: "—"; color: var(--ink3); margin-right: 8px; }
   .u { text-decoration: underline; text-decoration-color: var(--ink3); text-underline-offset: 3px; }
 
+  /* Get started. */
+  .start { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin-top: 48px; }
+  @media (max-width: 880px) { .start { grid-template-columns: minmax(0, 1fr); } }
+  .start > div { padding: 24px; border-radius: 20px; background: var(--surface); border: 1px solid var(--hair); display: flex; flex-direction: column; gap: 10px; }
+  .start .n { font: 600 13px var(--mono); color: var(--ink3); }
+  .start h3 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  .start p { margin: 0; color: var(--ink2); font-size: 15px; }
+  .cmd { display: flex; align-items: flex-start; gap: 10px; margin-top: auto; padding: 10px 10px 10px 14px; border-radius: 12px; background: #0b0c0f; border: 1px solid var(--hair);
+    font: 13px var(--mono); color: rgba(192,202,245,.9); }
+  .cmd code { flex: 1; min-width: 0; white-space: pre-wrap; line-height: 1.7; }
+  .cmd button { flex: none; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raise); color: var(--ink2); font: 600 12px var(--sans); cursor: pointer; }
+  .cmd button:hover { color: var(--ink); }
+  .start .soft { margin-top: auto; font-size: 13px; color: var(--ink3); }
+
+  /* Questions. */
+  .faq { margin-top: 40px; border-top: 1px solid var(--hair); max-width: 820px; }
+  .faq details { border-bottom: 1px solid var(--hair); }
+  .faq summary { list-style: none; cursor: pointer; padding: 22px 36px 22px 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; position: relative; }
+  .faq summary::-webkit-details-marker { display: none; }
+  .faq summary::after { content: "+"; position: absolute; right: 4px; top: 18px; font: 400 26px var(--sans); color: var(--ink3); transition: transform .4s var(--expo); }
+  .faq details[open] summary::after { transform: rotate(45deg); }
+  .faq .a { color: var(--ink2); font-size: 16px; padding: 0 0 24px; max-width: 700px; }
+  .faq .a p { margin: 0 0 10px; }
+
   .end { margin: 140px 0 0; padding: 88px 0 64px; text-align: center; border-top: 1px solid var(--hair); }
   .end img { width: 76px; height: 76px; }
   .end h2 { margin: 24px auto 0; max-width: none; font-size: clamp(36px, 6vw, 72px); }
@@ -135,7 +169,7 @@
 <body>
 <nav><div class="wrap">
   <img src="assets/icon-512.png" alt=""><b>Reflex</b>
-  <div class="links"><a href="#where">How it finds where</a><a href="#reach">Features</a><a href="#routing">Routing</a><a href="https://github.com/monotykamary/reflex">GitHub</a></div>
+  <div class="links"><a href="#where">How it finds where</a><a href="#reach">Features</a><a href="#start">Get started</a><a href="#faq">FAQ</a><a href="https://github.com/monotykamary/reflex">GitHub</a><a class="get" data-get href="#start">Download</a></div>
 </div></nav>
 
 <header class="hero"><div class="wrap">
@@ -143,14 +177,14 @@
   <h1 class="rise"><span class="l">Say what.</span><span class="l">Reflex finds where.</span></h1>
   <p class="lede fade" style="--d:350">Every coding agent starts in a folder. Reflex is the bar you say it to — and it finds <b>the repo nested four deep</b>, <b>the parent</b> when the work spans repos, <b>the conversation you already had</b>, or a new folder, only when you ask.</p>
   <div class="ctas fade" style="--d:480">
-    <a class="btn primary" href="https://github.com/monotykamary/reflex/releases/latest">
+    <a class="btn primary" data-get href="https://github.com/monotykamary/reflex/releases/latest">
       <svg width="16" height="18" viewBox="0 0 16 18" fill="currentColor" aria-hidden="true"><path d="M13.3 9.6c0-2.2 1.8-3.3 1.9-3.4-1-1.5-2.6-1.7-3.2-1.7-1.3-.1-2.6.8-3.3.8-.7 0-1.7-.8-2.8-.8C4.4 4.5 3 5.4 2.2 6.8.7 9.5 1.8 13.4 3.3 15.5c.7 1 1.5 2.2 2.6 2.1 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.6 1.1 0 1.8-1 2.5-2.1.8-1.2 1.1-2.3 1.1-2.4 0 0-2.1-.8-2.1-3.4zM11.2 3.2c.6-.7 1-1.7.9-2.7-.9 0-1.9.6-2.5 1.3-.6.6-1 1.6-.9 2.6 1 .1 1.9-.5 2.5-1.2z"/></svg>
-      Download for Mac</a>
+      <span data-get-label>Download for Mac</span></a>
     <a class="btn ghost" href="https://github.com/monotykamary/reflex">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.6 0 0 3.6 0 8c0 3.5 2.3 6.5 5.5 7.6.4.1.5-.2.5-.4v-1.4c-2.2.5-2.7-1-2.7-1-.4-.9-.9-1.2-.9-1.2-.7-.5.1-.5.1-.5.8.1 1.2.8 1.2.8.7 1.2 1.9.9 2.3.7.1-.5.3-.9.5-1.1-1.8-.2-3.6-.9-3.6-4 0-.9.3-1.6.8-2.1-.1-.2-.4-1 .1-2.1 0 0 .7-.2 2.2.8.6-.2 1.3-.3 2-.3s1.4.1 2 .3c1.5-1 2.2-.8 2.2-.8.4 1.1.2 1.9.1 2.1.5.6.8 1.3.8 2.1 0 3.1-1.9 3.7-3.7 3.9.3.3.6.8.6 1.5v2.2c0 .2.1.5.6.4C13.7 14.5 16 11.5 16 8c0-4.4-3.6-8-8-8z"/></svg>
       View on GitHub</a>
   </div>
-  <div class="fine fade" style="--d:560">Free and open source · macOS 26 · Apple Silicon</div>
+  <div class="fine fade" style="--d:560" data-get-fine>Free and open source · macOS 26 · Apple Silicon</div>
   <div class="stage fade" style="--d:650"><iframe id="film" title="Reflex finding where four requests should go" tabindex="-1" aria-hidden="true"></iframe></div>
   <div class="stage-note fade" style="--d:700">Not a video: the launch film’s own page, drawn live in your browser.</div>
 </div></header>
@@ -231,10 +265,41 @@
   </div>
 </div></section>
 
+<section id="start"><div class="wrap">
+  <div class="kicker fade">Get started</div>
+  <h2 class="rise">Three steps, about five minutes.</h2>
+  <p class="sub fade">Reflex sits on top of what you already run. The first launch checks each piece for you, and everything it checks lives in Settings → Setup afterwards.</p>
+  <div class="start">
+    <div class="fade"><span class="n">01</span><h3>Run your agents in herdr</h3><p>Install <a class="u" href="https://herdr.dev">herdr</a> 0.9 or later, then its integrations, so Reflex can see each agent’s state and questions.</p>
+      <div class="cmd"><code>herdr integration install claude
+herdr integration install pi</code><button type="button" data-copy>Copy</button></div></div>
+    <div class="fade" style="--d:60"><span class="n">02</span><h3>Open Reflex</h3><p>It walks you through herdr, connecting Jev (and trying a request without sending anything), the folders to index, <kbd>⌥</kbd><kbd>⌥</kbd> and the edge.</p>
+      <div class="soft" data-get-step>macOS 26 on Apple Silicon. Built from source until the first signed release.</div></div>
+    <div class="fade" style="--d:120"><span class="n">03</span><h3>Say what</h3><p>Double-tap <kbd>⌥</kbd> anywhere and say what you want. Reflex finds where, and you see it before it sends. ⏎ sends; ⌘⏎ sends and opens the terminal.</p>
+      <div class="soft">Routing uses <a class="u" href="https://github.com/fabric-runtime/jev-fabric">jev-fabric</a> and a Jev key; Reflex can reuse the one pi already has.</div></div>
+  </div>
+</div></section>
+
+<section id="faq"><div class="wrap">
+  <div class="kicker fade">Questions</div>
+  <h2 class="rise">Good to know.</h2>
+  <div class="faq fade">
+    <details><summary>What leaves my Mac?</summary><div class="a">
+      <p>Only the routing call. When you ask, Jev gets your request and a short description of the candidates Reflex built: folder names and descriptions, recent commit subjects, each live agent’s last few lines, and the titles of earlier conversations. Never your files or your diffs.</p>
+      <p>Without a Jev key, nothing leaves at all: you pick where each request goes. Your agents talk to their own providers exactly as they do today.</p></div></details>
+    <details><summary>Does it change what I typed?</summary><div class="a"><p>No. Reflex decides where and when; your words are delivered verbatim, images included. No model rewrites them.</p></div></details>
+    <details><summary>What if Jev picks the wrong folder?</summary><div class="a"><p>When Jev isn’t sure, nothing is sent on its own: its guess is highlighted and you confirm or choose another with <kbd>↓</kbd> <kbd>⏎</kbd>. Reflex remembers what you chose, so a similar request goes there next time. Settings → Routing shows that memory and forgets it.</p></div></details>
+    <details><summary>Which agents work with it?</summary><div class="a"><p>Anything herdr runs: Claude Code, Codex and pi are first-class, with their earlier sessions resumable and their questions answerable as cards. Your agents stay in their own terminal UIs, on the plans you already pay for.</p></div></details>
+    <details><summary>How does the phone connect?</summary><div class="a"><p>Over <a class="u" href="https://tailscale.com">Tailscale</a>, so it is private and works from anywhere. ⋯ on the rail shows a QR code that works once and expires in ten minutes; sign phones out from Settings → Phone. No app to install, and no account of ours.</p></div></details>
+    <details><summary>What does it cost?</summary><div class="a"><p>Reflex is free and MIT licensed. Routing calls go to your own Jev provider with your own key; everything else runs on your Mac.</p></div></details>
+    <details><summary>Intel Macs, or older macOS?</summary><div class="a"><p>Not for now: Reflex needs macOS 26 on Apple Silicon.</p></div></details>
+  </div>
+</div></section>
+
 <div class="end"><div class="wrap">
   <img class="fade" src="assets/icon-512.png" alt="">
   <h2 class="rise"><span class="l">Say what.</span><span class="l">Reflex finds where.</span></h2>
-  <div class="ctas fade" style="--d:300"><a class="btn primary" href="https://github.com/monotykamary/reflex/releases/latest">Download for Mac</a><a class="btn ghost" href="https://github.com/monotykamary/reflex">Build from source</a></div>
+  <div class="ctas fade" style="--d:300"><a class="btn primary" data-get href="https://github.com/monotykamary/reflex/releases/latest"><span data-get-label>Download for Mac</span></a><a class="btn ghost" href="https://github.com/monotykamary/reflex#build-and-run">Build from source</a></div>
 </div></div>
 <footer><span>Reflex · MIT</span><a href="https://github.com/monotykamary/reflex">GitHub</a><a href="https://github.com/monotykamary/reflex/releases">Releases</a><a href="appcast.xml">Updates feed</a></footer>
 
@@ -251,9 +316,39 @@
   const io = new IntersectionObserver((es) => es.forEach((e) => { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } }), { rootMargin: "0px 0px -8% 0px" });
   document.querySelectorAll(".rise, .fade").forEach((el) => io.observe(el));
 
-  // The film's search, looping (bars 7–17); one still frame for reduced motion.
+  // The film's search, looping (bars 7–17), paused while it's off screen;
+  // one still frame for reduced motion.
   const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document.getElementById("film").src = reduce ? "film/launch.html?embed&t=19.6" : "film/launch.html?embed&loop=16.8,40.8";
+  const film = document.getElementById("film");
+  film.src = reduce ? "film/launch.html?embed&t=19.6" : "film/launch.html?embed&loop=16.8,40.8";
+  new IntersectionObserver(([e]) => film.contentWindow?.postMessage({ paused: !e.isIntersecting }, location.origin)).observe(film);
+
+  // Download: the newest release, read from the same appcast Sparkle updates
+  // from. Before the first one, the buttons build from source.
+  const dl = (q) => document.querySelectorAll(q);
+  fetch("appcast.xml", { cache: "no-cache" }).then((r) => r.ok ? r.text() : Promise.reject())
+    .then((xml) => {
+      const item = new DOMParser().parseFromString(xml, "application/xml").querySelector("item");
+      const enc = item?.querySelector("enclosure");
+      if (!enc) return Promise.reject();
+      const version = item.getElementsByTagName("sparkle:shortVersionString")[0]?.textContent ?? "";
+      const mb = Math.round(+enc.getAttribute("length") / 1e6);
+      dl("[data-get]").forEach((a) => { a.href = enc.getAttribute("url"); });
+      dl("[data-get-fine]").forEach((d) => { d.textContent = `Version ${version}${mb ? ` · ${mb} MB` : ""} · Free and open source · macOS 26 · Apple Silicon`; });
+      dl("[data-get-step]").forEach((d) => { d.textContent = `Reflex ${version}, signed and notarized. It keeps itself up to date.`; });
+    })
+    .catch(() => {
+      dl("[data-get]").forEach((a) => { a.href = "https://github.com/monotykamary/reflex#build-and-run"; });
+      dl("[data-get-label]").forEach((s) => { s.textContent = "Build for your Mac"; });
+      dl("[data-get-fine]").forEach((d) => { d.textContent = "Free and open source · macOS 26 · Apple Silicon · The first signed build is on its way"; });
+      dl("nav [data-get]").forEach((a) => { a.textContent = "Get it"; });
+    });
+
+  // Copy buttons.
+  dl("[data-copy]").forEach((b) => b.addEventListener("click", async () => {
+    try { await navigator.clipboard.writeText(b.previousElementSibling.textContent); b.textContent = "Copied"; } catch { b.textContent = "Select it"; }
+    setTimeout(() => { b.textContent = "Copy"; }, 1600);
+  }));
 })();
 </script>
 </body>
