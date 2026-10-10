@@ -917,7 +917,7 @@ private struct AgentRow: View {
             HStack(spacing: 0) {
                 action("terminal", "Open terminal", open)
                 action("sparkle", "Message this agent", ask)
-                action("arrow.up.forward.app", "Show in herdr", reveal)
+                OpenInAction(agent: agent)
                 CloseSessionButton(pane: agent.pane)
             }
             .opacity(hover ? 1 : 0.45)
@@ -927,6 +927,7 @@ private struct AgentRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
         .onHover { h in withAnimation(Motion.micro) { hover = h } }
+        .contextMenu { OpenInItems(agent: agent, pane: agent.pane) }
         .help("\(agent.kind) in \(agent.place)")
     }
 
@@ -941,6 +942,33 @@ private struct AgentRow: View {
     }
 }
 
+
+/// The row's "Open in": a click opens where you last chose; holding it (or
+/// the row's context menu) lists herdr, Finder, terminals and editors.
+private struct OpenInAction: View {
+    var agent: AgentInfo
+    @ObservedObject private var settings = Settings.shared
+
+    var body: some View {
+        let t = OpenIn.preferred
+        Menu {
+            OpenInItems(agent: agent, pane: agent.pane)
+        } label: {
+            if t.kind == .herdr {
+                Image(systemName: "arrow.up.forward.app").font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.text)
+            } else {
+                Image(nsImage: OpenIn.icon(t))
+            }
+        } primaryAction: {
+            OpenIn.open(t, agent: agent, pane: agent.pane)
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .frame(width: 22, height: 22)
+        .help(t.kind == .herdr ? "Show in herdr (hold for more)" : "Open \(agent.folder) in \(t.name) (hold for more)")
+        .id(settings.openIn)
+    }
+}
 
 // MARK: - Question card
 

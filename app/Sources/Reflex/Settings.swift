@@ -42,6 +42,8 @@ final class Settings: ObservableObject {
     @Published var awakeMode: String { didSet { d.set(awakeMode, forKey: "awakeMode") } }
     /// Keep the display on too, not only the Mac.
     @Published var awakeDisplay: Bool { didSet { d.set(awakeDisplay, forKey: "awakeDisplay") } }
+    /// Where "Open in" goes first: "herdr", "finder" or an app's bundle id.
+    @Published var openIn: String { didSet { d.set(openIn, forKey: "openIn") } }
     /// On battery at or below this percentage, let the Mac sleep (0: never).
     @Published var awakeBattery: Int { didSet { d.set(awakeBattery, forKey: "awakeBattery") } }
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
@@ -68,6 +70,7 @@ final class Settings: ObservableObject {
         edgeDelay = d.object(forKey: "edgeDelay") as? Double ?? 0.5
         awakeMode = d.string(forKey: "awakeMode") ?? "agents"
         awakeDisplay = d.object(forKey: "awakeDisplay") as? Bool ?? false
+        openIn = d.string(forKey: "openIn") ?? "herdr"
         awakeBattery = d.object(forKey: "awakeBattery") as? Int ?? 20
         onboarded = d.bool(forKey: "onboarded")
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true

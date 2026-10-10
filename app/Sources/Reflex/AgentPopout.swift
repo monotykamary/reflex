@@ -216,17 +216,7 @@ struct AgentPopout: View {
                 .lineLimit(1)
                 .contentTransition(.interpolate)
             Spacer(minLength: 8)
-            Button {
-                HerdrWindow.reveal(pane: session.pane)
-            } label: {
-                Image(systemName: "arrow.up.forward.app")
-                    .font(.system(size: 12))
-                    .frame(width: 22, height: 22)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(Pressable())
-            .opacity(0.5)
-            .help("Show in herdr")
+            OpenInButton(agent: agent, pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
             CloseSessionButton(pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
         }
         .foregroundStyle(Color(hex: theme.foreground))
