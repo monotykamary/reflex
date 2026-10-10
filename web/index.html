@@ -149,7 +149,7 @@
     let h = toast ? `<div class="toast">${esc(toast)}</div>` : "";
     if (s.pending.length) {
       h += `<h2>Sending</h2>` + s.pending.map((p) => `<div class="pending${fresh("p" + p.id)}"><span class="label">${esc(p.label.replace(/^→ /, ""))}</span>
-        <button data-cancel="${p.id}">Undo</button><span class="drain" style="animation-duration:${p.left}ms;--from:${(p.left / Math.max(s.undo, 1)).toFixed(3)}"></span></div>`).join("");
+</div>`).join("");
     }
     h += `<h2>Inbox</h2>`;
     h += s.inbox.length ? s.inbox.map((i) => `<div class="card${fresh("i" + i.id)}" style="--tone:${tone[i.kind] || "var(--blue)"}">

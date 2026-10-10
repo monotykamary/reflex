@@ -111,7 +111,7 @@ def load() -> IO(Cfg):
     web : String <- env("REFLEX_WEB", "web")
     scan : String <- env("REFLEX_SCAN", "reflex-scan.sh")
     fork : String <- env("REFLEX_FORK", "reflex-fork.sh")
-    undo : U32 <- u32_env("REFLEX_UNDO_MS", 2000)
+    undo : U32 <- u32_env("REFLEX_UNDO_MS", 0)
     return Cfg{sock, bind, port, token, jev, harness, threshold, home, data, web, scan, fork, undo, String.is_empty(given)}
 
 def Cfg.sock(c: Cfg) -> String:
@@ -446,6 +446,8 @@ def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) 
         post_fork_reply(chan, pane, label, stdout_of(r))
     case M.Spawn{+cwd, +kind, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
+        # A new project folder may not exist yet; mkdir -p is a no-op otherwise.
+        m : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/bin/mkdir", ["-p", cwd], "", 4096, 5000)
         w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(Cfg.sock(cfg), cwd, Core.base_name(cwd))
         spawn_in(cfg, id, cwd, kind, text, w)
 
@@ -648,7 +650,7 @@ def act(dry: Bool, +chan: Chan(Env), +text: String, d: R.Decision) -> IO(String)
         r : String <- ask_text(chan, M.Post{M.INote{}, "", "reflex", "could not route", message, []})
         return route_json(R.Decision.json(R.Broke{message}), "")
 
-def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +line: String, +seen: List<&2, R.Seen>, +cands: List<&2, M.Folder>) -> IO(String):
+def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +line: String, +seen: List<&2, R.Seen>, +cands: List<&2, M.Folder>) -> IO(String):
   match again:
     case False{}:
       act(dry, chan, text, d)
@@ -656,9 +658,9 @@ def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +t
       do IO<String>:
         IO.sleep(300)
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
-        act(dry, chan, text, R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), Cfg.harness(cfg), Cfg.threshold(cfg), seen, cands))
+        act(dry, chan, text, R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands))
 
-def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, ctx: M.Reply) -> IO(String):
+def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
@@ -666,15 +668,30 @@ def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, ctx: M.Repl
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
         +line : String = R.request(text, Cfg.home(cfg), seen, cands)
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
-        +d : R.Decision = R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), Cfg.harness(cfg), Cfg.threshold(cfg), seen, cands)
-        retry(R.transient(d), d, dry, cfg, chan, text, line, seen, cands)
+        +d : R.Decision = R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands)
+        retry(R.transient(d), d, dry, cfg, chan, text, harness, line, seen, cands)
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
-def route(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String) -> IO(String):
+def route(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String) -> IO(String):
   do IO<String>:
     ctx : M.Reply <- ask(chan, M.Context{})
-    route_ctx(dry, cfg, chan, text, ctx)
+    route_ctx(dry, cfg, chan, text, harness, ctx)
+
+# Jev's ranking of every candidate, live, for the Ask bar's list. Dry.
+def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, ctx: M.Reply) -> IO(String):
+  match ctx:
+    case M.RContext{agents, folders}:
+      do IO<String>:
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
+        +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
+        +line : String = R.request(text, Cfg.home(cfg), seen, cands)
+        t0 : Nat <- IO.now()
+        out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
+        t1 : Nat <- IO.now()
+        return R.candidates_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, U32.from_nat(Nat.sub(t1, t0)))
+    case M.RText{json}:
+      IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
 # The JSON request for the candidates routing would show Jev (for a UI or a
 # debugging session), without calling Jev.
@@ -744,6 +761,7 @@ def folders_ctx(+home: String, +q: String, ctx: M.Reply) -> String:
 type Ep is Data:
   EState{}
   ERoute{}
+  ECandidates{}
   EExplain{}
   ESend{}
   ESpawn{}
@@ -767,6 +785,7 @@ def rows() -> List<&2, Row>:
   [
     Row{"/api/state", EState{}},
     Row{"/api/route", ERoute{}},
+    Row{"/api/candidates", ECandidates{}},
     Row{"/api/explain", EExplain{}},
     Row{"/api/send", ESend{}},
     Row{"/api/spawn", ESpawn{}},
@@ -891,7 +910,12 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case ERoute{}:
       do IO<String>:
-        r : String <- route(is_true(Js.text_at(body, "dry")), cfg, chan, Js.text_at(body, "text"))
+        r : String <- route(is_true(Js.text_at(body, "dry")), cfg, chan, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)))
+        ok(r)
+    case ECandidates{}:
+      do IO<String>:
+        ctx : M.Reply <- ask(chan, M.Context{})
+        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), ctx)
         ok(r)
     case EExplain{}:
       do IO<String>:

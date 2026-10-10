@@ -2,7 +2,7 @@ import SwiftUI
 
 // Every question, finished turn, side answer and routing choice, as a stack of
 // glass cards that grows out of the rail. Keyboard first:
-// J/K move · 1–9 answer · E clear · ⏎ open · U undo · ⇥ filter · esc close
+// J/K move · 1–9 answer · E clear · ⏎ open · ⇥ filter · esc close
 // Selection moves instantly: it is driven by keys pressed many times a minute.
 
 @MainActor
@@ -117,7 +117,7 @@ struct InboxView: View {
 
     private var footer: some View {
         HStack(spacing: 12) {
-            ForEach([("J K", "move"), ("1–9", "answer"), ("E", "clear"), ("⏎", "open"), ("U", "undo"), ("⇥", "filter")], id: \.0) { k, v in
+            ForEach([("J K", "move"), ("1–9", "answer"), ("E", "clear"), ("⏎", "open"), ("⇥", "filter")], id: \.0) { k, v in
                 HStack(spacing: 4) {
                     Text(k).font(Type.count).foregroundStyle(.secondary)
                     Text(v).font(Type.meta).foregroundStyle(.tertiary)
@@ -166,8 +166,6 @@ struct InboxView: View {
         case "k": move(-1)
         case "e":
             if let c = current { move(1); dismiss(c) }
-        case "u":
-            if let p = store.state.pending.last { Task { await Client.local.cancel(p.id); await store.refresh() } }
         case let d where d.count == 1 && "123456789".contains(d):
             if let c = current, c.options.contains(where: { $0.key == d }) { answer(c, d) }
         default:
@@ -220,15 +218,8 @@ private struct Card: View {
                     .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
             if let p = pending {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(p.label).font(Type.meta).lineLimit(1)
-                        Spacer()
-                        Text("U to undo").font(Type.meta).foregroundStyle(.secondary)
-                    }
-                    CountdownLine(duration: Double(p.left) / 1000, tint: tone).id(p.id)
-                }
-                .transition(.blurSwap)
+                Label(p.label.bare, systemImage: "arrow.turn.down.right").font(Type.meta).foregroundStyle(.secondary).lineLimit(1)
+                    .transition(.blurSwap)
             } else if !item.options.isEmpty {
                 VStack(alignment: .leading, spacing: 2) {
                     ForEach(item.options) { o in

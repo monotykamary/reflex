@@ -12,7 +12,12 @@ final class Settings: ObservableObject {
     @Published var roots: String { didSet { d.set(roots, forKey: "roots") } }
     @Published var harness: String { didSet { d.set(harness, forKey: "harness") } }
     @Published var threshold: Int { didSet { d.set(threshold, forKey: "threshold") } }
-    @Published var undoMs: Int { didSet { d.set(undoMs, forKey: "undoMs") } }
+    /// Saying this asks for a new project folder (rare by design; see the Ask bar).
+    @Published var newKeyword: String { didSet { d.set(newKeyword, forKey: "newKeyword") } }
+    /// Where new project folders are made. Empty: the first project root.
+    @Published var newRoot: String { didSet { d.set(newRoot, forKey: "newRoot") } }
+    /// Single folders added from the Ask bar that sit outside the roots.
+    @Published var extraFolders: [String] { didSet { d.set(extraFolders, forKey: "extraFolders"); Settings.writeFolders(extraFolders) } }
     @Published var port: Int { didSet { d.set(port, forKey: "port") } }
     @Published var remote: Bool { didSet { d.set(remote, forKey: "remote") } }
     @Published var jevProvider: String { didSet { d.set(jevProvider, forKey: "jevProvider") } }
@@ -35,7 +40,9 @@ final class Settings: ObservableObject {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
         harness = d.string(forKey: "harness") ?? "claude"
         threshold = d.object(forKey: "threshold") as? Int ?? 6000
-        undoMs = d.object(forKey: "undoMs") as? Int ?? 2000
+        newKeyword = d.string(forKey: "newKeyword") ?? "new project"
+        newRoot = d.string(forKey: "newRoot") ?? ""
+        extraFolders = d.stringArray(forKey: "extraFolders") ?? []
         port = d.object(forKey: "port") as? Int ?? 47823
         remote = d.bool(forKey: "remote")
         jevProvider = d.string(forKey: "jevProvider") ?? "typesafe"
@@ -48,6 +55,7 @@ final class Settings: ObservableObject {
         onboarded = d.bool(forKey: "onboarded")
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true
         appearance = d.string(forKey: "appearance") ?? "system"
+        Settings.writeFolders(extraFolders)
     }
 
     /// Light, dark, or whatever macOS is using. (Agent terminals keep their
@@ -58,6 +66,34 @@ final class Settings: ObservableObject {
         case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
         default: NSApp.appearance = nil
         }
+    }
+
+    var rootList: [String] { roots.split(separator: ":").map(String.init) }
+
+    /// Where a new project folder goes.
+    var newFolderParent: String {
+        newRoot.isEmpty ? (rootList.first ?? NSHomeDirectory()) : newRoot
+    }
+
+    /// Is this folder already inside one of the roots (so the index finds it)?
+    func covers(_ path: String) -> Bool {
+        let p = (path as NSString).standardizingPath
+        return rootList.contains { p == $0 || p.hasPrefix(($0 as NSString).standardizingPath + "/") } || extraFolders.contains(p)
+    }
+
+    /// Add a folder chosen in the Ask bar to the projects list when the
+    /// roots don't already cover it, then re-index.
+    func addFolder(_ path: String) {
+        let p = (path as NSString).standardizingPath
+        guard !covers(p) else { return }
+        extraFolders.append(p)
+        Task { await Client.local.reindex() }
+    }
+
+    static var foldersFile: URL { supportDir.appendingPathComponent("folders.txt") }
+
+    static func writeFolders(_ fs: [String]) {
+        try? (fs.joined(separator: "\n") + "\n").write(to: foldersFile, atomically: true, encoding: .utf8)
     }
 
     static var supportDir: URL {

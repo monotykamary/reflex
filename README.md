@@ -38,9 +38,9 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 | | |
 |---|---|
 | **Tab & rail** | While agents are active, a small dark tab grows out of the right screen edge: a spinning ring per working agent, amber for waiting, green for done. Hover it (or rest on an empty edge for half a second) to open the rail, in Liquid Glass: inbox, agents, Ask and Settings, beside the question waiting on you (answer with 1, 2 or 3). Hover a dot for its state; click the dots for every agent, grouped by project, with one click to its terminal, a pinned message, or herdr. |
-| **⌥⌥ command bar** | Double-tap Option, type, ⏎. Reflex routes it to the right session, or starts a new one in the right folder. ⇥ pins a specific agent instead. The action waits out a **2 s undo window** (Esc undoes and gives your text back). |
+| **⌥⌥ Ask bar** | Double-tap Option and type: a Raycast-style list of where it could go — live sessions, folders to start one in, a new folder, any folder you choose. A local match fills it at once; Jev's live ranking (about a second after you stop typing) puts its pick on top with a weight per row. ⏎ sends to the selected row; ↑↓/⇥ choose another, ⌘1–9 sends a row directly. Hovering never selects, a click on a row that just moved is ignored, and once you pick a row Jev stops moving it. `/claude`, `/pi`, `/codex`… choose the agent for new sessions; `/new` starts in a new folder; `/btw` asks on the side; `/folder` chooses any folder (one outside your roots joins your projects). A new folder is Jev's pick only when you say your keyword ("new project" by default) or nothing fits — and ⏎ asks you to name it first. Sends go at once. |
 | **Unsure? It asks.** | Below the confidence threshold (default 60%) nothing is sent: you get numbered choices (1/2/3) instead. |
-| **Inbox** | Every blocked question (with its numbered options parsed off the agent's screen), finished turn, side answer and routing question. J/K move, 1–9 answer, E clear, ⏎ open, U undo. |
+| **Inbox** | Every blocked question (with its numbered options parsed off the agent's screen), finished turn, side answer and routing question. J/K move, 1–9 answer, E clear, ⏎ open. |
 | **btw** | Start with `btw` (or let Jev notice) to ask without interrupting: Claude Code gets its native `/btw` (no tools, shares the prompt cache); pi — and Claude when blocked on a dialog — gets a headless, unsaved fork of its session (same prefix, warm cache, read-only for Claude). Other harnesses: Reflex asks you. |
 | **Terminals** | Click a bead for a raw terminal on that agent (SwiftTerm attached through `herdr agent attach`): full color, keys and resizing go straight to the agent's TUI. Any Ghostty theme, Tokyo Night by default; Geist Mono when installed, or any monospaced font (Settings → Terminal). |
 | **Phone** | Settings → Phone shows a QR code for the web remote (prefers your Tailscale address). |
@@ -130,7 +130,8 @@ curl -H 'authorization: Bearer dev' localhost:47823/api/state
 | `REFLEX_HERDR_SOCKET` / `HERDR_SESSION` | default herdr session | |
 | `REFLEX_HARNESS` | `claude` | agent for new sessions |
 | `REFLEX_THRESHOLD` | `6000` | confidence (basis points) needed to act |
-| `REFLEX_UNDO_MS` | `2000` | undo window |
+| `REFLEX_UNDO_MS` | `0` | delay before an action runs (the app sends at once) |
+| `REFLEX_FOLDERS_FILE` | — | file of extra folders to index, one per line (folders added from the Ask bar) |
 | `REFLEX_ROOTS` | `~/VCS` | colon-separated roots for the folder index |
 | `REFLEX_JEV` | `jev-fabric` | jev-fabric binary |
 | `REFLEX_DATA` | `~/Library/Application Support/Reflex` | usage history |

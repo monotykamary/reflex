@@ -137,10 +137,35 @@ def recent_part.if(empty: Bool, r: String) -> String:
 def recent_part(+r: String) -> String:
   recent_part.if(String.is_empty(r), r)
 
+# When the folder was last worked on (its last commit), and how often the user
+# has started sessions there: when a request names no project, the folder the
+# user has been in lately is the likelier one.
+def ago.pick(lt1: Bool, lt48: Bool, +h: U32) -> String:
+  match lt1 lt48:
+    case True{} _:
+      "within the hour"
+    case False{} True{}:
+      U32.show(h) ++ " hours ago"
+    case False{} False{}:
+      U32.show(U32.div(h, 24)) ++ " days ago"
+
+def age_part(+age: U32) -> String:
+  " Last worked on " ++ ago.pick(U32.is_lt(age, 1), U32.is_lt(age, 48), age) ++ "."
+
+def uses_part.if(none: Bool, +n: U32) -> String:
+  match none:
+    case True{}:
+      ""
+    case False{}:
+      " The user started " ++ U32.show(n) ++ " sessions here before."
+
+def uses_part(+n: U32) -> String:
+  uses_part.if(U32.is_eq(n, 0), n)
+
 def folder_line(+home: String, +i: Nat, f: M.Folder) -> String:
   match f:
-    case M.Folder{path, name, desc, recent, branch, age, uses}:
-      idx("f", i) ++ ": " ++ name ++ " — " ++ short(home, path) ++ desc_part(desc) ++ recent_part(recent) ++ "\n"
+    case M.Folder{path, name, desc, recent, branch, +age, +uses}:
+      idx("f", i) ++ ": " ++ name ++ " — " ++ short(home, path) ++ desc_part(desc) ++ recent_part(recent) ++ age_part(age) ++ uses_part(uses) ++ "\n"
 
 def folders_text(xs: List<&2, M.Folder>, +home: String, +i: Nat) -> String:
   match xs:
@@ -199,7 +224,7 @@ def target_q(+home: String, seen: List<&2, Seen>) -> String:
 def folder_q(+home: String, folders: List<&2, M.Folder>) -> String:
   Js.kv("folder", Js.obj([
     Js.kv("type", Js.str("choice")),
-    Js.kv("instructions", Js.str("If a new session is started for this request, which folder is the request about? Prefer a folder the user names; otherwise the folder whose name, description or recent commits match the request.")),
+    Js.kv("instructions", Js.str("If a new session is started for this request, which folder is the request about? Prefer a folder the user names; otherwise the folder whose name, description or recent commits match the request. When several fit about equally, or the request names no project, prefer the one worked on most recently.")),
     Js.kv("criteria", Js.obj(folder_choices(folders, home, 0n))),
   ]))
 
@@ -726,3 +751,45 @@ def is_go(d: Decision) -> Bool:
       True{}
     case other:
       False{}
+
+# Live candidates, for a search list
+# ----------------------------------
+# Every session and folder Jev weighed, best first, with Jev's own decision
+# and its side-question score: the Ask bar shows these as you type and lets
+# you pick another row. Nothing is sent.
+
+def ranked_json(r: Ranked) -> String:
+  match r:
+    case Ranked{bp, label, action}:
+      Js.obj([Js.kv("bp", Js.num(bp)), Js.kv("label", Js.str(label)), Js.kv("action", M.Action.json(action))])
+
+def ranked_jsons(xs: List<&2, Ranked>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{r, t}:
+      ranked_json(r) <> ranked_jsons(t)
+
+def ranked_all(+target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +text: String, +home: String, +default: String) -> List<&2, Ranked>:
+  List.sort(~Ranked, ~ranked_le, List.append(&2, Ranked, seen_ranked(seen, all_of(target), text, home, 0n), folder_ranked(folders, all_of(folder), new_weight(target), text, home, default, 0n)))
+
+def candidates.with(+target: Maybe<&2, Pick>, +folder: Maybe<&2, Pick>, +side: U32, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +ms: U32) -> String:
+  Js.obj([
+    Js.kv("ok", "true"),
+    Js.kv("ms", Js.num(ms)),
+    Js.kv("side", Js.num(side)),
+    Js.kv("threshold", Js.num(threshold)),
+    Js.kv("harness", Js.str(default)),
+    Js.kv("decision", Decision.json(decide(text, home, default, threshold, seen, folders, target, folder, side))),
+    Js.kv("ranked", Js.arr(ranked_jsons(ranked_all(target, folder, seen, folders, text, home, default)))),
+  ])
+
+def candidates_answers(r: Result<&1, &1, U32 & String, J.JSON>, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +ms: U32) -> String:
+  match r:
+    case Fail{(code, msg)}:
+      Js.obj([Js.kv("ok", "false"), Js.kv("error", Js.str(msg)), Js.kv("ms", Js.num(ms))])
+    case Done{+answers}:
+      candidates.with(pick(answers, "target"), pick(answers, "folder"), noul_bp(answers), text, home, default, threshold, seen, folders, ms)
+
+def candidates_output(+out: String, +text: String, +home: String, +default: String, +threshold: U32, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +ms: U32) -> String:
+  candidates_answers(response(out), text, home, default, threshold, seen, folders, ms)

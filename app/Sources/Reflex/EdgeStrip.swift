@@ -196,10 +196,6 @@ extension Rail {
     @MainActor static func key(_ press: KeyPress) -> KeyPress.Result {
         let rail = RailModel.shared, store = Store.shared
         guard rail.visible else { return .ignored }
-        if press.characters.lowercased() == "u", let p = store.state.pending.last {
-            Task { await Client.local.cancel(p.id); await Store.shared.refresh() }
-            return .handled
-        }
         let mode = side(rail, store, inboxShown: InboxModel.shared.shown)
         if mode == .agents {
             if press.key == .escape { rail.filter = ""; return .handled }
@@ -763,15 +759,9 @@ private struct QuestionCard: View {
                 }
             }
             if let p = pending {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack {
-                        Text(p.label.bare).font(.system(size: 11.5)).foregroundStyle(Ink.dim).lineLimit(1)
-                        Spacer()
-                        Text("U to undo").font(.system(size: 11.5)).foregroundStyle(Ink.dim)
-                    }
-                    CountdownLine(duration: Double(p.left) / 1000, tint: Tone.working).id(p.id)
-                }
-                .transition(.blurSwap)
+                Label(p.label.bare, systemImage: "arrow.turn.down.right")
+                    .font(.system(size: 11.5)).foregroundStyle(Ink.dim).lineLimit(1)
+                    .transition(.blurSwap)
             }
             if let a = agent {
                 Button { openAgent(a) } label: {

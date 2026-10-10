@@ -102,11 +102,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 self.toggleBar()
                 // Dev: fill or pin without sending, to check the bar's layout.
                 let env = ProcessInfo.processInfo.environment
-                if let t = env["REFLEX_DEMO_TYPED"] { self.command.text = t }
+                if let t = env["REFLEX_DEMO_TYPED"] {
+                    Task {
+                        for _ in 0..<40 where Store.shared.state.folders == 0 && !t.hasPrefix("/") {
+                            try? await Task.sleep(for: .milliseconds(500))
+                        }
+                        self.command.text = t
+                    }
+                }
                 if env["REFLEX_DEMO_PIN"] != nil { self.command.target = Store.shared.state.agents.first?.pane }
                 if let t = ProcessInfo.processInfo.environment["REFLEX_DEMO_TEXT"] {
                     self.command.text = t
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.command.submit(agents: Store.shared.state.agents) }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { self.command.submit() }
                 }
             case "inbox": self.showInbox()
             case "access": AccessGuide.shared.start(preview: true)

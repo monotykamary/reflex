@@ -445,9 +445,9 @@ struct OnboardingView: View {
         case .done:
             VStack(alignment: .leading, spacing: 9) {
                 Cheat(keys: "⌥⌥", what: "Ask — Jev routes it")
-                Cheat(keys: "⇥", what: "Pin an agent instead of routing")
+                Cheat(keys: "↑↓", what: "Pick another row than Jev's")
                 Cheat(keys: "btw", what: "Ask on the side, without interrupting")
-                Cheat(keys: "esc", what: "Undo during the 2-second window")
+                Cheat(keys: "/pi", what: "Start new sessions with another agent")
                 Cheat(keys: "edge", what: "Rest on the right edge to see agents")
                 Cheat(keys: "J K 1–9", what: "Move and answer in the inbox")
             }

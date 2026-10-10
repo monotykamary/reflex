@@ -77,7 +77,8 @@ final class Daemon: ObservableObject {
         env["REFLEX_BIND"] = s.remote ? "0.0.0.0" : "127.0.0.1"
         env["REFLEX_HARNESS"] = s.harness
         env["REFLEX_THRESHOLD"] = String(s.threshold)
-        env["REFLEX_UNDO_MS"] = String(s.undoMs)
+        env["REFLEX_UNDO_MS"] = "0"
+        env["REFLEX_FOLDERS_FILE"] = Settings.foldersFile.path
         env["REFLEX_ROOTS"] = s.roots
         env["REFLEX_DATA"] = Settings.supportDir.path
         env["REFLEX_USAGE"] = Settings.supportDir.appendingPathComponent("usage.tsv").path

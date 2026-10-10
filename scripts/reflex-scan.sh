@@ -7,7 +7,8 @@
 # Roots come from REFLEX_ROOTS (colon-separated, default ~/VCS); git
 # repositories up to REFLEX_SCAN_DEPTH (default 4) levels below a root are
 # listed. REFLEX_FOLDERS (colon-separated) adds folders that are not
-# repositories. REFLEX_USAGE names a file of past spawn paths, one per line,
+# repositories, and REFLEX_FOLDERS_FILE names a file of more, one per line
+# (folders added from the Ask bar). REFLEX_USAGE names a file of past spawn paths, one per line,
 # counted into `uses`. Reads only; never fetches, never writes.
 set -u
 
@@ -88,4 +89,9 @@ fi
     [ -d "$f" ] && printf '%s\n' "$f"
   done
   IFS=$old_ifs
+  if [ -n "${REFLEX_FOLDERS_FILE:-}" ] && [ -f "$REFLEX_FOLDERS_FILE" ]; then
+    while IFS= read -r f; do
+      [ -n "$f" ] && [ -d "$f" ] && printf '%s\n' "$f"
+    done < "$REFLEX_FOLDERS_FILE"
+  fi
 } | sort -u | xargs -P 8 -I{} "$0" --one {}

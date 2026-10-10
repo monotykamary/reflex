@@ -42,6 +42,13 @@ struct Client {
         try await post("/api/route", dry ? ["text": text, "dry": true] : ["text": text], as: RouteResponse.self)
     }
 
+    /// Jev's live ranking for the Ask bar's list. Dry: nothing is sent.
+    func candidates(_ text: String, harness: String?) async throws -> CandidatesResponse {
+        var body: [String: Any] = ["text": text]
+        if let harness { body["harness"] = harness }
+        return try await post("/api/candidates", body, as: CandidatesResponse.self)
+    }
+
     func send(pane: String, text: String, label: String) async throws -> PendingInfo {
         try await post("/api/send", ["pane": pane, "text": text, "label": label], as: PendingInfo.self)
     }
@@ -54,7 +61,6 @@ struct Client {
         try await post("/api/spawn", ["cwd": cwd, "kind": kind, "text": text], as: PendingInfo.self)
     }
 
-    func cancel(_ id: Int) async { await post("/api/cancel", ["id": id]) }
     func answer(item: Int, key: String) async { await post("/api/answer", ["item": item, "key": key]) }
     func dismiss(_ item: Int) async { await post("/api/dismiss", ["item": item]) }
     func focus(_ pane: String) async { await post("/api/focus", ["pane": pane]) }

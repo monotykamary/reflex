@@ -89,6 +89,25 @@ struct PostedInfo: Codable {
     var item: Int?
 }
 
+/// One candidate Jev weighed for a request: a session (prompt) or a folder (spawn).
+struct RankedInfo: Codable, Hashable {
+    var bp: Int
+    var label: String
+    var action: ActionInfo
+}
+
+/// `/api/candidates`: Jev's ranking of every candidate, live and dry.
+struct CandidatesResponse: Codable {
+    var ok: Bool
+    var ms: Int?
+    var side: Int?
+    var threshold: Int?
+    var harness: String?
+    var decision: RouteInfo?
+    var ranked: [RankedInfo]?
+    var error: String?
+}
+
 struct RouteResponse: Codable {
     var ok: Bool
     var route: RouteInfo?

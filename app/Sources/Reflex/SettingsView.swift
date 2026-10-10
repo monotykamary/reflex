@@ -66,11 +66,11 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     /// Words the sidebar search matches besides the title.
     var keywords: String {
         switch self {
-        case .general: return "login startup dock cmd tab hotkey option double undo agent harness claude codex pi daemon reflexd restart log"
+        case .general: return "login startup dock cmd tab hotkey option double agent harness claude codex pi daemon reflexd restart log appearance light dark"
         case .rail: return "edge tab rail hover delay rest questions surface visible sliver"
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential confidence threshold typesafe openrouter vercel test"
-        case .projects: return "folders roots repositories index herdr session"
+        case .projects: return "folders roots repositories index herdr session new project keyword"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
         case .about: return "version"
@@ -283,13 +283,6 @@ private struct GeneralPane: View {
                     ForEach(Onboarding.harnesses, id: \.self) { Text($0) }
                 } label: {
                     RowLabel("Default agent", "Used when Jev starts a session in a folder.")
-                }
-                LabeledContent {
-                    Stepper(value: $s.undoMs, in: 0...10000, step: 500) {
-                        Text(String(format: "%.1f s", Double(s.undoMs) / 1000)).monospacedDigit()
-                    }
-                } label: {
-                    RowLabel("Undo window", "How long you have to take a request back before it is sent.")
                 }
             }
             Section("reflexd") {
@@ -766,8 +759,47 @@ private struct ProjectsPane: View {
             } header: {
                 Text("Folders")
             } footer: {
-                Text("Reflex indexes the repositories under these folders — names, descriptions, recent commits — so Jev can start a session in the right one.")
+                Text("Reflex indexes the repositories under these folders — names, descriptions, recent commits, when you last worked in them — so Jev can start a session in the right one.")
                     .font(.caption).foregroundStyle(.secondary)
+            }
+            if !s.extraFolders.isEmpty {
+                Section {
+                    ForEach(s.extraFolders, id: \.self) { f in
+                        HStack {
+                            Image(systemName: "folder").foregroundStyle(.secondary)
+                            Text(f.abbreviatingHome)
+                            Spacer()
+                            Button {
+                                s.extraFolders.removeAll { $0 == f }
+                                Task { await Client.local.reindex() }
+                            } label: { Image(systemName: "minus.circle.fill").foregroundStyle(.secondary) }
+                            .buttonStyle(.plain)
+                            .help("Remove")
+                        }
+                    }
+                } header: {
+                    Text("Added from the Ask bar")
+                } footer: {
+                    Text("Single folders you chose with “Choose folder…” that sit outside the folders above.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            Section {
+                LabeledContent {
+                    TextField("", text: $s.newKeyword, prompt: Text("new project"))
+                        .frame(maxWidth: 180)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    RowLabel("New project keyword", "Say this in a request to start in a new folder. Otherwise Reflex picks an existing one — or suggests a new folder only when nothing fits, and asks you to name it.")
+                }
+                Picker(selection: $s.newRoot) {
+                    Text("First folder above").tag("")
+                    ForEach(roots, id: \.self) { Text($0.abbreviatingHome).tag($0) }
+                } label: {
+                    RowLabel("New projects go in")
+                }
+            } header: {
+                Text("New projects")
             }
             Section {
                 LabeledContent {
