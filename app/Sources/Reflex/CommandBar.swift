@@ -6,8 +6,9 @@ import SwiftUI
 //
 //   search  a few words ("reflex", "jev fab") find a session; ⏎ opens its
 //           terminal. No Jev call: instant.
-//   ask     prose ("fix the flaky test in jev fabric") is a request: the
-//           list below is where it could go — live sessions, folders to start one in, a
+//   ask     prose or a question ("fix the flaky test in jev fabric", "why
+//           is staging red?") is a request. No step between: the list below
+//           is where it could go — live sessions, folders to start one in, a
 // new folder, any folder you choose. A local match fills the list at once;
 // Jev's ranking replaces it a moment after you stop typing, with its pick on
 // top. ⏎ sends to the selected row.
@@ -102,9 +103,6 @@ final class CommandModel: ObservableObject {
     /// When the rows last changed order (a click right after is ignored).
     private(set) var reorderedAt = Date.distantPast
 
-    /// Treat the text as a request even if it reads like a search.
-    @Published var forcedAsk = false
-
     var close: () -> Void = {}
     /// Open an agent's terminal.
     var openPane: (String) -> Void = { _ in }
@@ -130,7 +128,6 @@ final class CommandModel: ObservableObject {
         harness = nil
         sideForced = false
         newForced = false
-        forcedAsk = false
         jev = nil
         jevText = ""
         thinking = false
@@ -157,19 +154,29 @@ final class CommandModel: ObservableObject {
 
     enum Mode: Equatable { case search, ask }
 
-    /// Search unless the words read like a request (or a command says ask).
+    /// Decided by the words alone, with no step in between: a request
+    /// (prose, a question, a command) asks; anything else is a lookup, which
+    /// only ever opens a session — it is never sent anywhere.
     var mode: Mode {
-        if forcedAsk || sideForced || newForced || harness != nil { return .ask }
+        if sideForced || newForced || harness != nil { return .ask }
         return CommandModel.looksLikeProse(request) ? .ask : .search
     }
 
-    /// A request, not a lookup: four or more words; a phrase with sentence
-    /// punctuation; or a phrase that starts like an instruction or question.
+    /// A request, not a lookup: a question; four or more words; a phrase
+    /// with sentence punctuation; or one that starts like an instruction or
+    /// question, or has a sentence's verb in it ("staging is broken").
     nonisolated static func looksLikeProse(_ t: String) -> Bool {
-        let words = t.split(whereSeparator: \.isWhitespace)
-        guard let first = words.first?.lowercased() else { return false }
+        let words = t.split(whereSeparator: \.isWhitespace).map { $0.lowercased().trimmingCharacters(in: .punctuationCharacters) }
+        guard let first = words.first else { return false }
+        if t.hasSuffix("?") { return true }
         if words.count >= 4 { return true }
         if words.count >= 2, t.contains(where: { "?!.,:;".contains($0) }) { return true }
+        let verbs: Set<String> = [
+            "is", "are", "was", "were", "be", "been", "has", "have", "had", "does", "do", "did", "can", "can't", "cannot",
+            "won't", "doesn't", "isn't", "aren't", "didn't", "don't", "should", "would", "could", "will", "keeps", "keep",
+            "fails", "failing", "failed", "broke", "broken", "breaks", "crashes", "crashing", "hangs", "works", "working",
+        ]
+        if words.count >= 2, words.dropFirst().contains(where: verbs.contains) { return true }
         let starts: Set<String> = [
             "fix", "add", "make", "why", "what", "how", "when", "where", "who", "which", "can", "could", "should", "would",
             "please", "run", "update", "write", "explain", "refactor", "remove", "delete", "create", "build", "test", "deploy",
@@ -178,6 +185,17 @@ final class CommandModel: ObservableObject {
             "is", "are", "does", "do", "did", "summarize", "summarise", "document", "clean", "optimize", "port", "migrate", "try",
         ]
         return words.count >= 2 && starts.contains(first)
+    }
+
+    /// Sessions whose title, agent, folder or path contain every word.
+    var sessionMatches: [AgentInfo] {
+        let q = request.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        let order = ["blocked": 0, "working": 1, "done": 2]
+        return agents.filter { a in
+            let hay = "\(a.title) \(a.kind) \(a.folder) \(a.place) \(a.name)".lowercased()
+            return q.allSatisfy { hay.contains($0) }
+        }
+        .sorted { (order[$0.status] ?? 3) < (order[$1.status] ?? 3) }
     }
 
     var isSide: Bool {
@@ -205,15 +223,6 @@ final class CommandModel: ObservableObject {
         }
         if naming { naming = false }
         if case .failed = phase { phase = .typing }
-        if request.isEmpty { forcedAsk = false }
-        schedule()
-    }
-
-    /// From search: treat these words as a request after all.
-    func askInstead() {
-        guard !request.isEmpty else { return }
-        forcedAsk = true
-        userPicked = false
         schedule()
     }
 
@@ -395,27 +404,13 @@ final class CommandModel: ObservableObject {
         return out
     }
 
-    /// Search: sessions matching every word, waiting ones first; then "Ask".
+    /// Search: the sessions matching every word, waiting ones first.
     private var searchRows: [Candidate] {
-        let q = request.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
-        let order = ["blocked": 0, "working": 1, "done": 2]
-        let hits = agents.filter { a in
-            let hay = "\(a.title) \(a.kind) \(a.folder) \(a.place) \(a.name)".lowercased()
-            return q.allSatisfy { hay.contains($0) }
-        }
-        .sorted { (order[$0.status] ?? 3) < (order[$1.status] ?? 3) }
-        var out = hits.map { a in
+        sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
                       title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
                       detail: "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status), agent: a, path: a.cwd)
         }
-        if !request.isEmpty {
-            let ask = Candidate(id: "ask", kind: .ask, title: "Ask “\(request)”",
-                                detail: "send it to a session, or start one — Jev routes it")
-            // Nothing matched: asking is the likely intent, so it leads.
-            if out.isEmpty { out.insert(ask, at: 0) } else { out.append(ask) }
-        }
-        return out
     }
 
     var selected: Candidate? { rows.first { $0.id == selection } ?? rows.first }
@@ -448,9 +443,7 @@ final class CommandModel: ObservableObject {
         if selected?.kind == .command, let c = selected?.command { apply(c); return }
         if selected?.kind == .chooseFolder { chooseFolder(); return }
         if mode == .search {
-            guard let c = selected else { return }
-            if c.kind == .ask { askInstead(); return }
-            if let a = c.agent { openPane(a.pane); close() }
+            if let a = selected?.agent { openPane(a.pane); close() }
             return
         }
         guard !request.isEmpty else { return }
@@ -519,7 +512,7 @@ final class CommandModel: ObservableObject {
         case .command:
             if let cmd = c.command { apply(cmd) }
         case .ask:
-            askInstead()
+            break
         }
     }
 
@@ -670,7 +663,7 @@ struct CommandBar: View {
                     .contentTransition(.symbolEffect(.replace))
                     .symbolEffect(.pulse, isActive: model.thinking && !reduce)
                     .frame(width: 20)
-                    .help(model.mode == .search ? "Searching sessions — type a request to ask" : "Asking — Jev routes it")
+                    .help(model.mode == .search ? "Searching your sessions" : "A request — Jev routes it")
                 tokens
                 TextField("", text: $model.text, axis: .vertical)
                     .textFieldStyle(.plain)
@@ -752,8 +745,8 @@ struct CommandBar: View {
         case .upArrow: model.move(-1); return .handled
         case .tab: model.move(press.modifiers.contains(.shift) ? -1 : 1); return .handled
         case .return where press.modifiers.contains(.command):
-            // Search: ask instead. Ask: send, then open the terminal.
-            if model.mode == .search { model.askInstead() } else { model.sendAndOpen() }
+            // Send, then open the terminal (in search, ⏎ already opens it).
+            if model.mode == .search { model.submit() } else { model.sendAndOpen() }
             return .handled
         case .delete where model.text.isEmpty: return model.dropToken() ? .handled : .ignored
         default: break
@@ -783,7 +776,7 @@ struct CommandBar: View {
             case .sending(let label):
                 status("arrow.turn.down.right", Tone.working, "Sending", label)
             default:
-                rowsView
+                if !model.rows.isEmpty { rowsView }
             }
             footer
         }
@@ -869,6 +862,9 @@ struct CommandBar: View {
     @ViewBuilder private var footerStatus: some View {
         HStack(spacing: 6) {
             switch model.phase {
+            case .typing where model.mode == .search && !model.request.isEmpty && model.rows.isEmpty:
+                Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
+                Text("No session matches “\(model.request)” — write it as a sentence to send it").foregroundStyle(.secondary).lineLimit(1)
             case .failed(let message):
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Tone.blocked)
                 Text(message).lineLimit(2)
@@ -893,7 +889,7 @@ struct CommandBar: View {
                     }
                 } else if model.mode == .search {
                     hint("⏎", "open")
-                    if !model.request.isEmpty { hint("⌘⏎", "ask instead") }
+                    Text("type a request to send it").foregroundStyle(.tertiary)
                     hint("/", "commands")
                 } else {
                     hint("↑↓", "choose")
