@@ -705,10 +705,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // all while another app holds it: show the window regardless, then
         // make it key once Reflex is active.
         w.orderFrontRegardless()
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
-            guard !w.isKeyWindow else { return }
-            NSRunningApplication.current.activate(options: [.activateAllWindows])
-            w.makeKeyAndOrderFront(nil)
+        // A new window (a terminal starting up) can take a little longer.
+        for delay in [0.08, 0.35] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                guard !w.isKeyWindow else { return }
+                NSRunningApplication.current.activate(options: [.activateAllWindows])
+                w.makeKeyAndOrderFront(nil)
+            }
         }
     }
 
@@ -792,9 +795,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         popouts[pane] = w
         terminals[pane] = session
-        AppDelegate.activateSelf()
-        w.makeKeyAndOrderFront(nil)
         w.makeFirstResponder(session.view)
+        // Shown the way an open one is brought back: activation is cooperative,
+        // and a new window asked for once would open behind the app you're in.
+        bringForward(w)
     }
 
     // MARK: Onboarding
