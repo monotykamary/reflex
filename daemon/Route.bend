@@ -198,8 +198,10 @@ def pasts_text(xs: List<&2, P.Past>, +home: String, +i: Nat) -> String:
     case Con{p, t}:
       past_line(home, i, p) ++ pasts_text(t, home, 1n+i)
 
-def state_text(text: String, +home: String, seen: List<&2, Seen>, folders: List<&2, M.Folder>, pasts: List<&2, P.Past>) -> String:
-  "The user said: " ++ Js.str(text) ++ "\n" ++ section_of("Live coding-agent sessions (terminal panes):", agents_text(seen, home, 0n)) ++ section_of("Folders where a new session could be started:", folders_text(folders, home, 0n)) ++ section_of("Earlier conversations, not running, that could be resumed:", pasts_text(pasts, home, 0n))
+# `memory`: what the user sent where lately, and where they corrected a
+# pick for a similar request (written by the app; may be empty).
+def state_text(text: String, +home: String, seen: List<&2, Seen>, folders: List<&2, M.Folder>, pasts: List<&2, P.Past>, +memory: String) -> String:
+  "The user said: " ++ Js.str(text) ++ "\n" ++ section_of("Live coding-agent sessions (terminal panes):", agents_text(seen, home, 0n)) ++ section_of("Folders where a new session could be started:", folders_text(folders, home, 0n)) ++ section_of("Earlier conversations, not running, that could be resumed:", pasts_text(pasts, home, 0n)) ++ section_of("What the user did before (use it for follow-ups and to follow their corrections):", memory)
 
 # Questions
 # ---------
@@ -231,14 +233,14 @@ def folder_choices(xs: List<&2, M.Folder>, +home: String, +i: Nat) -> List<&2, S
 def target_q(+home: String, seen: List<&2, Seen>) -> String:
   Js.kv("target", Js.obj([
     Js.kv("type", Js.str("choice")),
-    Js.kv("instructions", Js.str("Which live session is the user's request meant for? Match the project, files and topic the user mentions against each session's folder, title and recent output. Choose new when the request is about a different project or no session fits.")),
+    Js.kv("instructions", Js.str("Which live session is the user's request meant for? Match the project, files and topic the user mentions against each session's folder, title and recent output. Choose new when the request is about a different project or no session fits. If the request follows on from something the user just sent (also, that, there, again, the same, or the same topic), choose the session it went to. Where the user corrected an earlier pick for a similar request, choose what they chose.")),
     Js.kv("criteria", Js.obj(agent_choices(seen, home, 0n))),
   ]))
 
 def folder_q(+home: String, folders: List<&2, M.Folder>) -> String:
   Js.kv("folder", Js.obj([
     Js.kv("type", Js.str("choice")),
-    Js.kv("instructions", Js.str("If a new session is started for this request, which folder is the request about? Prefer a folder the user names; otherwise the folder whose name, description or recent commits match the request. When several fit about equally, or the request names no project, prefer the one worked on most recently.")),
+    Js.kv("instructions", Js.str("If a new session is started for this request, which folder is the request about? Prefer a folder the user names; otherwise the folder whose name, description or recent commits match the request. When several fit about equally, or the request names no project, prefer the one worked on most recently. Where the user corrected an earlier pick for a similar request, choose what they chose.")),
     Js.kv("criteria", Js.obj(folder_choices(folders, home, 0n))),
   ]))
 
@@ -292,12 +294,12 @@ def questions(+home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>
   List.append(&2, String, List.append(&2, String, questions.agents(home, seen), questions.folders(home, folders)), questions.pasts(home, pasts))
 
 # One `jev` request line for `jev-fabric -- serve`.
-def request(+text: String, +home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>) -> String:
+def request(+text: String, +home: String, +seen: List<&2, Seen>, +folders: List<&2, M.Folder>, +pasts: List<&2, P.Past>, +memory: String) -> String:
   Js.obj([
     Js.kv("id", "1"),
     Js.kv("op", Js.str("jev")),
     Js.kv("request", Js.obj([
-      Js.kv("state", Js.str(state_text(text, home, seen, folders, pasts))),
+      Js.kv("state", Js.str(state_text(text, home, seen, folders, pasts, memory))),
       Js.kv("questions", Js.obj(questions(home, seen, folders, pasts))),
     ])),
   ]) ++ "\n"

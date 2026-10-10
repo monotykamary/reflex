@@ -5,15 +5,16 @@
 #   path  name  age_hours  branch  uses  description  recent_commits
 #
 # Roots come from REFLEX_ROOTS (colon-separated, default ~/VCS); git
-# repositories up to REFLEX_SCAN_DEPTH (default 4) levels below a root are
-# listed. REFLEX_FOLDERS (colon-separated) adds folders that are not
+# repositories whose .git is up to REFLEX_SCAN_DEPTH (default 6) levels below
+# a root are listed — deep enough for root/host/org/group/repo layouts
+# (~/VCS/work/acme/studio/app). Dependency and build folders are skipped. REFLEX_FOLDERS (colon-separated) adds folders that are not
 # repositories, and REFLEX_FOLDERS_FILE names a file of more, one per line
 # (folders added from the Ask bar). REFLEX_USAGE names a file of past spawn paths, one per line,
 # counted into `uses`. Reads only; never fetches, never writes.
 set -u
 
 roots=${REFLEX_ROOTS:-$HOME/VCS}
-depth=${REFLEX_SCAN_DEPTH:-4}
+depth=${REFLEX_SCAN_DEPTH:-6}
 usage=${REFLEX_USAGE:-}
 now=$(date +%s)
 
@@ -81,8 +82,9 @@ fi
   for r in $roots; do
     IFS=$old_ifs
     [ -d "$r" ] || continue
-    find "$r" -maxdepth "$depth" -name .git -prune \
-      -not -path '*/node_modules/*' -not -path '*/.build/*' -not -path '*/vendor/*' 2>/dev/null
+    find "$r" -maxdepth "$depth" \( -name node_modules -o -name .build -o -name vendor -o -name target \
+      -o -name dist -o -name build -o -name .venv -o -name Pods -o -name DerivedData \) -prune \
+      -o -name .git -print -prune 2>/dev/null
   done
   IFS=:
   for f in ${REFLEX_FOLDERS:-}; do

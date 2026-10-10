@@ -635,6 +635,7 @@ private struct RoutingPane: View {
     @ObservedObject var onboarding = Onboarding.shared
     @State private var key = ""
     @State private var hasKey = Settings.jevKey != nil
+    @State private var corrections = 0
 
     var body: some View {
         Form {
@@ -699,7 +700,19 @@ private struct RoutingPane: View {
                     Button("Apply & Restart reflexd") { Daemon.shared.restart(); onboarding.test() }
                 }
             }
+            Section {
+                LabeledContent {
+                    Button("Forget") { Memory.shared.forget(); corrections = 0 }
+                        .disabled(corrections == 0)
+                } label: {
+                    RowLabel("Memory",
+                             corrections == 0
+                                ? "Where your recent requests went, so follow-ups like \u{201C}also add tests there\u{201D} land in the same session. When you pick something other than Jev\u{2019}s suggestion, Jev remembers it for similar requests. Kept on this Mac."
+                                : "Jev has learned from \(corrections) of your corrections, and knows where your recent requests went. Kept on this Mac.")
+                }
+            }
         }
+        .onAppear { corrections = Memory.shared.corrections }
     }
 
     private func save() {

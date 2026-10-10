@@ -385,7 +385,9 @@ final class CommandModel: ObservableObject {
         // folder. (Not while the projects are still being indexed: then
         // "nothing fits" only means "nothing indexed yet".)
         let indexed = Store.shared.state.folders > 0
-        guard let top = r.ranked?.first else { return indexed ? "new" : nil }
+        // An earlier conversation is only brought back when Jev is sure (the
+        // `go` above); unsure, the guess is a live session or a folder.
+        guard let top = r.ranked?.first(where: { $0.action.type != "resume" }) else { return indexed ? "new" : nil }
         if top.bp < 2500 && indexed { return "new" }
         if let p = top.action.pane, top.action.type == "prompt" { return "s:" + p }
         if let c = top.action.cwd { return "f:" + c }
@@ -435,6 +437,9 @@ final class CommandModel: ObservableObject {
                 folders.append(Candidate(id: "f:" + f.path, kind: .folder, title: f.name,
                                          detail: "new \(kind) · \(f.short)" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path))
             }
+            // Folders before earlier sessions: new work is the common case,
+            // and the folders must not fall below the fold.
+            out += folders.prefix(8)
             // Earlier sessions Jev weighed for this request.
             for r in (jevText == request ? jev?.ranked ?? [] : []) where r.action.type == "resume" {
                 guard let x = r.action.session else { continue }
@@ -443,7 +448,6 @@ final class CommandModel: ObservableObject {
                                    last: "", modified: Date(), state: .past)
                 out.append(resumeRow(past, bp: r.bp))
             }
-            out += folders.prefix(8)
             if !request.isEmpty {
                 out.append(Candidate(id: "new", kind: .newFolder, title: "New folder “\(suggestedName)”",
                                      detail: "new \(kind) · \((Settings.shared.newFolderParent as NSString).appendingPathComponent(suggestedName).abbreviatingHome)"))
@@ -549,6 +553,33 @@ final class CommandModel: ObservableObject {
         }
     }
 
+    /// Where this request went, for follow-ups; and when it was not where
+    /// Jev would have sent it, the correction, for similar requests later.
+    private func remember(_ words: String, sentTo c: Candidate, kind: String) {
+        let target = describe(c, kind: kind)
+        Memory.shared.sent(words, to: target)
+        guard let p = pick, p != c.id, jevText == words else { return }
+        let jev = p == "new" ? "a new project folder" : rows.first { $0.id == p }.map { describe($0, kind: kind) }
+        if let jev { Memory.shared.corrected(words, jev: jev, chose: target) }
+    }
+
+    private func describe(_ c: Candidate, kind: String) -> String {
+        switch c.kind {
+        case .session:
+            guard let a = c.agent else { return c.title }
+            return "the \(a.kind) session in \(Memory.short(a.cwd))" + (a.title.isEmpty ? "" : " (\"\(a.title)\")")
+        case .folder:
+            return "a new \(kind) session in \(Memory.short(c.path ?? c.title))"
+        case .newFolder:
+            return "a new project folder"
+        case .resume:
+            guard let p = c.past else { return c.title }
+            return "the earlier \(p.agent) conversation \"\(p.title)\" in \(Memory.short(p.cwd))"
+        default:
+            return c.title
+        }
+    }
+
     /// ⌘⏎ in ask mode: send, then open that agent's terminal to watch.
     func sendAndOpen() {
         guard mode == .ask, let c = selected else { return }
@@ -558,6 +589,9 @@ final class CommandModel: ObservableObject {
     func send(to c: Candidate, open: Bool = false) {
         let words = request
         let kind = harness ?? Settings.shared.harness
+        if mode == .ask, ![.command, .chooseFolder, .ask].contains(c.kind), c.kind != .newFolder || naming {
+            remember(words, sentTo: c, kind: kind)
+        }
         switch c.kind {
         case .session:
             guard let a = c.agent else { return }

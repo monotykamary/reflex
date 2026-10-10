@@ -166,12 +166,17 @@ def scored_all(+toks: List<&2, String>, fs: List<&2, M.Folder>) -> List<&2, Scor
     case Con{f, t}:
       score(toks, f) <> scored_all(toks, t)
 
+# A folder is named when a word of the request is its name, or the first
+# part of it ("talkyform" names talkyform-private, "inloop" inloop.studio).
+def names(+name: String, +t: String) -> Bool:
+  String.eq(name, t) || String.starts_with(name, t ++ "-") || String.starts_with(name, t ++ "_") || String.starts_with(name, t ++ ".")
+
 def name_in(+name: String, toks: List<&2, String>) -> Bool:
   match toks:
     case Nil{}:
       False{}
     case Con{t, rest}:
-      String.eq(name, t) || name_in(name, rest)
+      names(name, t) || name_in(name, rest)
 
 def is_pinned(+toks: List<&2, String>, +s: Scored) -> Bool:
   match s:

@@ -700,7 +700,7 @@ def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +t
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         act(dry, chan, text, R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts))
 
-def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, ctx: M.Reply) -> IO(String):
+def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +memory: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
@@ -708,20 +708,20 @@ def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: S
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
         +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
-        +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts)
+        +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts, memory)
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         +d : R.Decision = R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts)
         retry(R.transient(d), d, dry, cfg, chan, text, harness, line, seen, cands, pasts)
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
-def route(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String) -> IO(String):
+def route(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +memory: String) -> IO(String):
   do IO<String>:
     ctx : M.Reply <- ask(chan, M.Context{})
-    route_ctx(dry, cfg, chan, text, harness, ctx)
+    route_ctx(dry, cfg, chan, text, harness, memory, ctx)
 
 # Jev's ranking of every candidate, live, for the Ask bar's list. Dry.
-def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, ctx: M.Reply) -> IO(String):
+def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, +memory: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
@@ -729,7 +729,7 @@ def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, ctx: M.Reply) -> 
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
         +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
-        +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts)
+        +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts, memory)
         t0 : Nat <- IO.now()
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         t1 : Nat <- IO.now()
@@ -739,13 +739,13 @@ def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, ctx: M.Reply) -> 
 
 # The JSON request for the candidates routing would show Jev (for a UI or a
 # debugging session), without calling Jev.
-def explain_ctx(+cfg: Cfg, +text: String, ctx: M.Reply) -> IO(String):
+def explain_ctx(+cfg: Cfg, +text: String, +memory: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
         +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
         all : List<&2, P.Past> <- read_pasts(cfg)
-        return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, folders, 8n), P.rank(text, all, 5n))) ++ "}"
+        return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, folders, 8n), P.rank(text, all, 5n), memory)) ++ "}"
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false}")
 
@@ -961,17 +961,17 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case ERoute{}:
       do IO<String>:
-        r : String <- route(is_true(Js.text_at(body, "dry")), cfg, chan, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)))
+        r : String <- route(is_true(Js.text_at(body, "dry")), cfg, chan, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"))
         ok(r)
     case ECandidates{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})
-        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), ctx)
+        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"), ctx)
         ok(r)
     case EExplain{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})
-        r : String <- explain_ctx(cfg, Js.text_at(body, "text"), ctx)
+        r : String <- explain_ctx(cfg, Js.text_at(body, "text"), Js.text_at(body, "memory"), ctx)
         ok(r)
     case ESend{}:
       do IO<String>:

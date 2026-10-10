@@ -60,6 +60,7 @@ struct InboxView: View {
 
     @ObservedObject var store = Store.shared
     @ObservedObject var model = InboxModel.shared
+    @ObservedObject var replies = Replies.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var rowsHeight: CGFloat = 0
     var openPane: (String) -> Void
@@ -97,6 +98,14 @@ struct InboxView: View {
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { handle($0) }
+        .onChange(of: model.shown, initial: true) { _, shown in
+            if shown { replies.refresh(items, agents: store.state.agents) }
+        }
+        .onChange(of: items.map(\.id)) { _, _ in replies.refresh(items, agents: store.state.agents) }
+    }
+
+    private func reply(_ item: ItemInfo) -> String? {
+        Replies.session(of: item, in: store.state.agents).flatMap { replies.text[$0.session] }
     }
 
     // MARK: Pieces
@@ -147,6 +156,7 @@ struct InboxView: View {
                                 section(asks(item) ? "Needs you" : "Updates")
                             }
                             Row(item: item,
+                                reply: reply(item),
                                 selected: item.id == current?.id,
                                 now: store.state.now,
                                 pending: store.state.pending.first { $0.item == item.id },
@@ -261,6 +271,8 @@ struct InboxView: View {
 /// they said (more of it when selected), or the question's answers.
 private struct Row: View {
     var item: ItemInfo
+    /// What the session said last, from its own session file.
+    var reply: String?
     var selected: Bool
     var now: Int
     var pending: PendingInfo?
@@ -289,7 +301,17 @@ private struct Row: View {
                     .opacity(hover ? 1 : 0)
                 }
             }
-            if !gist.isEmpty {
+            if let reply {
+                // A reply reads from its start: that is where it says what it did.
+                Text(reply)
+                    .font(Type.meta)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(selected ? 8 : 2)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 15)
+            } else if !gist.isEmpty {
+                // A screen reads from its end: the latest is at the bottom.
                 Text(gist)
                     .font(Type.meta)
                     .foregroundStyle(.secondary)

@@ -39,12 +39,14 @@ struct Client {
 
     /// Route a request. `dry`: decide only — nothing is sent or started.
     func route(_ text: String, dry: Bool = false) async throws -> RouteResponse {
-        try await post("/api/route", dry ? ["text": text, "dry": true] : ["text": text], as: RouteResponse.self)
+        var body: [String: Any] = ["text": text, "memory": await Memory.shared.context(for: text)]
+        if dry { body["dry"] = true }
+        return try await post("/api/route", body, as: RouteResponse.self)
     }
 
     /// Jev's live ranking for the Ask bar's list. Dry: nothing is sent.
     func candidates(_ text: String, harness: String?) async throws -> CandidatesResponse {
-        var body: [String: Any] = ["text": text]
+        var body: [String: Any] = ["text": text, "memory": await Memory.shared.context(for: text)]
         if let harness { body["harness"] = harness }
         return try await post("/api/candidates", body, as: CandidatesResponse.self)
     }
