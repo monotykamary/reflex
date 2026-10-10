@@ -376,8 +376,12 @@ final class CommandModel: ObservableObject {
         if userPicked, let s = selection, ids.contains(s) { return }
         userPicked = false
         var next = pick ?? ids.first
-        // ⌘Tab-like: already in the first session's terminal → the one before it.
-        if mode == .search, ids.count > 1, let front = frontPane, ids.first == "s:" + front { next = ids[1] }
+        // ⌘Tab-like: with nothing typed, already in the first session's
+        // terminal → the session before it. Typed words mean the match itself,
+        // even the session you are in; and never an earlier conversation.
+        if mode == .search, request.isEmpty, ids.count > 1, let front = frontPane, ids.first == "s:" + front, ids[1].hasPrefix("s:") {
+            next = ids[1]
+        }
         if next != selection {
             selection = next
             reorderedAt = Date()
