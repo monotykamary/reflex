@@ -240,7 +240,7 @@ def target_q(+home: String, seen: List<&2, Seen>) -> String:
 def folder_q(+home: String, folders: List<&2, M.Folder>) -> String:
   Js.kv("folder", Js.obj([
     Js.kv("type", Js.str("choice")),
-    Js.kv("instructions", Js.str("If a new session is started for this request, which folder is the request about? Prefer a folder the user names; otherwise the folder whose name, description or recent commits match the request. A folder that holds several repositories is their parent: choose it when the request spans more than one of the repositories it holds, or names the parent itself; choose the single repository when the request is about one. When several fit about equally, or the request names no project, prefer the one worked on most recently. Where the user corrected an earlier pick for a similar request, choose what they chose.")),
+    Js.kv("instructions", Js.str("If a new session is started for this request, which folder is the request about? Prefer a folder the user names; otherwise the folder whose name, description or recent commits match the request. A folder that holds several repositories is their parent: choose it when the request spans more than one of the repositories it holds, or names the parent itself; choose the single repository when the request is about one. A collection of many repositories is chosen only when the user names it or the work is about the whole collection. When several fit about equally, or the request names no project, prefer the one worked on most recently. Where the user corrected an earlier pick for a similar request, choose what they chose.")),
     Js.kv("criteria", Js.obj(folder_choices(folders, home, 0n))),
   ]))
 

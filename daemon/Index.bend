@@ -223,10 +223,32 @@ def take(xs: List<&2, M.Folder>, n: Nat) -> List<&2, M.Folder>:
     case Con{h, t} 1n+p:
       h <> take(t, p)
 
+# A folder holding many repositories (the scan describes it as "A collection
+# of N repositories"): offered when named or matched, never just for being
+# recent — its newest repo would put it on top of every request.
+def is_collection(+s: Scored) -> Bool:
+  match s:
+    case Scored{l, t, a, M.Folder{path, name, +desc, recent, branch, age, uses}}:
+      String.starts_with(desc, "A collection of")
+
+def keep_scored(drop: Bool, s: Scored, rest: List<&2, Scored>) -> List<&2, Scored>:
+  match drop:
+    case True{}:
+      rest
+    case False{}:
+      s <> rest
+
+def no_collections(xs: List<&2, Scored>) -> List<&2, Scored>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+s, t}:
+      keep_scored(is_collection(s), s, no_collections(t))
+
 def rank.parts(p: Parts, +k: Nat) -> List<&2, M.Folder>:
   match p:
     case Parts{pinned, matched, others}:
-      take(List.append(&2, M.Folder, folders_of(pinned), List.append(&2, M.Folder, folders_of(List.sort(~Scored, ~scored_le, matched)), folders_of(List.sort(~Scored, ~by_age_le, others)))), k)
+      take(List.append(&2, M.Folder, folders_of(pinned), List.append(&2, M.Folder, folders_of(List.sort(~Scored, ~scored_le, matched)), folders_of(List.sort(~Scored, ~by_age_le, no_collections(others))))), k)
 
 def rank.toks(+toks: List<&2, String>, fs: List<&2, M.Folder>, +k: Nat) -> List<&2, M.Folder>:
   rank.parts(partition(toks, scored_all(toks, fs)), k)

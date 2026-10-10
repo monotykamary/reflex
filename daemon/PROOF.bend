@@ -197,7 +197,7 @@ def take_bounded(xs: List<&2, M.Folder>, k: Nat) -> {Nat.is_le(List.length(&2, M
 def parts_bounded(p: Ix.Parts, k: Nat) -> {Nat.is_le(List.length(&2, M.Folder, Ix.rank.parts(p, k)), k) == True{} : Bool}:
   match p:
     case Ix.Parts{pinned, matched, others}:
-      take_bounded(List.append(&2, M.Folder, Ix.folders_of(pinned), List.append(&2, M.Folder, Ix.folders_of(List.sort(~Ix.Scored, ~Ix.scored_le, matched)), Ix.folders_of(List.sort(~Ix.Scored, ~Ix.by_age_le, others)))), k)
+      take_bounded(List.append(&2, M.Folder, Ix.folders_of(pinned), List.append(&2, M.Folder, Ix.folders_of(List.sort(~Ix.Scored, ~Ix.scored_le, matched)), Ix.folders_of(List.sort(~Ix.Scored, ~Ix.by_age_le, Ix.no_collections(others))))), k)
 
 def Laws.rank_is_bounded(text, fs, k):
   parts_bounded(Ix.partition(Ix.tokens(text), Ix.scored_all(Ix.tokens(text), fs)), k)

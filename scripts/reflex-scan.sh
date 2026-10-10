@@ -11,10 +11,10 @@
 # and archive/archived folders are skipped.
 #
 # Parents are listed too: a folder that is not a repository itself but holds
-# two to twelve of them (~/VCS/work/acme with web, mobile, …), for work that
-# spans repos. Its description says what it holds. Never a root itself, never
-# your home folder; a folder holding more than twelve is a collection, not a
-# project.
+# two or more (~/VCS/work/acme with web, mobile, …), for work that spans repos.
+# Its description says what it holds; one holding more than twelve is "a
+# collection" (~/VCS/open-source), which routing offers only when you name it
+# or your words match it. Never a root itself, never your home folder.
 #
 # REFLEX_FOLDERS (colon-separated) adds folders that are not repositories, and
 # REFLEX_FOLDERS_FILE names a file of more, one per line (folders added from
@@ -97,7 +97,8 @@ scan_parent() {
     uses=$(grep -cxF "$d" "$usage" 2>/dev/null || true)
     uses=${uses:-0}
   fi
-  printf '%s\t%s\t%s\t\t%s\tHolds %s repositories: %s.\t\n' "$d" "$(basename "$d")" $(( (now - newest) / 3600 )) "$uses" "$n" "$names"
+  if [ "$n" -gt 12 ]; then desc="A collection of $n repositories: $names."; else desc="Holds $n repositories: $names."; fi
+  printf '%s\t%s\t%s\t\t%s\t%s\t\n' "$d" "$(basename "$d")" $(( (now - newest) / 3600 )) "$uses" "$desc"
 }
 
 case "${1:-}" in
@@ -136,7 +137,7 @@ awk -v roots="$roots" -v home="$HOME" '
         count[d]++
       }
     }
-    for (d in count) if (count[d] >= 2 && count[d] <= 12 && !(d in repo)) cand[d] = 1
+    for (d in count) if (count[d] >= 2 && !(d in repo)) cand[d] = 1
     # A folder holding exactly what its parent holds is the same project:
     # list the parent (acme, not acme/packages).
     for (d in cand) { up = d; sub(/\/[^\/]*$/, "", up); if (!(up in cand) || count[up] != count[d]) print d }
