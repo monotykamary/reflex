@@ -157,5 +157,9 @@ def new_workspace(sock: String, cwd: String, label: String) -> IO(Result<&1, &1,
 def start_agent(sock: String, name: String, kind: String, pane: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "agent.start", p_start(name, kind, pane), 50000)
 
+# Close a pane: ends the agent running in it (the user asked, twice).
+def close_pane(sock: String, pane: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
+  call(sock, "pane.close", Js.obj([Js.kv("pane_id", Js.str(pane))]), 5000)
+
 def focus(sock: String, target: String) -> IO(Result<&1, &1, U32 & String, J.JSON>):
   call(sock, "agent.focus", Js.obj([Js.kv("target", Js.str(target))]), 5000)

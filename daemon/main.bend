@@ -774,6 +774,7 @@ type Ep is Data:
   EHealth{}
   ESide{}
   EFocus{}
+  EClose{}
   EJevPing{}
   EStatic{}
   EMissing{}
@@ -798,6 +799,7 @@ def rows() -> List<&2, Row>:
     Row{"/api/health", EHealth{}},
     Row{"/api/side", ESide{}},
     Row{"/api/focus", EFocus{}},
+    Row{"/api/close", EClose{}},
     Row{"/api/jev/ping", EJevPing{}},
   ]
 
@@ -967,6 +969,10 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.focus(Cfg.sock(cfg), Js.text_at(body, "pane"))
         ok(pane_json(ok_detail(r, "focused")))
+    case EClose{}:
+      do IO<String>:
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.close_pane(Cfg.sock(cfg), Js.text_at(body, "pane"))
+        ok(pane_json(ok_detail(r, "closed")))
     case EStatic{}:
       serve_static(cfg, static_name(Http.Req.path(req)))
     case EMissing{}:

@@ -227,6 +227,7 @@ struct AgentPopout: View {
             .buttonStyle(Pressable())
             .opacity(0.5)
             .help("Show in herdr")
+            CloseSessionButton(pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
         }
         .foregroundStyle(Color(hex: theme.foreground))
         .padding(.leading, 78)

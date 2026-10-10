@@ -64,6 +64,8 @@ struct Client {
     func answer(item: Int, key: String) async { await post("/api/answer", ["item": item, "key": key]) }
     func dismiss(_ item: Int) async { await post("/api/dismiss", ["item": item]) }
     func focus(_ pane: String) async { await post("/api/focus", ["pane": pane]) }
+    /// Ends the session: herdr closes the pane and the agent in it.
+    func close(_ pane: String) async { await post("/api/close", ["pane": pane]) }
     func reindex() async { await post("/api/reindex", [:]) }
 
     func pane(_ id: String, lines: Int = 160) async -> String {

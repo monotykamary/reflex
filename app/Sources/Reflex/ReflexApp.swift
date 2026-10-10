@@ -490,6 +490,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bar = p
         }
         command.reset()
+        // ⌘Tab-like: if you're in a session's terminal, ⏎ goes to the one before it.
+        command.frontPane = popouts.first { $0.value.isKeyWindow || ($0.value.isMainWindow && NSApp.isActive) }?.key
         var t = Transaction()
         t.disablesAnimations = true
         withTransaction(t) { command.shown = true }
@@ -623,7 +625,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config)
     }
 
+    /// A session ended from Reflex: its terminal window goes too.
+    func closedSession(_ pane: String) {
+        popouts[pane]?.close()
+        if command.target == pane { command.target = nil }
+    }
+
     func showPane(_ pane: String) {
+        Recents.shared.touch(pane)
         edge.hide(returnFocus: false)
         // The bar goes first, at once: left to fade while still key, it would
         // hand focus back to the app it came from as it left.
@@ -659,6 +668,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session.detach()
                 self?.popouts[pane] = nil
             }
+        }
+        // Clicking between terminals counts as switching, for the bar's order.
+        NotificationCenter.default.addObserver(forName: NSWindow.didBecomeKeyNotification, object: w, queue: .main) { _ in
+            Task { @MainActor in Recents.shared.touch(pane) }
         }
         popouts[pane] = w
         AppDelegate.activateSelf()

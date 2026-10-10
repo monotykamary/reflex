@@ -636,6 +636,7 @@ private struct AgentRow: View {
                 action("terminal", "Open terminal", open)
                 action("sparkle", "Message this agent", ask)
                 action("arrow.up.forward.app", "Show in herdr", reveal)
+                CloseSessionButton(pane: agent.pane)
             }
             .opacity(hover ? 1 : 0.45)
         }

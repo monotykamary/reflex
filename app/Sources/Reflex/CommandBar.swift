@@ -103,6 +103,12 @@ final class CommandModel: ObservableObject {
     /// When the rows last changed order (a click right after is ignored).
     private(set) var reorderedAt = Date.distantPast
 
+    /// The session whose terminal was in front when the bar opened.
+    var frontPane: String?
+    /// ⌘⌫ armed on this session: a second ⌘⌫ closes it.
+    @Published var armedClose: String?
+    private var disarm: Task<Void, Never>?
+
     var close: () -> Void = {}
     /// Open an agent's terminal.
     var openPane: (String) -> Void = { _ in }
@@ -137,6 +143,7 @@ final class CommandModel: ObservableObject {
         naming = false
         newName = ""
         sendWhenReady = false
+        armedClose = nil
         focusTick += 1
         Task { local = await Client.local.folders("") }
     }
@@ -187,15 +194,32 @@ final class CommandModel: ObservableObject {
         return words.count >= 2 && starts.contains(first)
     }
 
-    /// Sessions whose title, agent, folder or path contain every word.
+    /// Sessions whose title, agent, folder or path contain every word —
+    /// most recently switched to first, like ⌘Tab.
     var sessionMatches: [AgentInfo] {
         let q = request.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
-        let order = ["blocked": 0, "working": 1, "done": 2]
-        return agents.filter { a in
+        return Recents.shared.sorted(agents.filter { a in
             let hay = "\(a.title) \(a.kind) \(a.folder) \(a.place) \(a.name)".lowercased()
             return q.allSatisfy { hay.contains($0) }
+        })
+    }
+
+    /// ⌘⌫ on a session: once arms it, twice (within three seconds) closes it.
+    func closeSelected() {
+        guard let a = selected?.agent else { return }
+        if armedClose == a.pane {
+            disarm?.cancel()
+            armedClose = nil
+            Sessions.close(a.pane)
+            return
         }
-        .sorted { (order[$0.status] ?? 3) < (order[$1.status] ?? 3) }
+        armedClose = a.pane
+        disarm?.cancel()
+        disarm = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            self?.armedClose = nil
+        }
     }
 
     var isSide: Bool {
@@ -297,7 +321,9 @@ final class CommandModel: ObservableObject {
         let ids = rows.map(\.id)
         if userPicked, let s = selection, ids.contains(s) { return }
         userPicked = false
-        let next = pick ?? ids.first
+        var next = pick ?? ids.first
+        // ⌘Tab-like: already in the first session's terminal → the one before it.
+        if mode == .search, ids.count > 1, let front = frontPane, ids.first == "s:" + front { next = ids[1] }
         if next != selection {
             selection = next
             reorderedAt = Date()
@@ -365,13 +391,17 @@ final class CommandModel: ObservableObject {
         let side = isSide
         var out: [Candidate] = []
         // Sessions: Jev's order when it has one, else live order.
-        var sessions = agents.map { a in
+        var sessions = Recents.shared.sorted(agents).map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
                       title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
                       detail: (side ? "btw → " : "") + "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status),
                       bp: bp(for: "s:" + a.pane), agent: a, path: a.cwd)
         }
-        sessions.sort { ($0.bp ?? -1) > ($1.bp ?? -1) }
+        // Jev's weight first; equal weights keep the recent order (stable).
+        sessions = sessions.enumerated().sorted { l, r in
+            let a = l.element.bp ?? -1, b = r.element.bp ?? -1
+            return a != b ? a > b : l.offset < r.offset
+        }.map(\.element)
         out += sessions
         if !side {
             // Folders: the chosen one, Jev's, then the local index's — once each.
@@ -423,6 +453,7 @@ final class CommandModel: ObservableObject {
         let i = r.firstIndex { $0.id == selection } ?? 0
         selection = r[max(0, min(r.count - 1, i + delta))].id
         userPicked = true
+        armedClose = nil
         naming = false
     }
 
@@ -431,6 +462,7 @@ final class CommandModel: ObservableObject {
         guard Date().timeIntervalSince(reorderedAt) > 0.35 else { return }
         selection = c.id
         userPicked = true
+        armedClose = nil
         if count >= 2 { submit() }
     }
 
@@ -486,6 +518,7 @@ final class CommandModel: ObservableObject {
                         }
                         done(label)
                     } else {
+                        Recents.shared.touch(a.pane)
                         let p = try await Client.local.send(pane: a.pane, text: words, label: label)
                         await watch(p.id, label: label)
                     }
@@ -762,6 +795,9 @@ struct CommandBar: View {
             // ⏎ is the bar's main key, so it is handled here.
             model.submit()
             return .handled
+        case .delete where press.modifiers.contains(.command) && model.selected?.kind == .session:
+            model.closeSelected()
+            return .handled
         case .delete where model.text.isEmpty: return model.dropToken() ? .handled : .ignored
         default: break
         }
@@ -876,6 +912,10 @@ struct CommandBar: View {
     @ViewBuilder private var footerStatus: some View {
         HStack(spacing: 6) {
             switch model.phase {
+            case .typing where model.armedClose != nil:
+                Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.red)
+                Text("⌘⌫ again to close \(model.selected?.agent.map { "\($0.kind) · \($0.folder)" } ?? "this session") — it ends the agent")
+                    .foregroundStyle(.primary).lineLimit(1)
             case .typing where model.mode == .search && !model.request.isEmpty && model.rows.isEmpty:
                 Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
                 Text("No session matches “\(model.request)” — write it as a sentence to send it").foregroundStyle(.secondary).lineLimit(1)
@@ -903,6 +943,7 @@ struct CommandBar: View {
                     }
                 } else if model.mode == .search {
                     hint("⏎", "open")
+                    if model.selected?.kind == .session { hint("⌘⌫", "close") }
                     Text("type a request to send it").foregroundStyle(.tertiary)
                     hint("/", "commands")
                 } else {
