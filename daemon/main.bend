@@ -631,13 +631,97 @@ def screens(cur: List<&2, M.Agent>, +sock: String, +prev: List<&2, M.Agent>) -> 
 type Snap is Data:
   Snap{ok: Bool, agents: List<&2, M.Agent>}
 
+# Claude's own word on its sessions: ~/.claude/sessions/<pid>.json says
+# "busy" while a turn runs and "shell" while a shell it started in the
+# background still runs after the turn — which Herdr reports as done (Claude wakes and carries on when
+# the shell finishes). Only files of live processes count.
+def busy_script() -> String:
+  "for f in \"$HOME\"/.claude/sessions/*.json; do p=${f##*/}; p=${p%.json}; kill -0 \"$p\" 2>/dev/null && { cat \"$f\"; echo; }; done"
+
+def busy_pick(busy: Bool, +sid: String) -> String:
+  match busy:
+    case True{}:
+      sid
+    case False{}:
+      ""
+
+def busy_of.r(r: Result<&1, &1, U32 & String, J.JSON>) -> String:
+  match r:
+    case Done{+v}:
+      # "busy" during a turn; "shell" after it, while a background shell runs.
+      busy_pick(String.eq(Js.text_at(v, "status"), "busy") || String.eq(Js.text_at(v, "status"), "shell"), Js.text_at(v, "sessionId"))
+    case Fail{e}:
+      ""
+
+def busy_of(line: String) -> String:
+  busy_of.r(Js.read(line))
+
+def busy_put.if(empty: Bool, sid: String, rest: List<&2, String>) -> List<&2, String>:
+  match empty:
+    case True{}:
+      rest
+    case False{}:
+      sid <> rest
+
+def busy_put(+sid: String, rest: List<&2, String>) -> List<&2, String>:
+  busy_put.if(String.is_empty(sid), sid, rest)
+
+def busy_list(lines: List<&2, String>) -> List<&2, String>:
+  match lines:
+    case Nil{}:
+      []
+    case Con{l, t}:
+      busy_put(busy_of(l), busy_list(t))
+
+def read_busy() -> IO(List<&2, String>):
+  do IO<List<&2, String>>:
+    out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/bin/sh", ["-c", busy_script()], "", 1048576, 3000)
+    return busy_list(String.lines(text_or(stdout_of(out), "")))
+
+def member(+x: String, xs: List<&2, String>) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{+h, t}:
+      String.eq(h, x) || member(x, t)
+
+# Done or idle, but its shell still runs: still working.
+def still_working(s: M.Status) -> M.Status:
+  match s:
+    case M.Finished{}:
+      M.Working{}
+    case M.Idle{}:
+      M.Working{}
+    case other:
+      other
+
+def busy_status(busy: Bool, s: M.Status) -> M.Status:
+  match busy:
+    case True{}:
+      still_working(s)
+    case False{}:
+      s
+
+def mark_busy(a: M.Agent, +busy: List<&2, String>) -> M.Agent:
+  match a:
+    case M.Agent{pane, name, +kind, status, cwd, title, seq, +session, screen}:
+      M.Agent{pane, name, kind, busy_status(String.eq(kind, "claude") && R.bool_not(String.is_empty(session)) && member(session, busy), status), cwd, title, seq, session, screen}
+
+def marks(xs: List<&2, M.Agent>, +busy: List<&2, String>) -> List<&2, M.Agent>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{a, t}:
+      mark_busy(a, busy) <> marks(t, busy)
+
 def snap(r: Result<&1, &1, U32 & String, List<&2, M.Agent>>, +sock: String, +prev: List<&2, M.Agent>) -> IO(Snap):
   match r:
     case Fail{e}:
       IO.pure(Snap, Snap{False{}, prev})
     case Done{cur}:
       do IO<Snap>:
-        xs : List<&2, M.Agent> <- screens(cur, sock, prev)
+        +busy : List<&2, String> <- read_busy()
+        xs : List<&2, M.Agent> <- screens(marks(cur, busy), sock, prev)
         return Snap{True{}, xs}
 
 def poll.post(+chan: Chan(Env), +s: Snap) -> IO(List<&2, M.Agent>):
