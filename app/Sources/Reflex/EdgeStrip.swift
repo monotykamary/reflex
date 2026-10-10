@@ -141,8 +141,11 @@ struct Rail: View {
     @ObservedObject var store = Store.shared
     @ObservedObject var rail = RailModel.shared
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var inbox = InboxModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Namespace private var glass
+    /// The dot under the pointer, which shows its status beside it.
+    @State private var hoverDot: String?
     var openInbox: () -> Void
     var openAgent: (AgentInfo) -> Void
     /// Open the command bar, pinned to an agent when one is given.
@@ -167,14 +170,13 @@ struct Rail: View {
         questions.indices.contains(rail.cardIndex) ? questions[rail.cardIndex] : questions.first
     }
 
-    /// What sits beside the buttons: the waiting question, or every agent at a glance.
+    /// What sits beside the buttons: the waiting question, or — only once you
+    /// click the dots — every agent. Nothing while the inbox is open beside it.
     private var showing: RailModel.Panel {
+        if inbox.shown { return .auto }
         switch rail.panel {
-        case .question where card != nil: return .question
         case .agents where !store.state.agents.isEmpty: return .agents
-        default:
-            if card != nil { return .question }
-            return store.state.agents.isEmpty ? .auto : .agents
+        default: return card != nil ? .question : .auto
         }
     }
 
@@ -271,6 +273,11 @@ struct Rail: View {
         .padding(.trailing, 10)
     }
 
+    private func toggleAgents() {
+        if inbox.shown { InboxModel.shared.shown = false }
+        rail.panel = showing == .agents ? .auto : .agents
+    }
+
     private var column: some View {
         VStack(spacing: 10) {
             RoundButton(help: "Inbox", action: openInbox) {
@@ -289,21 +296,33 @@ struct Rail: View {
             }
 
             if !store.state.agents.isEmpty {
+                // The dots: click for every agent's details, click again to put them away.
                 VStack(spacing: 2) {
                     ForEach(store.state.agents.prefix(10)) { a in
-                        Button { openAgent(a) } label: {
+                        Button(action: toggleAgents) {
                             AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
                                 .frame(width: 40, height: 28)
                                 .contentShape(Rectangle())
                         }
                         .buttonStyle(Pressable())
-                        .help("\(a.kind) · \(a.folder) — \(a.title.isEmpty ? a.status : a.title)")
+                        .onHover { h in hoverDot = h ? a.pane : (hoverDot == a.pane ? nil : hoverDot) }
+                        .overlay(alignment: .trailing) {
+                            if hoverDot == a.pane && showing != .agents {
+                                StatusPill(agent: a)
+                                    .fixedSize()
+                                    .offset(x: -48)
+                                    .transition(.opacity.combined(with: .offset(x: 6)))
+                                    .allowsHitTesting(false)
+                            }
+                        }
+                        .animation(Motion.micro, value: hoverDot)
+                        .accessibilityLabel("\(a.kind) in \(a.folder), \(StatusPill.word(a.status))")
                     }
                 }
                 .padding(.vertical, 6)
-                .glassEffect(.rail, in: Capsule())
+                .glassEffect(.rail.interactive(), in: Capsule())
                 .glassEffectID("agents", in: glass)
-                .onHover { h in if h { rail.panel = .agents } }
+                .help(showing == .agents ? "Hide agents" : "Show agents")
             }
 
             VStack(spacing: 0) {
@@ -330,6 +349,32 @@ struct Rail: View {
             .glassEffect(.rail.interactive(), in: Circle())
             .help("More")
         }
+    }
+}
+
+/// getone-style: hovering a dot names its state beside it.
+private struct StatusPill: View {
+    var agent: AgentInfo
+
+    static func word(_ status: String) -> String {
+        switch status {
+        case "working": return "Working"
+        case "blocked": return "Needs you"
+        case "done": return "Done"
+        default: return "Idle"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle().fill(Tone.of(agent.status)).frame(width: 6, height: 6)
+            Text(agent.folder).foregroundStyle(Ink.dim)
+            Text(StatusPill.word(agent.status)).foregroundStyle(Ink.text)
+        }
+        .font(.system(size: 12, weight: .medium))
+        .lineLimit(1)
+        .padding(.horizontal, 10).padding(.vertical, 6)
+        .glassEffect(.rail, in: Capsule())
     }
 }
 

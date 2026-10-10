@@ -37,7 +37,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 
 | | |
 |---|---|
-| **Tab & rail** | While agents are active, a small dark tab grows out of the right screen edge: a spinning ring per working agent, amber for waiting, green for done. Hover it (or rest on an empty edge for half a second) to open the rail, in Liquid Glass: inbox, agents, Ask and Settings, beside either the question waiting on you (answer with 1, 2 or 3) or every agent at a glance, grouped by project, with one click to its terminal, a pinned message, or herdr. |
+| **Tab & rail** | While agents are active, a small dark tab grows out of the right screen edge: a spinning ring per working agent, amber for waiting, green for done. Hover it (or rest on an empty edge for half a second) to open the rail, in Liquid Glass: inbox, agents, Ask and Settings, beside the question waiting on you (answer with 1, 2 or 3). Hover a dot for its state; click the dots for every agent, grouped by project, with one click to its terminal, a pinned message, or herdr. |
 | **⌥⌥ command bar** | Double-tap Option, type, ⏎. Reflex routes it to the right session, or starts a new one in the right folder. ⇥ pins a specific agent instead. The action waits out a **2 s undo window** (Esc undoes and gives your text back). |
 | **Unsure? It asks.** | Below the confidence threshold (default 60%) nothing is sent: you get numbered choices (1/2/3) instead. |
 | **Inbox** | Every blocked question (with its numbered options parsed off the agent's screen), finished turn, side answer and routing question. J/K move, 1–9 answer, E clear, ⏎ open, U undo. |
