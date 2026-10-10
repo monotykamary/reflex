@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import Security
 
@@ -27,6 +28,8 @@ final class Settings: ObservableObject {
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
     /// A regular app (Dock, ⌘Tab, menu bar) rather than menu-bar only.
     @Published var showInDock: Bool { didSet { d.set(showInDock, forKey: "showInDock") } }
+    /// "system", "light" or "dark": Reflex's surfaces in either of Raycast's tones.
+    @Published var appearance: String { didSet { d.set(appearance, forKey: "appearance") } }
 
     private init() {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
@@ -44,6 +47,17 @@ final class Settings: ObservableObject {
         edgeDelay = d.object(forKey: "edgeDelay") as? Double ?? 0.5
         onboarded = d.bool(forKey: "onboarded")
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true
+        appearance = d.string(forKey: "appearance") ?? "system"
+    }
+
+    /// Light, dark, or whatever macOS is using. (Agent terminals keep their
+    /// own theme's appearance.)
+    @MainActor func applyAppearance() {
+        switch appearance {
+        case "light": NSApp.appearance = NSAppearance(named: .aqua)
+        case "dark": NSApp.appearance = NSAppearance(named: .darkAqua)
+        default: NSApp.appearance = nil
+        }
     }
 
     static var supportDir: URL {

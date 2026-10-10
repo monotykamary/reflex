@@ -57,6 +57,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if !Settings.shared.onboarded && ProcessInfo.processInfo.environment["REFLEX_SHOW"] == nil {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in self?.showOnboarding() }
         }
+        Settings.shared.applyAppearance()
+        Settings.shared.$appearance.dropFirst().removeDuplicates().sink { _ in
+            DispatchQueue.main.async { Settings.shared.applyAppearance() }
+        }.store(in: &bag)
         Settings.shared.$showInDock.dropFirst().removeDuplicates().sink { dock in
             NSApp.setActivationPolicy(dock ? .regular : .accessory)
         }.store(in: &bag)
@@ -573,7 +577,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w.isMovableByWindowBackground = true
             w.isOpaque = false
             w.backgroundColor = .clear
-            w.appearance = NSAppearance(named: .darkAqua)
             w.contentView = NSHostingView(rootView: OnboardingView())
             w.isReleasedWhenClosed = false
             NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { _ in

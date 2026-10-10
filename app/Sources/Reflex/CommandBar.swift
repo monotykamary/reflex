@@ -157,14 +157,10 @@ struct CommandBar: View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 field
-                    .glassTone(RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-                    .glassEffectID("field", in: glass)
+                    .raySurface(RoundedRectangle(cornerRadius: 24, style: .continuous))
                     .modifier(Shake(animatableData: model.shake))
                 tray
-                    .glassTone(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .glassEffectID("tray", in: glass)
+                    .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
             }
         }
         .frame(width: 680)
@@ -244,8 +240,8 @@ struct CommandBar: View {
             }
             .padding(.horizontal, 10)
             .frame(height: CommandBar.lineHeight - 2)
-            .glassEffect(.regular.tint(Tone.of(a.status).opacity(0.25)), in: Capsule())
-            .glassEffectID("pin", in: glass)
+            .background(Tone.of(a.status).opacity(0.22), in: Capsule())
+            .overlay(Capsule().strokeBorder(Tone.of(a.status).opacity(0.4), lineWidth: 1))
             .transition(.surface(reduce: reduce))
         } else {
             Image(systemName: "sparkle")
@@ -346,7 +342,7 @@ struct CommandBar: View {
                                     Text("\(a.kind) · \(a.folder)").font(Type.meta).lineLimit(1)
                                 }
                                 .padding(.horizontal, 10).padding(.vertical, 6)
-                                .background(on ? Tone.of(a.status).opacity(0.22) : GlassTone.raised,
+                                .background(on ? Tone.of(a.status).opacity(0.22) : Color.primary.opacity(0.1),
                                             in: Capsule())
                                 .overlay(Capsule().strokeBorder(on ? Tone.of(a.status).opacity(0.55) : .clear, lineWidth: 1))
                             }

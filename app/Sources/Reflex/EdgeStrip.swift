@@ -39,12 +39,10 @@ final class RailModel: ObservableObject {
 // MARK: - Shared pieces
 
 enum Ink {
-    static let surface = Color(hex: "#0f0f11")
-    static let raised = Color(hex: "#1a1a1d")
-    static let hover = Color(hex: "#242428")
-    static let line = Color.white.opacity(0.09)
-    static let text = Color.white.opacity(0.92)
-    static let dim = Color.white.opacity(0.55)
+    static let text = Color.primary.opacity(0.92)
+    static let dim = Color.primary.opacity(0.55)
+    static let line = Color.primary.opacity(0.1)
+    static let hover = Color.primary.opacity(0.08)
 }
 
 /// An agent's state, the way the tab and rail draw it.
@@ -69,7 +67,7 @@ struct AgentGlyph: View {
             case "done":
                 Circle().fill(Tone.done).frame(width: size * 0.62, height: size * 0.62)
             default:
-                Circle().fill(Color.white.opacity(0.28)).frame(width: size * 0.5, height: size * 0.5)
+                Circle().fill(Color.primary.opacity(0.28)).frame(width: size * 0.5, height: size * 0.5)
             }
         }
         .frame(width: size, height: size)
@@ -87,10 +85,17 @@ struct AgentGlyph: View {
 
 /// The tab's outline: rounded on the screen side, with concave "ears" where it
 /// meets the screen edge, so it reads as growing out of the edge.
-struct EdgeTabShape: Shape {
+struct EdgeTabShape: InsettableShape {
     var ear: CGFloat = 9
     var radius: CGFloat = 12
-    func path(in r: CGRect) -> Path {
+    var inset: CGFloat = 0
+    func inset(by amount: CGFloat) -> EdgeTabShape {
+        var s = self
+        s.inset += amount
+        return s
+    }
+    func path(in rect: CGRect) -> Path {
+        let r = rect.insetBy(dx: inset, dy: inset)
         let w = r.width, h = r.height, f = ear, c = min(radius, (h - 2 * f) / 2)
         var p = Path()
         p.move(to: CGPoint(x: w, y: 0))
@@ -106,11 +111,6 @@ struct EdgeTabShape: Shape {
     }
 }
 
-/// Plain Liquid Glass: grey and frosted, the desktop showing through.
-extension Glass {
-    static var rail: Glass { .regular }
-}
-
 private struct RoundButton<Label: View>: View {
     var help: String
     var action: () -> Void
@@ -119,11 +119,10 @@ private struct RoundButton<Label: View>: View {
         Button(action: action) {
             label
                 .frame(width: 40, height: 40)
-                .glassTone(Circle(), raised: true)
+                .raySurface(Circle())
                 .contentShape(Circle())
         }
         .buttonStyle(Pressable())
-        .glassEffect(.rail.interactive(), in: Circle())
         .help(help)
     }
 }
@@ -266,10 +265,8 @@ struct Rail: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .animation(rail.visible ? Motion.enter : Motion.exit, value: rail.visible)
         .animation(Motion.spring, value: Rail.active(store.state.agents).map(\.pane))
-        .environment(\.colorScheme, .dark)
         // One look whether or not the rail has the keys: it takes them while the
         // pointer is over it, and glass would otherwise change as they come and go.
-        .environment(\.controlActiveState, .inactive)
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { Rail.key($0) }
@@ -290,9 +287,7 @@ struct Rail: View {
         .padding(.vertical, 9 + 12)
         .padding(.leading, 8)
         .padding(.trailing, 7)
-        .glassTone(EdgeTabShape(), raised: true)
-        .glassEffect(.rail, in: EdgeTabShape())
-        .glassEffectID("agents", in: glass)
+        .raySurface(EdgeTabShape())
     }
 
     // MARK: Column
@@ -361,9 +356,7 @@ struct Rail: View {
                     }
                 }
                 .padding(.vertical, 6)
-                .glassTone(Capsule(), raised: true)
-                .glassEffect(.rail, in: Capsule())
-                .glassEffectID("agents", in: glass)
+                .raySurface(Capsule())
                 .help(side == .agents ? "Hide agents" : "Show agents")
             }
 
@@ -372,8 +365,7 @@ struct Rail: View {
                 PillButton(symbol: "gearshape", help: "Settings", action: openSettings)
             }
             .padding(.vertical, 4)
-            .glassTone(Capsule(), raised: true)
-            .glassEffect(.rail, in: Capsule())
+            .raySurface(Capsule())
 
             Menu {
                 Button("Restart reflexd", action: restart)
@@ -383,14 +375,13 @@ struct Rail: View {
             } label: {
                 Image(systemName: "ellipsis").font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.dim)
                     .frame(width: 40, height: 40)
-                    .glassTone(Circle(), raised: true)
+                    .raySurface(Circle())
                     .contentShape(Circle())
             }
             .menuStyle(.button)
             .buttonStyle(.plain)
             .menuIndicator(.hidden)
             .fixedSize()
-            .glassEffect(.rail.interactive(), in: Circle())
             .help("More")
         }
     }
@@ -421,8 +412,6 @@ struct RailSide: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .trailing)
         .animation(Motion.enter, value: mode)
-        .environment(\.colorScheme, .dark)
-        .environment(\.controlActiveState, .inactive)
         .focusable()
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { Rail.key($0) }
@@ -488,8 +477,7 @@ private struct StatusPill: View {
         .font(.system(size: 12, weight: .medium))
         .lineLimit(1)
         .padding(.horizontal, 10).padding(.vertical, 6)
-        .glassTone(Capsule(), raised: true)
-        .glassEffect(.rail, in: Capsule())
+        .raySurface(Capsule())
     }
 }
 
@@ -581,7 +569,7 @@ private struct AgentList: View {
                 .font(.system(size: 11.5))
                 .lineLimit(1)
                 .padding(.horizontal, 8).padding(.vertical, 4)
-                .background(Color.white.opacity(0.07), in: Capsule())
+                .background(Color.primary.opacity(0.07), in: Capsule())
                 .padding(.horizontal, 8).padding(.bottom, 3)
             }
 
@@ -613,8 +601,7 @@ private struct AgentList: View {
             .frame(height: min(max(rowsHeight, 30), 520))
         }
         .frame(width: 340)
-        .glassTone(RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+        .raySurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
     }
 }
 
@@ -657,7 +644,7 @@ private struct AgentRow: View {
             .opacity(hover ? 1 : 0.45)
         }
         .padding(.horizontal, 8).padding(.vertical, 3)
-        .background(hover ? Color.white.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .background(hover ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
         .contentShape(Rectangle())
         .onTapGesture(perform: open)
         .onHover { h in withAnimation(Motion.micro) { hover = h } }
@@ -715,7 +702,7 @@ private struct QuestionCard: View {
                 if count > 1 {
                     HStack(spacing: 4) {
                         ForEach(0..<min(count, 5), id: \.self) { i in
-                            Capsule().fill(i == index ? Tone.working : Color.white.opacity(0.25))
+                            Capsule().fill(i == index ? Tone.working : Color.primary.opacity(0.25))
                                 .frame(width: i == index ? 14 : 5, height: 5)
                         }
                     }
@@ -740,7 +727,7 @@ private struct QuestionCard: View {
             HStack(spacing: 10) {
                 AgentGlyph(status: item.kind == "route" ? "working" : "blocked", size: 14)
                     .frame(width: 26, height: 26)
-                    .background(Color.white.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.agent).font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text)
                     Text(item.kind == "route" ? "Pick where your request goes" : "Waiting for your answer · \(agent?.folder ?? "")")
@@ -765,7 +752,7 @@ private struct QuestionCard: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 9)
-                        .background(Color.white.opacity(hoverKey == o.key ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                        .background(Color.primary.opacity(hoverKey == o.key ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Ink.line))
                         .contentShape(Rectangle())
                     }
@@ -795,8 +782,7 @@ private struct QuestionCard: View {
         }
         .padding(16)
         .frame(width: 340)
-        .glassTone(RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .glassEffect(.rail, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+        .raySurface(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Motion.enter, value: pending?.id)
     }
 }
@@ -822,8 +808,7 @@ private struct KeyHint: View {
         .lineLimit(1)
         .fixedSize()
         .padding(.horizontal, 14).padding(.vertical, 8)
-        .glassTone(Capsule(), raised: true)
-        .glassEffect(.rail, in: Capsule())
+        .raySurface(Capsule())
     }
 }
 

@@ -189,7 +189,7 @@ struct AgentPopout: View {
                         Button("Reattach") { session.attach() }.buttonStyle(.glassProminent)
                     }
                     .padding(18)
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
                     .transition(.surface(reduce: reduce))
                 }
             }

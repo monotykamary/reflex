@@ -263,7 +263,6 @@ struct OnboardingView: View {
             VStack { Spacer(); footer }
         }
         .frame(width: 920, height: 600)
-        .environment(\.colorScheme, .dark)
         .onKeyPress(.return) {
             // On the Jev step, Return routes the trial request instead.
             guard model.step != .jev else { return .ignored }
@@ -280,17 +279,17 @@ struct OnboardingView: View {
                 .font(.system(size: 11.5, weight: .semibold))
                 .tracking(0.8)
                 .textCase(.uppercase)
-                .foregroundStyle(.white.opacity(0.55))
+                .foregroundStyle(.primary.opacity(0.55))
             Text(title)
                 .font(OnboardType.display)
                 .tracking(-1.3)
                 .lineSpacing(-4)
-                .foregroundStyle(.white)
+                .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
             Text(lede)
                 .font(.system(size: 15, weight: .regular))
                 .tracking(-0.1)
-                .foregroundStyle(.white.opacity(0.72))
+                .foregroundStyle(.primary.opacity(0.72))
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
             checks.padding(.top, 8)
@@ -388,7 +387,7 @@ struct OnboardingView: View {
                         SecureField("…or paste a TypeSafe API key", text: $key)
                             .textFieldStyle(.plain)
                             .padding(.horizontal, 12).padding(.vertical, 8)
-                            .glassEffect(.regular, in: Capsule())
+                            .rayPill(Capsule())
                             .onSubmit { model.saveKey(key); key = "" }
                         GlassAction("Save") { model.saveKey(key); key = "" }
                     }
@@ -404,7 +403,7 @@ struct OnboardingView: View {
                         Button {
                             model.setRoots(settings.roots.split(separator: ":").map(String.init).filter { $0 != root })
                         } label: { Image(systemName: "xmark") }
-                        .buttonStyle(.plain).foregroundStyle(.white.opacity(0.5))
+                        .buttonStyle(.plain).foregroundStyle(.primary.opacity(0.5))
                     }
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .pane(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -413,10 +412,10 @@ struct OnboardingView: View {
                     GlassAction("Add folder…") { model.addRoot() }
                     Spacer()
                     Text(store.state.folders == 0 ? "indexing…" : "\(store.state.folders) repositories")
-                        .font(.system(size: 12)).foregroundStyle(.white.opacity(0.6))
+                        .font(.system(size: 12)).foregroundStyle(.primary.opacity(0.6))
                         .contentTransition(.numericText(value: Double(store.state.folders)))
                 }
-                Text("New sessions start with").font(.system(size: 12)).foregroundStyle(.white.opacity(0.5)).padding(.top, 6)
+                Text("New sessions start with").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).padding(.top, 6)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), alignment: .leading, spacing: 6) {
                     ForEach(Onboarding.harnesses, id: \.self) { h in
                         let on = settings.harness == h
@@ -429,7 +428,7 @@ struct OnboardingView: View {
                                 .opacity(have ? 1 : 0.4)
                         }
                         .buttonStyle(Pressable())
-                        .glassEffect(on ? .regular.tint(Tone.working.opacity(0.45)) : .regular, in: Capsule())
+                        .background(on ? Tone.working.opacity(0.35) : Color.primary.opacity(0.1), in: Capsule())
                         .disabled(!have)
                         .help(have ? h : "\(h) is not installed")
                     }
@@ -493,7 +492,7 @@ struct OnboardingView: View {
             HStack(spacing: 6) {
                 ForEach(Onboarding.Step.allCases, id: \.self) { s in
                     Capsule()
-                        .fill(.white.opacity(s == model.step ? 0.9 : (s.rawValue < model.step.rawValue ? 0.45 : 0.18)))
+                        .fill(.primary.opacity(s == model.step ? 0.9 : (s.rawValue < model.step.rawValue ? 0.45 : 0.18)))
                         .frame(width: s == model.step ? 22 : 7, height: 7)
                         .onTapGesture { model.go(s) }
                 }
@@ -503,7 +502,7 @@ struct OnboardingView: View {
             if model.step != .welcome && model.step != .done {
                 Button("Back") { model.back() }
                     .buttonStyle(.plain)
-                    .foregroundStyle(.white.opacity(0.6))
+                    .foregroundStyle(.primary.opacity(0.6))
                     .keyboardShortcut(.leftArrow, modifiers: [])
             }
             Button {
@@ -543,7 +542,7 @@ private struct Check<Accessory: View>: View {
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
             ZStack {
-                Circle().strokeBorder(.white.opacity(ok ? 0 : 0.25), lineWidth: 1.5)
+                Circle().strokeBorder(.primary.opacity(ok ? 0 : 0.25), lineWidth: 1.5)
                 if ok {
                     Image(systemName: "checkmark.circle.fill")
                         .font(.system(size: 20))
@@ -553,9 +552,9 @@ private struct Check<Accessory: View>: View {
             }
             .frame(width: 20, height: 20)
             VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.white)
+                Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.primary)
                 if let detail {
-                    Text(detail).font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55))
+                    Text(detail).font(.system(size: 11.5)).foregroundStyle(.primary.opacity(0.55))
                         .lineLimit(2).textSelection(.enabled)
                         .contentTransition(.interpolate)
                 }
@@ -592,7 +591,7 @@ private struct Cheat: View {
                 .padding(.horizontal, 9).padding(.vertical, 4)
                 .pane(RoundedRectangle(cornerRadius: 7, style: .continuous))
                 .frame(minWidth: 70, alignment: .leading)
-            Text(what).font(.system(size: 13.5)).foregroundStyle(.white.opacity(0.8))
+            Text(what).font(.system(size: 13.5)).foregroundStyle(.primary.opacity(0.8))
         }
     }
 }
@@ -603,8 +602,7 @@ private struct Backdrop: View {
     var body: some View {
         Rectangle()
             .fill(.clear)
-            .glassTone(Rectangle())
-            .glassEffect(.regular, in: .rect)
+            .raySurface(Rectangle(), border: false)
             .ignoresSafeArea()
     }
 }
@@ -628,7 +626,7 @@ private struct PanesIllustration: View {
                 }
                 .padding(.horizontal, 16).padding(.vertical, 14)
                 .background(Color(hex: "#1a1b26").opacity(0.85), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.white.opacity(0.08)))
+                .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.08)))
                 .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.06)))
             }
         }
@@ -651,7 +649,7 @@ private struct FoldersIllustration: View {
                     Image(systemName: "folder.fill").foregroundStyle(Tone.working.opacity(0.9))
                     VStack(alignment: .leading, spacing: 1) {
                         Text(f.0).font(.system(size: 13, weight: .semibold))
-                        if !f.1.isEmpty { Text(f.1).font(.system(size: 11)).foregroundStyle(.white.opacity(0.5)).lineLimit(1) }
+                        if !f.1.isEmpty { Text(f.1).font(.system(size: 11)).foregroundStyle(.primary.opacity(0.5)).lineLimit(1) }
                     }
                     Spacer()
                 }
@@ -681,8 +679,8 @@ private struct KeysIllustration: View {
             }
             ZStack(alignment: .trailing) {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(.white.opacity(0.04))
-                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.white.opacity(0.1)))
+                    .fill(.primary.opacity(0.04))
+                    .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(.primary.opacity(0.1)))
                     .frame(width: 300, height: 170)
                 EdgeDemo(done: edge)
             }
@@ -695,7 +693,7 @@ private struct KeysIllustration: View {
             Text("⌥")
                 .font(.system(size: 28, weight: .medium))
                 .frame(width: 64, height: 58)
-                .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                .rayPill(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 .scaleEffect(down && !reduce ? 0.93 : 1)
                 .offset(y: down && !reduce ? 2 : 0)
         } animation: { down in
@@ -717,7 +715,7 @@ private struct EdgeDemo: View {
                     Bead(status: "done", size: 8)
                 }
                 .padding(.vertical, 12).padding(.horizontal, 8)
-                .glassEffect(.regular, in: Capsule())
+                .raySurface(Capsule())
                 .transition(.surface())
             } else {
                 Capsule()
@@ -761,11 +759,11 @@ private struct EdgeStory: View {
         ZStack(alignment: .trailing) {
             // The "screen": a few quiet windows.
             RoundedRectangle(cornerRadius: 18, style: .continuous)
-                .fill(.white.opacity(0.035))
-                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.white.opacity(0.09)))
+                .fill(.primary.opacity(0.035))
+                .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous).strokeBorder(.primary.opacity(0.09)))
             VStack(alignment: .leading, spacing: 10) {
                 ForEach(0..<6, id: \.self) { i in
-                    Capsule().fill(.white.opacity(0.06)).frame(width: [180, 230, 140, 210, 120, 190][i], height: 7)
+                    Capsule().fill(.primary.opacity(0.06)).frame(width: [180, 230, 140, 210, 120, 190][i], height: 7)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -781,7 +779,7 @@ private struct EdgeStory: View {
                         }
                     }
                     .padding(.vertical, 9 + 12).padding(.leading, 8).padding(.trailing, 7)
-                    .glassEffect(.rail, in: EdgeTabShape())
+                    .raySurface(EdgeTabShape())
                     .transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
                 }
             }
@@ -812,9 +810,9 @@ private struct EdgeStory: View {
                 KeyCap(key: "2", tint: Tone.blocked); Text("Not yet").font(.system(size: 11.5))
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(12)
-        .glassEffect(.regular.tint(Color.black.opacity(0.6)), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .raySurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 
@@ -836,19 +834,20 @@ private struct TryReflex: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Try a reflex").font(.system(size: 11, weight: .semibold)).tracking(1.4).textCase(.uppercase)
-                .foregroundStyle(.white.opacity(0.5))
+                .foregroundStyle(.primary.opacity(0.5))
             HStack(spacing: 10) {
                 Image(systemName: "sparkle").foregroundStyle(Tone.route)
-                TextField("", text: $model.trialText, prompt: Text(model.trialSuggestion).foregroundStyle(.white.opacity(0.4)))
+                TextField("", text: $model.trialText, prompt: Text(model.trialSuggestion).foregroundStyle(.primary.opacity(0.4)))
                     .textFieldStyle(.plain)
                     .font(.system(size: 15))
                     .focused($focused)
                     .onSubmit { model.tryRoute() }
                     .onChange(of: model.trialText) { _, _ in if model.trial != .routing { model.trial = .idle } }
-                KeyCap(key: "⏎", tint: .white)
+                KeyCap(key: "⏎", tint: .primary)
             }
             .padding(.horizontal, 16).padding(.vertical, 13)
-            .glassEffect(.regular.tint(Color.black.opacity(0.4)).interactive(), in: Capsule())
+            .rayPill(Capsule())
+            .overlay(Capsule().strokeBorder(Color.primary.opacity(0.1), lineWidth: 1))
             .overlay(alignment: .bottom) {
                 if model.trial == .routing { ThinkingLine().frame(height: 2).padding(.horizontal, 24).clipShape(Capsule()) }
             }
@@ -861,7 +860,7 @@ private struct TryReflex: View {
                         Text(e).font(.system(size: 11.5)).lineLimit(1).padding(.horizontal, 10).padding(.vertical, 6)
                     }
                     .buttonStyle(Pressable())
-                    .glassEffect(.regular.interactive(), in: Capsule())
+                    .rayPill(Capsule())
                 }
             }
             .fixedSize(horizontal: false, vertical: true)
@@ -874,19 +873,19 @@ private struct TryReflex: View {
         switch model.trial {
         case .idle:
             Text("Press Return. Jev decides where it would go — a session, a new one in a folder, or a side question. Nothing is sent.")
-                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
+                .font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.55)).fixedSize(horizontal: false, vertical: true)
         case .routing:
             Text(Store.shared.state.folders == 0 ? "Reading your projects, then asking Jev…" : "Asking Jev…")
-                .font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.55))
+                .font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.55))
         case .routed(let label, let why, let ms):
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: "arrow.turn.down.right").font(.system(size: 15, weight: .semibold)).foregroundStyle(Tone.done)
                     .frame(width: 30, height: 30)
-                    .glassEffect(.regular.tint(Tone.done.opacity(0.25)), in: Circle())
+                    .background(Tone.done.opacity(0.25), in: Circle())
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(label).font(.system(size: 16, weight: .semibold)).foregroundStyle(.white)
-                    if !why.isEmpty { Text(why).font(.system(size: 12.5)).foregroundStyle(.white.opacity(0.6)) }
-                    Text(verbatim: "jev · \(ms) ms · dry run, nothing sent").font(.system(size: 11, design: .monospaced)).foregroundStyle(.white.opacity(0.45))
+                    Text(label).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                    if !why.isEmpty { Text(why).font(.system(size: 12.5)).foregroundStyle(.primary.opacity(0.6)) }
+                    Text(verbatim: "jev · \(ms) ms · dry run, nothing sent").font(.system(size: 11, design: .monospaced)).foregroundStyle(.primary.opacity(0.45))
                         .padding(.top, 2)
                 }
             }
@@ -941,11 +940,11 @@ private struct MemberCard: View {
                     AgentGlyph(status: "done", size: 10)
                 }
                 .padding(.horizontal, 9).padding(.vertical, 6)
-                .glassEffect(.regular.tint(Color.black.opacity(0.6)), in: Capsule())
+                .rayPill(Capsule())
             }
             Spacer()
             Text(name).font(.system(size: 26, weight: .semibold)).tracking(-0.7).lineLimit(1).minimumScaleFactor(0.6)
-            Text("Member since \(since)").font(.system(size: 11.5)).foregroundStyle(.white.opacity(0.55)).padding(.top, 2)
+            Text("Member since \(since)").font(.system(size: 11.5)).foregroundStyle(.primary.opacity(0.55)).padding(.top, 2)
             Spacer().frame(height: 18)
             HStack(spacing: 0) {
                 stat("\(repos)", "repos")
@@ -954,10 +953,11 @@ private struct MemberCard: View {
                 stat(jev, "jev")
             }
         }
-        .foregroundStyle(.white)
+        .foregroundStyle(.primary)
         .padding(22)
         .frame(width: 380, height: 240)
-        .glassEffect(.regular.tint(Color.black.opacity(0.45)).interactive(), in: RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .rayPill(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous).strokeBorder(Color.primary.opacity(0.12), lineWidth: 1))
         .rotation3DEffect(.degrees(Double(tilt.height) * 9), axis: (x: 1, y: 0, z: 0), perspective: 0.6)
         .rotation3DEffect(.degrees(Double(-tilt.width) * 11), axis: (x: 0, y: 1, z: 0), perspective: 0.6)
         .scaleEffect(shown || reduce ? 1 : 0.92)
@@ -984,7 +984,7 @@ private struct MemberCard: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(value).font(.system(size: 14, weight: .semibold, design: .rounded)).lineLimit(1).minimumScaleFactor(0.7)
                 .contentTransition(.numericText())
-            Text(label).font(.system(size: 10.5)).foregroundStyle(.white.opacity(0.5))
+            Text(label).font(.system(size: 10.5)).foregroundStyle(.primary.opacity(0.5))
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
@@ -1001,7 +1001,7 @@ private extension View {
     /// A content surface on the glass window: a faint fill and a hairline,
     /// so cards read as layers of the glass rather than glass on glass.
     func pane<S: InsettableShape>(_ shape: S, tint: Color? = nil) -> some View {
-        background((tint ?? .white).opacity(tint == nil ? 0.07 : 0.12), in: shape)
-            .overlay(shape.strokeBorder(.white.opacity(0.1), lineWidth: 0.5))
+        background((tint ?? .primary).opacity(tint == nil ? 0.07 : 0.12), in: shape)
+            .overlay(shape.strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
     }
 }

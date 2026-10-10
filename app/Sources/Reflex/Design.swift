@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 // Reflex's design system: "Meniscus" — the screen edge as a sliver of liquid
@@ -218,23 +219,61 @@ struct ThinkingLine: View {
     }
 }
 
-// MARK: Glass tone
+// MARK: Surfaces — Raycast's recipe
 
-/// Reflex's glass in Raycast's two tones: a near-black, faintly blue surface
-/// with just a hint of what is behind it, and a lighter blue-grey for the
-/// pills and buttons that sit on it. One look — no hover or focus change.
-enum GlassTone {
-    /// Cards, lists, the Ask bar, the inbox, window backgrounds.
-    static let surface = Color(red: 0.07, green: 0.075, blue: 0.098).opacity(0.93)
-    /// Round buttons, capsules, pills, the edge tab.
-    static let raised = Color(red: 0.23, green: 0.238, blue: 0.272).opacity(0.93)
-    static let fill = surface
+/// A native blur behind the window, held "active" so it never changes with
+/// focus. Follows the app's light or dark appearance.
+struct BlurMaterial: NSViewRepresentable {
+    var material: NSVisualEffectView.Material = .popover
+    func makeNSView(context: Context) -> NSVisualEffectView {
+        let v = NSVisualEffectView()
+        v.material = material
+        v.blendingMode = .behindWindow
+        v.state = .active
+        return v
+    }
+    func updateNSView(_ v: NSVisualEffectView, context: Context) { v.material = material }
+}
+
+/// Raycast's surface: the blur, the theme background over it at 40% (black
+/// in dark, white in light), and an even hairline in the text colour at 10%
+/// on every side. Every panel, card, bar and rail button uses it, so all of
+/// Reflex reads as one material in either appearance.
+struct SurfaceStyle<S: InsettableShape>: ViewModifier {
+    var shape: S
+    var border = true
+    @Environment(\.colorScheme) private var scheme
+    func body(content: Content) -> some View {
+        content
+            .background {
+                ZStack {
+                    BlurMaterial()
+                    (scheme == .dark ? Color.black : Color.white).opacity(0.4)
+                }
+                .clipShape(shape)
+            }
+            .overlay {
+                if border { shape.strokeBorder(Color.primary.opacity(0.1), lineWidth: 1) }
+            }
+    }
 }
 
 extension View {
-    /// Lay one of Reflex's tones over the glass behind this view's content.
-    func glassTone<S: Shape>(_ shape: S, raised: Bool = false) -> some View {
-        background(raised ? GlassTone.raised : GlassTone.surface, in: shape)
-            .overlay(shape.stroke(Color.white.opacity(raised ? 0.08 : 0.06), lineWidth: 0.5))
+    /// A Reflex surface (see SurfaceStyle).
+    func raySurface<S: InsettableShape>(_ shape: S, border: Bool = true) -> some View {
+        modifier(SurfaceStyle(shape: shape, border: border))
     }
+
+    /// Something that sits on a surface — a chip, a key, a field: the text
+    /// colour at 10% (20% when selected), as Raycast draws selection.
+    func rayPill<S: InsettableShape>(_ shape: S, selected: Bool = false) -> some View {
+        background(Color.primary.opacity(selected ? 0.2 : 0.1), in: shape)
+    }
+}
+
+/// The 40% veil alone, for a surface whose blur the system already draws
+/// (the Settings sidebar).
+struct SurfaceVeil: View {
+    @Environment(\.colorScheme) private var scheme
+    var body: some View { (scheme == .dark ? Color.black : Color.white).opacity(0.4) }
 }

@@ -34,8 +34,7 @@ struct InboxView: View {
         GlassEffectContainer(spacing: 10) {
             VStack(spacing: 10) {
                 header
-                    .glassTone(RoundedRectangle(cornerRadius: 18, style: .continuous))
-                    .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+                    .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
                 list
                 footer
             }
@@ -90,8 +89,7 @@ struct InboxView: View {
                 Text("Nothing needs you right now.").font(Type.meta).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, minHeight: 220)
-            .glassTone(RoundedRectangle(cornerRadius: 18, style: .continuous))
-            .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+            .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
             .transition(.surface(reduce: reduce))
         } else {
             ScrollViewReader { proxy in
@@ -256,8 +254,7 @@ private struct Card: View {
             }
         }
         .padding(14)
-        // Content sits on a solid material, not glass: dense text must read on any backdrop.
-        .background(.thickMaterial, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
         .background(selected ? tone.opacity(0.10) : .clear, in: RoundedRectangle(cornerRadius: 18, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 18, style: .continuous)
             .strokeBorder(selected ? tone.opacity(0.5) : Color.primary.opacity(0.08), lineWidth: selected ? 1 : 0.5))

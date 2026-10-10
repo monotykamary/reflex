@@ -140,7 +140,7 @@ private struct AccessCard: View {
         }
         .padding(.leading, 16).padding(.trailing, 28).padding(.vertical, 14)
         .frame(width: 340)
-        .glassEffect(.regular, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .raySurface(RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay(alignment: .topTrailing) {
             if !model.granted {
                 Button(action: close) {
@@ -153,7 +153,6 @@ private struct AccessCard: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .environment(\.colorScheme, .dark)
         .animation(Motion.enter, value: model.granted)
         .task {
             guard !reduce else { return }

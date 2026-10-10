@@ -134,9 +134,9 @@ struct SettingsView: View {
             }
             .searchable(text: $query, placement: .sidebar, prompt: "Search settings")
             .navigationSplitViewColumnWidth(min: 210, ideal: 230, max: 280)
-            // The sidebar in Reflex's dark grey, like the rest of its glass.
+            // The sidebar's blur with Raycast's 40% veil, like every Reflex surface.
             .background {
-                GlassTone.fill.ignoresSafeArea()
+                SurfaceVeil().ignoresSafeArea()
             }
         } detail: {
             Group {
@@ -261,6 +261,13 @@ private struct GeneralPane: View {
             Section {
                 Toggle(isOn: Binding(get: { login }, set: setLogin)) {
                     RowLabel("Open at login", loginError)
+                }
+                Picker(selection: $s.appearance) {
+                    Text("System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                } label: {
+                    RowLabel("Appearance", "Reflex's surfaces follow macOS, or stay light or dark.")
                 }
                 Toggle(isOn: $s.showInDock) {
                     RowLabel("Show in the Dock and ⌘Tab", "When off, Reflex lives in the menu bar and at the edge.")
