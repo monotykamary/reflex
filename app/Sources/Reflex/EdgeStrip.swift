@@ -854,6 +854,12 @@ private struct BackgroundRow: View {
             }
             Spacer(minLength: 4)
             if busy { ProgressView().controlSize(.mini) }
+            if hover && session.agent == "claude" {
+                CloseSessionButton(pane: "", size: 20, tint: Ink.dim, word: "Remove",
+                                   help: session.state == .running ? "Stop and delete this background session…" : "Delete this background session…",
+                                   confirm: { Sessions.removeBackground(session) })
+                    .transition(.opacity)
+            }
             Text(session.state == .running ? "Attach" : "Resume")
                 .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.text)
                 .padding(.horizontal, 7).padding(.vertical, 2)

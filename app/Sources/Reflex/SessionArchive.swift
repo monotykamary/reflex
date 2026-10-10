@@ -45,6 +45,9 @@ struct PastSession: Identifiable, Hashable {
 final class SessionArchive: ObservableObject {
     static let shared = SessionArchive()
     @Published private(set) var sessions: [PastSession] = []
+
+    /// Out of the list now (it was deleted); the next scan agrees.
+    func forget(_ id: String) { sessions.removeAll { $0.id == id } }
     private var cache: [String: (Date, PastSession?)] = [:]
     private var background: [String: PastSession.State] = [:]
     private var timer: Timer?

@@ -56,12 +56,26 @@ enum Sessions {
     }
 
     /// `claude respawn <id>`: restart a stopped background session.
-    @MainActor static func respawn(_ id: String) async {
+    @MainActor static func respawn(_ id: String) async { await claude(["respawn", id]) }
+
+    /// Delete a Claude background session (`claude rm`; its worktree too
+    /// when that is safe). A running one is stopped first — rm only takes
+    /// sessions that have exited. Gone from the list at once.
+    @MainActor static func removeBackground(_ p: PastSession) {
+        SessionArchive.shared.forget(p.id)
+        Task {
+            if p.state == .running { await claude(["stop", p.id]) }
+            await claude(["rm", p.id])
+            SessionArchive.shared.refresh()
+        }
+    }
+
+    @MainActor private static func claude(_ args: [String]) async {
         let env = Daemon.shared.childEnvironment()
         await Task.detached {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = ["claude", "respawn", id]
+            p.arguments = ["claude"] + args
             p.environment = env
             p.standardOutput = FileHandle.nullDevice
             p.standardError = FileHandle.nullDevice
@@ -130,6 +144,10 @@ struct CloseSessionButton: View {
     var pane: String
     var size: CGFloat = 22
     var tint: Color = Ink.text
+    /// The confirmed word and what it does (default: end a live session).
+    var word = "Close"
+    var help = "Close session…"
+    var confirm: (() -> Void)?
     @State private var armed = false
     @State private var disarm: Task<Void, Never>?
 
@@ -138,7 +156,7 @@ struct CloseSessionButton: View {
             if armed {
                 disarm?.cancel()
                 armed = false
-                Sessions.close(pane)
+                if let confirm { confirm() } else { Sessions.close(pane) }
             } else {
                 withAnimation(Motion.micro) { armed = true }
                 disarm?.cancel()
@@ -151,7 +169,7 @@ struct CloseSessionButton: View {
         } label: {
             Group {
                 if armed {
-                    Text("Close")
+                    Text(word)
                         .font(.system(size: 10.5, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 7)
@@ -169,6 +187,6 @@ struct CloseSessionButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(Pressable())
-        .help(armed ? "Click again to end this session" : "Close session…")
+        .help(armed ? "Click again to \(word.lowercased()) it" : help)
     }
 }
