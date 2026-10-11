@@ -293,9 +293,14 @@ final class CommandModel: ObservableObject {
         }
     }
 
+    /// You said so yourself (/btw, or "btw …"): only a live session can take it.
+    var sideAsked: Bool { sideForced || request.lowercased().hasPrefix("btw") }
+
+    /// Sent to a live session, this goes on the side: you said so, or Jev
+    /// reads it as a side question. Jev's reading is about the words, not
+    /// about where they go, so it never takes the other rows off the list.
     var isSide: Bool {
-        if sideForced { return true }
-        if request.lowercased().hasPrefix("btw") { return true }
+        if sideAsked { return true }
         if let s = jev?.side, jevText == request { return s >= 5000 }
         return false
     }
@@ -542,7 +547,7 @@ final class CommandModel: ObservableObject {
             return a != b ? a > b : l.offset < r.offset
         }.map(\.element)
         out += sessions
-        if !side {
+        if !sideAsked {
             // Folders: Jev's, then the local index's — once each.
             var seen = Set<String>()
             var folders: [Candidate] = []
