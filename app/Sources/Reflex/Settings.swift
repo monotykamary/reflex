@@ -31,6 +31,8 @@ final class Settings: ObservableObject {
     @Published var jevProvider: String { didSet { d.set(jevProvider, forKey: "jevProvider") } }
     @Published var jevCredentialCommand: String { didSet { d.set(jevCredentialCommand, forKey: "jevCredentialCommand") } }
     @Published var herdrSession: String { didSet { d.set(herdrSession, forKey: "herdrSession") } }
+    /// Start herdr's server when it isn't running (after a restart).
+    @Published var startHerdr: Bool { didSet { d.set(startHerdr, forKey: "startHerdr") } }
     @Published var showStrip: Bool { didSet { d.set(showStrip, forKey: "showStrip") } }
     /// Keep the rail on screen instead of revealing it at the edge.
     @Published var railAlways: Bool { didSet { d.set(railAlways, forKey: "railAlways") } }
@@ -64,6 +66,7 @@ final class Settings: ObservableObject {
         jevProvider = d.string(forKey: "jevProvider") ?? "typesafe"
         jevCredentialCommand = d.string(forKey: "jevCredentialCommand") ?? ""
         herdrSession = d.string(forKey: "herdrSession") ?? ""
+        startHerdr = d.object(forKey: "startHerdr") as? Bool ?? true
         showStrip = d.object(forKey: "showStrip") as? Bool ?? true
         railAlways = d.bool(forKey: "railAlways")
         surfaceQuestions = d.object(forKey: "surfaceQuestions") as? Bool ?? true

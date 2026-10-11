@@ -879,6 +879,9 @@ private struct ProjectsPane: View {
                 } label: {
                     RowLabel("herdr session", "Leave empty for herdr's default session. Restart reflexd after changing.")
                 }
+                Toggle(isOn: $s.startHerdr) {
+                    RowLabel("Start herdr when it isn't running", "After a restart, say: Reflex starts herdr's server in the background, the way herdr itself does.")
+                }
             }
         }
     }

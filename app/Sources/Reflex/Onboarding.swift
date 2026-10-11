@@ -379,7 +379,7 @@ struct OnboardingView: View {
                 Check(ok: model.herdrInstalled, title: "herdr installed", detail: model.herdrInstalled ? nil : "brew install herdr") {
                     if !model.herdrInstalled { GlassAction("Copy") { model.copy("brew install herdr") } }
                 }
-                Check(ok: model.herdrRunning, title: "herdr running", detail: model.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "run `herdr` in your terminal") {
+                Check(ok: model.herdrRunning, title: "herdr running", detail: model.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : (model.herdrInstalled && Settings.shared.startHerdr ? "starting it…" : "run `herdr` in your terminal")) {
                     if !model.herdrRunning { GlassAction("Copy") { model.copy("herdr") } }
                 }
                 Check(ok: model.integrations, title: "Agent integrations", detail: model.integrations ? "exact sessions for side questions" : "lets side questions fork the exact session") {
