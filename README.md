@@ -56,6 +56,9 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 - An Apple Silicon Mac on **macOS 26** or later.
 - [herdr](https://herdr.dev) 0.9+, with its agent integrations
   (`herdr integration install claude && herdr integration install pi`).
+  Reflex does not ship herdr or jev-fabric: its setup has an Install button
+  for each, which runs that tool's own installer (it verifies its download
+  and puts one binary in `~/.local/bin`).
 - At least one agent: [Claude Code](https://claude.com/claude-code), Codex, pi, …
 - For routing: jev-fabric and a Jev provider key (TypeSafe by default; Reflex
   can reuse the key pi already has). Without them everything else works and

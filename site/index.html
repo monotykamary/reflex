@@ -142,10 +142,12 @@
   .start .n { font: 600 13px var(--mono); color: var(--ink3); }
   .start h3 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
   .start p { margin: 0; color: var(--ink2); font-size: 15px; }
-  .cmd { display: flex; align-items: flex-start; gap: 10px; margin-top: auto; padding: 10px 10px 10px 14px; border-radius: 12px; background: #0b0c0f; border: 1px solid var(--hair);
-    font: 13px var(--mono); color: rgba(192,202,245,.9); }
-  .cmd code { flex: 1; min-width: 0; white-space: pre-wrap; line-height: 1.7; }
-  .cmd button { flex: none; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raise); color: var(--ink2); font: 600 12px var(--sans); cursor: pointer; }
+  .cmd { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding: 12px 10px 10px 14px; border-radius: 12px; background: #0b0c0f; border: 1px solid var(--hair);
+    font: 12px var(--mono); color: rgba(192,202,245,.9); }
+  /* One command a line; a command too long for the card continues indented. */
+  .cmd code { min-width: 0; line-height: 1.7; }
+  .cmd code span { display: block; padding-left: 2ch; text-indent: -2ch; overflow-wrap: anywhere; }
+  .cmd button { align-self: flex-end; height: 28px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raise); color: var(--ink2); font: 600 12px var(--sans); cursor: pointer; }
   .cmd button:hover { color: var(--ink); }
   .start .soft { margin-top: auto; font-size: 13px; color: var(--ink3); }
 
@@ -270,13 +272,14 @@
   <h2 class="rise">Three steps, about five minutes.</h2>
   <p class="sub fade">Reflex sits on top of what you already run. The first launch checks each piece for you, and everything it checks lives in Settings → Setup afterwards.</p>
   <div class="start">
-    <div class="fade"><span class="n">01</span><h3>Run your agents in herdr</h3><p>Install <a class="u" href="https://herdr.dev">herdr</a> 0.9 or later, then its integrations, so Reflex can see each agent’s state and questions.</p>
-      <div class="cmd"><code>herdr integration install claude
-herdr integration install pi</code><button type="button" data-copy>Copy</button></div></div>
+    <div class="fade"><span class="n">01</span><h3>Run your agents in herdr</h3><p><a class="u" href="https://herdr.dev">herdr</a> 0.9 or later, with its integrations, lets Reflex see each agent’s state and questions. Reflex’s first launch installs both with a click; or do it by hand:</p>
+      <div class="cmd"><code><span>curl -fsSL https://herdr.dev/install.sh | sh</span>
+<span>herdr integration install claude</span>
+<span>herdr integration install pi</span></code><button type="button" data-copy>Copy</button></div></div>
     <div class="fade" style="--d:60"><span class="n">02</span><h3>Open Reflex</h3><p>It walks you through herdr, connecting Jev (and trying a request without sending anything), the folders to index, <kbd>⌥</kbd><kbd>⌥</kbd> and the edge.</p>
       <div class="soft" data-get-step>macOS 26 on Apple Silicon. Built from source until the first signed release.</div></div>
     <div class="fade" style="--d:120"><span class="n">03</span><h3>Say what</h3><p>Double-tap <kbd>⌥</kbd> anywhere and say what you want. Reflex finds where, and you see it before it sends. ⏎ sends; ⌘⏎ sends and opens the terminal.</p>
-      <div class="soft">Routing uses <a class="u" href="https://github.com/fabric-runtime/jev-fabric">jev-fabric</a> and a Jev key; Reflex can reuse the one pi already has.</div></div>
+      <div class="soft">Routing uses <a class="u" href="https://github.com/fabric-runtime/jev-fabric">jev-fabric</a> and a Jev key. Reflex installs jev-fabric for you, and can reuse the key pi already has.</div></div>
   </div>
 </div></section>
 

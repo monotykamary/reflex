@@ -978,8 +978,8 @@ private struct SetupPane: View {
         Form {
             Section { PaneHeader(pane: .setup) }
             Section("herdr") {
-                CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? nil : "brew install herdr") {
-                    Button("Copy Command") { o.copy("brew install herdr") }
+                CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? nil : o.installDetail(.herdr)) {
+                    installButtons(.herdr)
                 }
                 CheckRow(ok: o.herdrRunning, title: "herdr running",
                          detail: o.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `herdr` in a terminal.") {
@@ -999,8 +999,8 @@ private struct SetupPane: View {
                 }
             }
             Section("Jev") {
-                CheckRow(ok: o.jevInstalled, title: "jev-fabric installed", detail: o.jevInstalled ? nil : "One line in a terminal.") {
-                    Button("Copy Command") { o.copy("curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh") }
+                CheckRow(ok: o.jevInstalled, title: "jev-fabric installed", detail: o.jevInstalled ? nil : o.installDetail(.jev)) {
+                    installButtons(.jev)
                 }
                 CheckRow(ok: pingOK, title: "Jev answering", detail: pingDetail, showAccessory: true) {
                     Button(o.ping == .testing ? "Testing…" : "Test") { o.test() }
@@ -1020,6 +1020,14 @@ private struct SetupPane: View {
             }
         }
         .onAppear { SetupState.shared.update(); if o.ping == .idle { o.test() } }
+    }
+
+    /// Install, and once that has failed, the command to run by hand.
+    @ViewBuilder private func installButtons(_ tool: Onboarding.Tool) -> some View {
+        if o.failures[tool.rawValue] != nil { Button("Copy Command") { o.copy(tool.command) } }
+        Button(o.working == tool.rawValue ? "Installing…" : (o.failures[tool.rawValue] == nil ? "Install" : "Try Again")) { o.install(tool) }
+            .disabled(o.working != nil)
+            .help(tool.command)
     }
 
     private var pingOK: Bool { if case .ok = o.ping { return true } else { return false } }

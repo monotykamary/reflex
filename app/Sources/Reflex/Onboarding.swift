@@ -166,8 +166,47 @@ final class Onboarding: ObservableObject {
         }
     }
 
-    func run(_ label: String, _ command: String) {
+    /// The two things Reflex needs and does not ship. Each has its own
+    /// installer: it checks its download and puts one binary in ~/.local/bin,
+    /// with no password asked. Reflex runs that for you.
+    enum Tool: String {
+        case herdr, jev = "jev-fabric"
+        var command: String {
+            switch self {
+            case .herdr: return "curl -fsSL https://herdr.dev/install.sh | sh"
+            case .jev: return "curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh"
+            }
+        }
+        /// Where its installer comes from, in a word.
+        var source: String { self == .herdr ? "herdr.dev" : "GitHub" }
+    }
+
+    /// Why the last setup command didn't work, by its label.
+    @Published var failures: [String: String] = [:]
+
+    func install(_ tool: Tool) {
+        guard working == nil else { return }
+        // Without pipefail a failed download is an empty script, which "works".
+        run(tool.rawValue, "set -o pipefail; " + tool.command) { [weak self] in
+            guard Onboarding.which(tool.rawValue) else { return "It ran, but \(tool.rawValue) isn't in ~/.local/bin." }
+            // herdr: the store's next refresh starts its server. Jev: see if it answers.
+            if tool == .jev { self?.test() }
+            return nil
+        }
+    }
+
+    /// What the row says under its title until the tool is there.
+    func installDetail(_ tool: Tool) -> String {
+        if working == tool.rawValue { return "Downloading and checking it…" }
+        if let why = failures[tool.rawValue] { return "Didn't install: \(why)" }
+        return "Install runs its installer from \(tool.source), into ~/.local/bin."
+    }
+
+    /// Run a setup command with the login PATH. `after` (when it exited
+    /// cleanly) checks that it did what it was for, and says why if not.
+    func run(_ label: String, _ command: String, after: @escaping @MainActor () -> String? = { nil }) {
         working = label
+        failures[label] = nil
         let env = Daemon.shared.childEnvironment()
         Task.detached {
             let p = Process()
@@ -175,12 +214,28 @@ final class Onboarding: ObservableObject {
             p.arguments = ["-c", command]
             p.environment = env
             p.standardOutput = FileHandle.nullDevice
-            p.standardError = FileHandle.nullDevice
-            try? p.run()
-            p.waitUntilExit()
+            let err = Pipe()
+            p.standardError = err
+            var why: String?
+            do {
+                try p.run()
+                // An installer that hangs (no network) is stopped, not waited on forever.
+                DispatchQueue.global().asyncAfter(deadline: .now() + 180) { if p.isRunning { p.terminate() } }
+                let said = String(data: err.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+                p.waitUntilExit()
+                if p.terminationStatus != 0 {
+                    // Its last words, without the terminal colours or the ✗ in front.
+                    let plain = said.replacingOccurrences(of: "\u{1B}\\[[0-9;]*[A-Za-z]", with: "", options: .regularExpression)
+                    let marks = CharacterSet.whitespaces.union(CharacterSet(charactersIn: "✗!>"))
+                    let last = plain.split(separator: "\n").map { $0.trimmingCharacters(in: marks) }.last { !$0.isEmpty }
+                    why = last.map { String($0.prefix(160)) } ?? "it stopped with status \(p.terminationStatus)."
+                }
+            } catch { why = error.localizedDescription }
+            let failed = why
             await MainActor.run {
                 self.working = nil
                 self.refresh()
+                self.failures[label] = failed ?? after()
             }
         }
     }
@@ -376,8 +431,8 @@ struct OnboardingView: View {
             EmptyView()
         case .herdr:
             VStack(alignment: .leading, spacing: 10) {
-                Check(ok: model.herdrInstalled, title: "herdr installed", detail: model.herdrInstalled ? nil : "brew install herdr") {
-                    if !model.herdrInstalled { GlassAction("Copy") { model.copy("brew install herdr") } }
+                Check(ok: model.herdrInstalled, title: "herdr installed", detail: model.herdrInstalled ? nil : model.installDetail(.herdr)) {
+                    if !model.herdrInstalled { InstallActions(model: model, tool: .herdr) }
                 }
                 Check(ok: model.herdrRunning, title: "herdr running", detail: model.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : (model.herdrInstalled && Settings.shared.startHerdr ? "starting it…" : "run `herdr` in your terminal")) {
                     if !model.herdrRunning { GlassAction("Copy") { model.copy("herdr") } }
@@ -392,11 +447,8 @@ struct OnboardingView: View {
             }
         case .jev:
             VStack(alignment: .leading, spacing: 10) {
-                Check(ok: model.jevInstalled, title: "jev-fabric installed",
-                      detail: model.jevInstalled ? nil : "curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh") {
-                    if !model.jevInstalled {
-                        GlassAction("Copy") { model.copy("curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh") }
-                    }
+                Check(ok: model.jevInstalled, title: "jev-fabric installed", detail: model.jevInstalled ? nil : model.installDetail(.jev)) {
+                    if !model.jevInstalled { InstallActions(model: model, tool: .jev) }
                 }
                 Check(ok: pingOK, title: "Jev answering", detail: pingDetail) {
                     GlassAction(model.ping == .testing ? "Testing…" : "Test") { model.test() }
@@ -583,7 +635,8 @@ private struct Check<Accessory: View>: View {
                 Text(title).font(.system(size: 13.5, weight: .semibold)).foregroundStyle(.primary)
                 if let detail {
                     Text(detail).font(.system(size: 11.5)).foregroundStyle(.primary.opacity(0.55))
-                        .lineLimit(2).textSelection(.enabled)
+                        .lineLimit(3).textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
                         .contentTransition(.interpolate)
                 }
             }
@@ -606,6 +659,23 @@ private struct GlassAction: View {
     }
     var body: some View {
         Button(title, action: action).buttonStyle(.glass).controlSize(.small)
+    }
+}
+
+/// Install, and once that has failed, the command to run by hand.
+private struct InstallActions: View {
+    @ObservedObject var model: Onboarding
+    var tool: Onboarding.Tool
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if model.failures[tool.rawValue] != nil { GlassAction("Copy") { model.copy(tool.command) } }
+            GlassAction(model.working == tool.rawValue ? "Installing…" : (model.failures[tool.rawValue] == nil ? "Install" : "Try Again")) {
+                model.install(tool)
+            }
+            .disabled(model.working != nil)
+            .help(tool.command)
+        }
     }
 }
 
