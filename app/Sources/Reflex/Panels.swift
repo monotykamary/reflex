@@ -52,7 +52,12 @@ enum Panels {
         p.isFloatingPanel = true
         p.becomesKeyOnlyIfNeeded = false
         p.level = .floating
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
+        // Out of ⌘`: it moves between your windows (terminals, Settings), never
+        // through a panel. The rail's keys panel is always up and can take key;
+        // ⌘` landing there grayed the terminal's traffic lights until the edge
+        // handed key back: a flicker on every switch.
+        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient, .ignoresCycle]
+        p.isExcludedFromWindowsMenu = true
         p.backgroundColor = .clear
         p.isOpaque = false
         p.hasShadow = false
