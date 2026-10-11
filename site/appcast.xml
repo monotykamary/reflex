@@ -3,6 +3,16 @@
     <channel>
         <title>Reflex</title>
         <item>
+            <title>0.1.10</title>
+            <pubDate>Mon, 12 Oct 2026 01:21:15 +0700</pubDate>
+            <link>https://reflex.farm/</link>
+            <sparkle:version>93</sparkle:version>
+            <sparkle:shortVersionString>0.1.10</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.10/Reflex-0.1.10.dmg" length="5690368" type="application/octet-stream" sparkle:edSignature="t5yZ3o1zqfjvzVMmwksoYxLY1tDadmHx38FoGMOpar3jIz6yaPMBtRfKG5q9WTxTzGpl9udY/1plyLlUgPsFDQ=="/>
+        </item>
+        <item>
             <title>0.1.9</title>
             <pubDate>Sun, 11 Oct 2026 21:28:09 +0700</pubDate>
             <link>https://reflex.farm/</link>
@@ -21,16 +31,6 @@
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.8/Reflex-0.1.8.dmg" length="5677606" type="application/octet-stream" sparkle:edSignature="fdP0dDXxO9EYJHeqW8GVIN9aSav9QjfWj7S+trXGlfp7qkw3NkisF7rGfW5F8qtXLJfwPiYWCIvzS/MWX9L+AA=="/>
-        </item>
-        <item>
-            <title>0.1.7</title>
-            <pubDate>Sun, 11 Oct 2026 13:24:10 +0700</pubDate>
-            <link>https://reflex.farm/</link>
-            <sparkle:version>84</sparkle:version>
-            <sparkle:shortVersionString>0.1.7</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.7/Reflex-0.1.7.dmg" length="4594391" type="application/octet-stream" sparkle:edSignature="8B2re0cs0j/z0ZPRUgKqRZe+mLTrB8hRNS6rM+/E3wRjRKWm3KaGCx/KP6EWzTVsFXb4oH9RqjMWlWCpZ15/CA=="/>
         </item>
     </channel>
 </rss>
