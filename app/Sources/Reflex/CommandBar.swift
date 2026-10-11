@@ -181,6 +181,35 @@ final class CommandModel: ObservableObject {
         Task { local = await Client.local.folders("") }
     }
 
+    // MARK: Coming back
+
+    /// Words, images or a slash command in force: something to come back to.
+    var hasDraft: Bool {
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
+            || harness != nil || resumeOnly || sideForced || newForced
+    }
+
+    /// When the bar last went away with its request unsent.
+    private var leftAt = Date.distantPast
+
+    /// The bar went away, the request did not: you clicked into another app
+    /// (to copy the next image), or pressed ⌥⌥.
+    func left() { leftAt = Date() }
+
+    /// The bar opens with what was left in it, or fresh. A request waits
+    /// until it is sent or Esc lets it go. A lookup is only worth a minute
+    /// and a half: after that, ⌥⌥ ⏎ is the session before this one again.
+    func open() {
+        catchUp()
+        guard hasDraft, mode == .ask || Date().timeIntervalSince(leftAt) < 90 else { return reset() }
+        naming = false
+        armedClose = nil
+        sendWhenReady = false
+        focusTick += 1
+        // Sessions and folders may have changed while you were away.
+        schedule()
+    }
+
     // MARK: Words
 
     /// The request, trimmed.
@@ -781,9 +810,9 @@ final class CommandModel: ObservableObject {
     /// when you typed one, otherwise empty, its terminal open for you. One
     /// outside the project roots joins the projects.
     ///
-    /// The chooser takes focus, and the bar resets when it loses focus: so the
-    /// request (words, images, agent, Jev's pick) is taken first, and used
-    /// after. Cancelling brings the bar back as it was.
+    /// The chooser takes focus and the bar goes away behind it: so the request
+    /// (words, images, agent, Jev's pick) is taken first, and used after.
+    /// Cancelling brings the bar back as it was.
     func chooseFolder() {
         if text.hasPrefix("/") { text = "" }
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)

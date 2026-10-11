@@ -552,7 +552,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Command bar — shown instantly (used all day; no entrance animation)
 
     @objc func toggleBar() {
-        if let b = bar, b.isVisible { hideBar(); return }
+        if let b = bar, b.isVisible { hideBar(keep: true); return }
         if bar == nil {
             let p = Panels.floating(CommandBar(model: command), size: NSSize(width: 720, height: 560), key: true)
             p.onEscape = { [weak self] in self?.command.escape() }
@@ -564,13 +564,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             p.onResign = { [weak self] in
                 guard let self, let b = self.bar, b.isVisible else { return }
                 switch self.command.phase {
-                case .typing, .failed: self.hideBar()
+                case .typing, .failed: self.hideBar(keep: true)
                 default: break
                 }
             }
             bar = p
         }
-        command.reset()
+        command.open()
         // ⌘Tab-like: if you're in a session's terminal, ⏎ goes to the one before it.
         command.frontPane = popouts.first { $0.value.isKeyWindow || ($0.value.isMainWindow && NSApp.isActive) }?.key
         var t = Transaction()
@@ -617,14 +617,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if let a = pinned { command.target = a.pane }
     }
 
-    private func hideBar() {
-        guard let b = bar, b.isVisible else { return }
-        guard command.shown else { b.orderOut(nil); return }
+    /// `keep`: the bar goes, what is in it stays for when it comes back (you
+    /// clicked into another app, or ⌥⌥). Sending and Esc clear it.
+    private func hideBar(keep: Bool = false) {
+        if keep { command.left() }
+        guard let b = bar, b.isVisible, command.shown else {
+            // Already gone, or on its way out: only the clearing is left to do.
+            bar?.orderOut(nil)
+            if !keep { command.reset() }
+            return
+        }
         command.shown = false
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.17) { [weak self] in
             guard let self, !self.command.shown else { return }
             b.orderOut(nil)
-            self.command.reset()
+            if !keep { self.command.reset() }
         }
     }
 
@@ -761,9 +768,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if InboxModel.shared.shown { hideInbox() }
         // The bar goes first, at once: left to fade while still key, it would
         // hand focus back to the app it came from as it left.
+        // A request still being written waits for you; one just sent is done with.
         if let b = bar, b.isVisible {
             b.orderOut(nil)
-            command.reset()
+            if case .sent = command.phase { command.reset() } else { command.left() }
         }
         if let w = popouts[pane] {
             bringForward(w)
