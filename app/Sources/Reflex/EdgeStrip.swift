@@ -1140,6 +1140,7 @@ struct Sliver: View {
 /// rail, so the rail's own windows never become key — becoming key would
 /// switch their glass to its darker active look instantly.
 struct RailKeys: View {
+    static let window = NSUserInterfaceItemIdentifier("reflex.rail-keys")
     @FocusState private var focused: Bool
     var body: some View {
         Color.clear
@@ -1149,6 +1150,11 @@ struct RailKeys: View {
             .focusEffectDisabled()
             .onKeyPress(phases: .down) { Rail.key($0) }
             .onAppear { focused = true }
-            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in focused = true }
+            // Only when this panel takes the keys: listening to every window's
+            // didBecomeKey, it grabbed focus from a terminal you'd just switched
+            // to (⌘`, a click), graying it until the edge let go.
+            .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { note in
+                if (note.object as? NSWindow)?.identifier == RailKeys.window { focused = true }
+            }
     }
 }

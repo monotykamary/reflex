@@ -184,6 +184,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             default:
                 let want = ProcessInfo.processInfo.environment["REFLEX_DEMO_PANE"]
+                // Dev: several panes ("a,b"), one window each, to test switching between them.
+                if let want, want.contains(",") {
+                    for (i, pane) in want.split(separator: ",").enumerated() {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + Double(i) * 0.8) { self.showPane(String(pane)) }
+                    }
+                    return
+                }
                 if let a = Store.shared.state.agents.first(where: { $0.pane == want }) ?? Store.shared.state.agents.first {
                     self.showPane(a.pane)
                     // Dev: with another app in front, switch to it from the bar.
@@ -305,6 +312,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         strip = p
 
         let kc = Panels.floating(RailKeys(), size: NSSize(width: 1, height: 1), key: true)
+        kc.identifier = RailKeys.window
         kc.level = .statusBar
         kc.ignoresMouseEvents = true
         kc.alphaValue = 0
