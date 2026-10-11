@@ -23,6 +23,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.optionAsMetaKey = true
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
+        TerminalSelect.install()
         apply(Themes.shared.current, font: Themes.font(Themes.shared.fontFamily, size: Themes.shared.fontSize))
         Themes.shared.$current.combineLatest(Themes.shared.$fontSize, Themes.shared.$fontFamily)
             .sink { [weak self] t, s, f in self?.apply(t, font: Themes.font(f, size: s)) }
@@ -75,6 +76,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         if attached { view.terminate() }
         attached = false
         TerminalScroll.views[ObjectIdentifier(view)] = nil
+        TerminalSelect.toAgent[ObjectIdentifier(view)] = nil
     }
 
     // MARK: LocalProcessTerminalViewDelegate
@@ -171,6 +173,48 @@ enum TerminalScroll {
     }
 }
 
+/// Selecting text in an agent terminal. herdr's attach turns mouse reporting
+/// on, so a drag goes to the program: right inside an agent that selects for
+/// itself, useless in the plain shell left after it exits. So with no agent in
+/// the pane the mouse stays here (drag selects, ⌘C copies), and Shift-drag
+/// selects anywhere, as in Ghostty.
+@MainActor
+enum TerminalSelect {
+    private static var monitor: Any?
+    /// Per terminal: whether its pane has an agent to give the mouse to.
+    static var toAgent: [ObjectIdentifier: Bool] = [:]
+    /// The terminal a Shift-drag is selecting in, until the button comes up.
+    private static var holding: LocalProcessTerminalView?
+
+    static func set(_ view: LocalProcessTerminalView, agent: Bool) {
+        toAgent[ObjectIdentifier(view)] = agent
+        if holding !== view { view.allowMouseReporting = agent }
+    }
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseUp]) { e in
+            if e.type == .leftMouseUp {
+                // Back to the agent once the terminal has seen the release.
+                if holding != nil { DispatchQueue.main.async { release() } }
+                return e
+            }
+            guard e.modifierFlags.contains(.shift),
+                  let view = TerminalScroll.views.values.first(where: { $0.window === e.window && $0.window != nil }),
+                  view.bounds.contains(view.convert(e.locationInWindow, from: nil)) else { return e }
+            holding = view
+            view.allowMouseReporting = false
+            return e
+        }
+    }
+
+    private static func release() {
+        guard let v = holding else { return }
+        holding = nil
+        v.allowMouseReporting = toAgent[ObjectIdentifier(v)] ?? true
+    }
+}
+
 struct AgentPopout: View {
     @ObservedObject var session: TerminalSession
     /// The window's title-bar height: the header shares that row with the traffic lights.
@@ -207,6 +251,8 @@ struct AgentPopout: View {
         .ignoresSafeArea(edges: .top)
         .frame(minWidth: 520, minHeight: 320)
         .onAppear { session.attach() }
+        // An agent takes the mouse; the shell it leaves behind gives it back.
+        .onChange(of: agent == nil, initial: true) { _, gone in TerminalSelect.set(session.view, agent: !gone) }
         .onDisappear { session.detach() }
     }
 
