@@ -55,7 +55,7 @@ def toks_hits(toks: List<&2, String>, +hay: String) -> U32:
     case Nil{}:
       0
     case Con{+t, rest}:
-      (Ix.bonus(String.contains(hay, t), 1) + toks_hits(rest, hay) : U32)
+      (Ix.bonus(String.contains(hay, t), Ix.weight(t)) + toks_hits(rest, hay) : U32)
 
 type Scored is Data:
   Scored{score: U32, age: U32, p: Past}

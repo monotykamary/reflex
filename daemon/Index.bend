@@ -111,9 +111,89 @@ def filter_tokens(ws: List<&2, String>) -> List<&2, String>:
     case Con{+w, t}:
       put_token(keep_token(w), w, filter_tokens(t))
 
+# Words
+# -----
+# The request's words as written. A joiner inside a word is part of a name:
+# "pi-fabric" and "studio.app" stay whole, so "pi-fabric" names the folder
+# pi-fabric and not every folder that starts with "pi-".
+
+def joiner(+c: U32) -> Bool:
+  U32.is_eq(c, 45) || U32.is_eq(c, 46) || U32.is_eq(c, 95)
+
+def blank_keep(c: Char) -> Char:
+  match c:
+    case Chr{+code}:
+      blank_of.if(word_char(code) || joiner(code), code)
+
+def blank_keeping(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{c, t}:
+      SCon{blank_keep(c), blank_keeping(t)}
+
+def strip_start.if(j: Bool, +c: U32, t: String, stripped: String) -> String:
+  match j:
+    case True{}:
+      stripped
+    case False{}:
+      SCon{Chr{c}, t}
+
+# "..x" -> "x"
+def strip_start(s: String) -> String:
+  match s:
+    case SNil{}:
+      SNil{}
+    case SCon{Chr{+c}, +t}:
+      strip_start.if(joiner(c), c, t, strip_start(t))
+
+# "pi-fabric." (the end of a sentence) -> "pi-fabric"
+def strip(w: String) -> String:
+  String.reverse(strip_start(String.reverse(strip_start(w))))
+
+def strip_all(ws: List<&2, String>) -> List<&2, String>:
+  match ws:
+    case Nil{}:
+      []
+    case Con{w, t}:
+      strip(w) <> strip_all(t)
+
+def words(text: String) -> List<&2, String>:
+  filter_tokens(strip_all(String.split(blank_keeping(String.to_lower(text)), ' ')))
+
+def is_compound(+w: String) -> Bool:
+  String.contains(w, "-") || String.contains(w, ".") || String.contains(w, "_")
+
+def expand.put(compound: Bool, +w: String, rest: List<&2, String>) -> List<&2, String>:
+  match compound:
+    case True{}:
+      w <> List.append(&2, String, filter_tokens(String.split(blank(w), ' ')), rest)
+    case False{}:
+      w <> rest
+
+# What to look for in a folder's facts: each word, and a joined word's parts
+# too ("pi-fabric" -> pi-fabric, pi, fabric).
+def expand(ws: List<&2, String>) -> List<&2, String>:
+  match ws:
+    case Nil{}:
+      []
+    case Con{+w, t}:
+      expand.put(is_compound(w), w, expand(t))
+
 # The words of a request worth matching against folders.
 def tokens(text: String) -> List<&2, String>:
-  filter_tokens(String.split(blank(String.to_lower(text)), ' '))
+  expand(words(text))
+
+# A joined word is a name, and says more than one of its parts.
+def weight.if(compound: Bool) -> U32:
+  match compound:
+    case True{}:
+      3
+    case False{}:
+      1
+
+def weight(+t: String) -> U32:
+  weight.if(is_compound(t))
 
 # Scoring
 # -------
@@ -166,8 +246,8 @@ def scored_all(+toks: List<&2, String>, fs: List<&2, M.Folder>) -> List<&2, Scor
     case Con{f, t}:
       score(toks, f) <> scored_all(toks, t)
 
-# A folder is named when a word of the request is its name, or the first
-# part of it ("acme" names acme-web, "studio" studio.app).
+# A folder is named when a word of the request (as written: see Words) is its
+# name, or the first part of it ("acme" names acme-web, "studio" studio.app).
 def names(+name: String, +t: String) -> Bool:
   String.eq(name, t) || String.starts_with(name, t ++ "-") || String.starts_with(name, t ++ "_") || String.starts_with(name, t ++ ".")
 
@@ -248,12 +328,12 @@ def no_collections(xs: List<&2, Scored>) -> List<&2, Scored>:
 def rank.parts(p: Parts, +k: Nat) -> List<&2, M.Folder>:
   match p:
     case Parts{pinned, matched, others}:
-      take(List.append(&2, M.Folder, folders_of(pinned), List.append(&2, M.Folder, folders_of(List.sort(~Scored, ~scored_le, matched)), folders_of(List.sort(~Scored, ~by_age_le, no_collections(others))))), k)
+      take(List.append(&2, M.Folder, folders_of(List.sort(~Scored, ~scored_le, pinned)), List.append(&2, M.Folder, folders_of(List.sort(~Scored, ~scored_le, matched)), folders_of(List.sort(~Scored, ~by_age_le, no_collections(others))))), k)
 
-def rank.toks(+toks: List<&2, String>, fs: List<&2, M.Folder>, +k: Nat) -> List<&2, M.Folder>:
-  rank.parts(partition(toks, scored_all(toks, fs)), k)
+def rank.words(+ws: List<&2, String>, fs: List<&2, M.Folder>, +k: Nat) -> List<&2, M.Folder>:
+  rank.parts(partition(ws, scored_all(expand(ws), fs)), k)
 
-# The k best folders for a request: pinned names, lexical matches, then the
-# most recently active folders.
+# The k best folders for a request: named folders (the best match first),
+# lexical matches, then the most recently active folders.
 def rank(text: String, fs: List<&2, M.Folder>, +k: Nat) -> List<&2, M.Folder>:
-  rank.toks(tokens(text), fs, k)
+  rank.words(words(text), fs, k)

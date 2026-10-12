@@ -143,8 +143,9 @@ Every call except health and pair needs the token.
    more repos, like `~/VCS/work/acme`, described by what it holds, for work that
    spans them; past twelve it is a collection, offered only when named or
    matched), ranked by `daemon/Index.bend`: folders you name
-   (or the start of whose name you write) are pinned first, then lexical
-   matches, then recent activity. Earlier conversations are ranked the same
+   (or the start of whose name you write) are pinned first, the best match on
+   top, then lexical matches, then recent activity. A joined word is one name:
+   `pi-fabric` names pi-fabric, not every `pi-*` folder. Earlier conversations are ranked the same
    way. At most 8 folders, 12 agents and 5 earlier conversations are offered.
 2. **What you did before.** The app adds a few lines: where your last requests
    went, and your corrections for similar requests.

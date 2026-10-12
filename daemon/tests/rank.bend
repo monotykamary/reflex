@@ -28,5 +28,7 @@ def main() -> IO(Unit):
     IO.print(show(Ix.rank("fix the flaky follow test in jev fabric", fs, 8n)))
     IO.print("--- add a quicklook keybinding to herdr")
     IO.print(show(Ix.rank("add a quicklook keybinding to herdr", fs, 8n)))
+    IO.print("--- fix the issues listed for pi-fabric after #237, then bun publish")
+    IO.print(show(Ix.rank("fix the issues listed for pi-fabric after #237, then bun publish", fs, 8n)))
     IO.print("--- localterm browser theme bug")
     IO.print(show(Ix.rank("localterm browser theme bug", fs, 5n)))
