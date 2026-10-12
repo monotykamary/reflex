@@ -24,6 +24,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
         TerminalSelect.install()
+        TerminalKeys.install()
         apply(Themes.shared.current, font: Themes.font(Themes.shared.fontFamily, size: Themes.shared.fontSize))
         Themes.shared.$current.combineLatest(Themes.shared.$fontSize, Themes.shared.$fontFamily)
             .sink { [weak self] t, s, f in self?.apply(t, font: Themes.font(f, size: s)) }
@@ -212,6 +213,30 @@ enum TerminalSelect {
         guard let v = holding else { return }
         holding = nil
         v.allowMouseReporting = toAgent[ObjectIdentifier(v)] ?? true
+    }
+}
+
+/// The Mac's line keys, as Ghostty sends them: ⌘⌫ clears the line (^U),
+/// ⌘← and ⌘→ go to its start and end (^A, ^E). SwiftTerm drops ⌘⌫ and moves
+/// by a word for the other two.
+@MainActor
+enum TerminalKeys {
+    private static var monitor: Any?
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
+            guard e.modifierFlags.intersection([.command, .option, .control, .shift]) == .command,
+                  let view = TerminalScroll.views.values.first(where: { $0.window === e.window && $0.window != nil }),
+                  let first = e.window?.firstResponder as? NSView, first.isDescendant(of: view) else { return e }
+            switch e.keyCode {
+            case 51: view.send(txt: "\u{15}")
+            case 123: view.send(txt: "\u{01}")
+            case 124: view.send(txt: "\u{05}")
+            default: return e
+            }
+            return nil
+        }
     }
 }
 
