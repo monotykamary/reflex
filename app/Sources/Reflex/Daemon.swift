@@ -106,7 +106,7 @@ final class Daemon: ObservableObject {
         if !s.jevCredentialCommand.isEmpty {
             env["JEV_CREDENTIAL_COMMAND"] = s.jevCredentialCommand
         } else if let key = Settings.jevKey {
-            env["TYPESAFE_API_KEY"] = key
+            env[Settings.jevKeyVariable(s.jevProvider)] = key
         }
         return env
     }

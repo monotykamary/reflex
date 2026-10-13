@@ -60,9 +60,11 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
   for each, which runs that tool's own installer (it verifies its download
   and puts one binary in `~/.local/bin`).
 - At least one agent: [Claude Code](https://claude.com/claude-code), Codex, pi, …
-- For routing: jev-fabric and a Jev provider key (TypeSafe by default; Reflex
-  can reuse the key pi already has). Without them everything else works and
-  you pick where requests go.
+- For routing: jev-fabric and a System One provider key (TypeSafe's Jev by
+  default; Reflex can reuse the key pi already has). Settings → Routing also
+  offers OpenRouter, Vercel and [SubQ Snap](https://docs.subq.ai/), which needs
+  jev-fabric 0.7 or later; each provider keeps its own key. Without them
+  everything else works and you pick where requests go.
 - For the phone: [Tailscale](https://tailscale.com) on the Mac and the phone
   (the Mac app, Homebrew or a headless `tailscaled` all work).
 

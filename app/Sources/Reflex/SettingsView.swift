@@ -700,9 +700,18 @@ private struct RoutingPane: View {
                     RowLabel("Jev", "Asks one typed question per request; no chat model rewrites your words.")
                 }
                 Picker(selection: $s.jevProvider) {
-                    ForEach(["typesafe", "openrouter", "vercel"], id: \.self) { Text($0) }
+                    ForEach(["typesafe", "openrouter", "vercel", "subq"], id: \.self) { Text($0) }
                 } label: {
-                    RowLabel("Provider")
+                    if s.jevProvider == "subq" {
+                        RowLabel("Provider", "SubQ Snap needs jev-fabric 0.7 or later.")
+                    } else {
+                        RowLabel("Provider")
+                    }
+                }
+                // Each provider has its own key; the daemon takes the new one.
+                .onChange(of: s.jevProvider) {
+                    hasKey = Settings.jevKey != nil
+                    onboarding.providerChanged()
                 }
             }
             Section("Credentials") {

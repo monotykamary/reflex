@@ -260,6 +260,8 @@ final class Onboarding: ObservableObject {
         restartAndTest()
     }
 
+    func providerChanged() { restartAndTest() }
+
     private func restartAndTest() {
         Daemon.shared.restart()
         ping = .testing

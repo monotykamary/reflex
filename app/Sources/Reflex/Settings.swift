@@ -163,8 +163,22 @@ final class Settings: ObservableObject {
         try? FileManager.default.removeItem(at: supportDir.appendingPathComponent("token"))
     }
 
-    // Jev API key in the Keychain (used when no credential command is set).
-    private static let service = "dev.reflex.jev" + (profileKey.map { "." + $0 } ?? "")
+    /// The variable jev-fabric reads each provider's key from.
+    static func jevKeyVariable(_ provider: String) -> String {
+        switch provider {
+        case "openrouter": return "OPENROUTER_API_KEY"
+        case "vercel": return "AI_GATEWAY_API_KEY"
+        case "subq": return "SUBQ_API_KEY"
+        default: return "TYPESAFE_API_KEY"
+        }
+    }
+
+    // Jev API key in the Keychain (used when no credential command is set):
+    // one per provider, so a TypeSafe key is never sent to another service.
+    private static var service: String {
+        let provider = Settings.shared.jevProvider
+        return "dev.reflex.jev" + (provider == "typesafe" ? "" : "." + provider) + (profileKey.map { "." + $0 } ?? "")
+    }
 
     static var jevKey: String? {
         get {
