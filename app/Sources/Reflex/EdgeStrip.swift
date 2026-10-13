@@ -705,15 +705,38 @@ private struct AgentList: View {
         .buttonStyle(Pressable())
     }
 
-    /// Folders in order of first appearance, waiting agents' folders first.
-    private var groups: [(String, [AgentInfo])] {
-        let rank: [String: Int] = ["blocked": 0, "working": 1, "done": 2]
+    /// Home and your project roots (and what is above them) hold projects;
+    /// an agent working there is not the project of everything below it.
+    private static func holdsProjects(_ path: String) -> Bool {
+        ([NSHomeDirectory()] + Settings.shared.rootList.map { ($0 as NSString).expandingTildeInPath })
+            .contains { $0 == path || $0.hasPrefix(path + "/") }
+    }
+
+    /// Each agent's folder → the folder it is listed under: its own, or the
+    /// outermost folder above it that another agent is working in, so a
+    /// project's sub-folders stay with the project.
+    private var projects: [String: String] {
+        let cwds = Set(agents.map(\.cwd))
+        let tops = cwds.filter { !AgentList.holdsProjects($0) }
+        return Dictionary(uniqueKeysWithValues: cwds.map { c in
+            (c, tops.filter { c.hasPrefix($0 + "/") }.min { $0.count < $1.count } ?? c)
+        })
+    }
+
+    /// Where in its project an agent is, when not at its top ("coralbricks-web").
+    private func inside(_ a: AgentInfo, _ projects: [String: String]) -> String? {
+        guard let p = projects[a.cwd], p != a.cwd else { return nil }
+        return String(a.cwd.dropFirst(p.count + 1))
+    }
+
+    /// Projects in order of first appearance, waiting agents' projects first.
+    private func groups(_ projects: [String: String]) -> [(String, [AgentInfo])] {
         var order: [String] = []
         var by: [String: [AgentInfo]] = [:]
-        _ = rank
         for a in Rail.ordered(shown) {
-            if by[a.folder] == nil { order.append(a.folder) }
-            by[a.folder, default: []].append(a)
+            let folder = ((projects[a.cwd] ?? a.cwd) as NSString).lastPathComponent
+            if by[folder] == nil { order.append(folder) }
+            by[folder, default: []].append(a)
         }
         return order.map { ($0, by[$0] ?? []) }
     }
@@ -789,6 +812,8 @@ private struct AgentList: View {
                     // A project gets a header only when it holds two or more
                     // agents; one-agent projects stay a flat list that names
                     // each folder — under "Other" only when real groups are above.
+                    let projects = self.projects
+                    let groups = self.groups(projects)
                     let multi = groups.filter { $0.1.count > 1 }
                     let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
                     ForEach(multi, id: \.0) { folder, list in
@@ -796,7 +821,7 @@ private struct AgentList: View {
                         // A big project shows its first few; the rest one click away.
                         let folded = query.isEmpty && list.count > AgentList.groupLimit + 1 && !expanded.contains(folder)
                         ForEach(folded ? Array(list.prefix(AgentList.groupLimit)) : list) { a in
-                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, showFolder: false,
+                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects),
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                         if folded {
@@ -815,7 +840,7 @@ private struct AgentList: View {
                     if !singles.isEmpty {
                         if !multi.isEmpty { header("Other") }
                         ForEach(singles) { a in
-                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, showFolder: true,
+                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: a.folder,
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                     }
@@ -824,7 +849,7 @@ private struct AgentList: View {
                         ForEach(background) { p in BackgroundRow(session: p) }
                     }
                 }
-                .padding(.horizontal, 4).padding(.top, groups.contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
+                .padding(.horizontal, 4).padding(.top, groups(projects).contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
             }
             .scrollIndicators(.never)
@@ -887,7 +912,8 @@ private struct BackgroundRow: View {
 private struct AgentRow: View {
     var agent: AgentInfo
     var pulse: Int
-    var showFolder = false
+    /// Named under the title: the folder, or where in its project it is.
+    var place: String?
     var open: () -> Void
     var ask: () -> Void
     var reveal: () -> Void
@@ -903,7 +929,7 @@ private struct AgentRow: View {
         case "done": state = "done, unread"
         default: state = "idle"
         }
-        return ([agent.kind] + (showFolder ? [agent.folder] : []) + [state]).joined(separator: " · ")
+        return ([agent.kind] + (place.map { [$0] } ?? []) + [state]).joined(separator: " · ")
     }
 
     var body: some View {
