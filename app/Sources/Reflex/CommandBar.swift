@@ -611,6 +611,12 @@ final class CommandModel: ObservableObject {
 
     // MARK: Moving
 
+    /// Whether the selection has a row to go to in that direction.
+    func canMove(_ delta: Int) -> Bool {
+        let r = rows
+        return r.indices.contains((r.firstIndex { $0.id == selection } ?? 0) + delta)
+    }
+
     func move(_ delta: Int) {
         let r = rows
         guard !r.isEmpty else { return }
@@ -881,6 +887,8 @@ struct CommandBar: View {
     @FocusState private var nameFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var rowsHeight: CGFloat = 0
+    /// Where the caret was when an arrow last moved the list.
+    @State private var listCaret: Caret?
 
     var body: some View {
         VStack(spacing: 10) {
@@ -908,7 +916,7 @@ struct CommandBar: View {
         // — rows blurring in and out on each one — was the lag.
         .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.jevStamp)
         .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.phase)
-        .onChange(of: model.focusTick) { _, _ in focused = true }
+        .onChange(of: model.focusTick) { _, _ in focused = true; listCaret = nil }
         .onChange(of: store.state.folders > 0) { _, ready in if ready { model.indexReady() } }
         .onChange(of: archive.sessions.map(\.id)) { _, _ in model.resettle() }
         .onChange(of: model.naming) { _, n in if n { nameFocused = true } else { focused = true } }
@@ -1032,8 +1040,8 @@ struct CommandBar: View {
 
     private func key(_ press: KeyPress) -> KeyPress.Result {
         switch press.key {
-        case .downArrow: model.move(1); return .handled
-        case .upArrow: model.move(-1); return .handled
+        case .downArrow: return arrow(1, press)
+        case .upArrow: return arrow(-1, press)
         case .tab: model.move(press.modifiers.contains(.shift) ? -1 : 1); return .handled
         case .return where press.modifiers.contains(.command):
             // Send, then open the terminal (in search, ⏎ already opens it).
@@ -1065,6 +1073,30 @@ struct CommandBar: View {
             return .handled
         }
         return .ignored
+    }
+
+    private struct Caret: Equatable { var text: String; var range: NSRange }
+
+    /// ↑↓ choose a row, except inside a request of several lines: there they
+    /// move the caret until it is on the first or last line, as in a chat box.
+    /// Once an arrow has moved the list it keeps the list (so ↓ ↓ ↑ comes back
+    /// one row) until you type, click, or run out of rows that way. Tab and
+    /// ⌃N / ⌃P always choose.
+    private func arrow(_ delta: Int, _ press: KeyPress) -> KeyPress.Result {
+        // ⇧ selects and ⌥ / ⌘ jump: the field's own.
+        if !press.modifiers.isDisjoint(with: [.shift, .option, .command]) { return .ignored }
+        guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { model.move(delta); return .handled }
+        // An input method is choosing among its own candidates.
+        if editor.hasMarkedText() { return .ignored }
+        let here = Caret(text: model.text, range: editor.selectedRange())
+        if !editor.onEdgeLine(delta), !(listCaret == here && model.canMove(delta)) {
+            listCaret = nil
+            return .ignored
+        }
+        // A list already at its end leaves the arrows where they were.
+        if model.canMove(delta) { listCaret = here }
+        model.move(delta)
+        return .handled
     }
 
     // MARK: List
@@ -1203,7 +1235,8 @@ struct CommandBar: View {
                     Text("type a request to send it").foregroundStyle(.tertiary)
                     hint("/", "commands")
                 } else {
-                    hint("↑↓", "choose")
+                    // Over several lines the arrows walk the text first; Tab always chooses.
+                    hint(model.text.contains("\n") ? "⇥" : "↑↓", "choose")
                     hint("⌘⏎", "send & open")
                     hint("/", "commands")
                 }
@@ -1357,5 +1390,18 @@ private struct Removable<Content: View>: View {
                 }
             }
             .onHover { h in withAnimation(Motion.micro) { hover = h } }
+    }
+}
+
+private extension NSTextView {
+    /// Whether the caret is on the first (-1) or last (+1) line as drawn, wrapped lines included.
+    func onEdgeLine(_ delta: Int) -> Bool {
+        let sel = selectedRange()
+        let from = delta < 0 ? sel.location : NSMaxRange(sel)
+        return abs(lineY(from) - lineY(delta < 0 ? 0 : (string as NSString).length)) < 1
+    }
+
+    private func lineY(_ at: Int) -> CGFloat {
+        firstRect(forCharacterRange: NSRange(location: at, length: 0), actualRange: nil).midY
     }
 }
