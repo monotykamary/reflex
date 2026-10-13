@@ -688,7 +688,11 @@ private struct RoutingPane: View {
     var body: some View {
         Form {
             Section { PaneHeader(pane: .routing) }
-                .onAppear { if onboarding.ping == .idle { onboarding.test() } }
+                .onAppear {
+                    if onboarding.ping == .idle { onboarding.test() }
+                    onboarding.refresh()
+                    onboarding.askJevLatest()
+                }
             Section {
                 LabeledContent {
                     HStack(spacing: 8) {
@@ -702,16 +706,20 @@ private struct RoutingPane: View {
                 Picker(selection: $s.jevProvider) {
                     ForEach(["typesafe", "openrouter", "vercel", "subq"], id: \.self) { Text($0) }
                 } label: {
-                    if s.jevProvider == "subq" {
-                        RowLabel("Provider", "SubQ Snap needs jev-fabric 0.7 or later.")
-                    } else {
-                        RowLabel("Provider")
-                    }
+                    RowLabel("Provider")
                 }
                 // Each provider has its own key; the daemon takes the new one.
                 .onChange(of: s.jevProvider) {
                     hasKey = Settings.jevKey != nil
                     onboarding.providerChanged()
+                }
+                if onboarding.jevTooOld {
+                    LabeledContent {
+                        Button(onboarding.installLabel(.jev)) { onboarding.install(.jev) }
+                            .disabled(onboarding.working != nil)
+                    } label: {
+                        RowLabel("jev-fabric", onboarding.jevDetail)
+                    }
                 }
             }
             Section("Credentials") {
@@ -973,7 +981,7 @@ final class SetupState: ObservableObject {
     func update() {
         let o = Onboarding.shared
         o.refresh()
-        let ok = [o.herdrInstalled, o.herdrRunning, o.integrations, o.jevInstalled, o.trusted]
+        let ok = [o.herdrInstalled, o.herdrRunning, o.integrations, o.jevInstalled && !o.jevTooOld, o.trusted]
         missing = ok.filter { !$0 }.count
     }
 }
@@ -986,6 +994,7 @@ private struct SetupPane: View {
     var body: some View {
         Form {
             Section { PaneHeader(pane: .setup) }
+                .onAppear { o.refresh(); o.askJevLatest() }
             Section("herdr") {
                 CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? nil : o.installDetail(.herdr)) {
                     installButtons(.herdr)
@@ -1008,7 +1017,7 @@ private struct SetupPane: View {
                 }
             }
             Section("Jev") {
-                CheckRow(ok: o.jevInstalled, title: "jev-fabric installed", detail: o.jevInstalled ? nil : o.installDetail(.jev)) {
+                CheckRow(ok: o.jevInstalled && !o.jevTooOld, title: "jev-fabric installed", detail: o.jevInstalled ? o.jevDetail : o.installDetail(.jev), showAccessory: o.jevBehind) {
                     installButtons(.jev)
                 }
                 CheckRow(ok: pingOK, title: "Jev answering", detail: pingDetail, showAccessory: true) {
@@ -1034,7 +1043,7 @@ private struct SetupPane: View {
     /// Install, and once that has failed, the command to run by hand.
     @ViewBuilder private func installButtons(_ tool: Onboarding.Tool) -> some View {
         if o.failures[tool.rawValue] != nil { Button("Copy Command") { o.copy(tool.command) } }
-        Button(o.working == tool.rawValue ? "Installing…" : (o.failures[tool.rawValue] == nil ? "Install" : "Try Again")) { o.install(tool) }
+        Button(o.installLabel(tool)) { o.install(tool) }
             .disabled(o.working != nil)
             .help(tool.command)
     }

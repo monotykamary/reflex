@@ -23,6 +23,12 @@ final class Onboarding: ObservableObject {
     /// Reflex's pi extension: pi-fabric's background shells count as work.
     @Published var piShells = false
     @Published var jevInstalled = false
+    /// jev-fabric as installed ("0.7.0"), and the newest release once asked.
+    @Published var jevVersion: String?
+    @Published var jevLatest: String?
+    /// The binary (and its date) the version was read from.
+    private var jevSeen = ""
+    private var latestAsked = Date.distantPast
     @Published var ping: Ping = .idle
     @Published var installed: Set<String> = []
     @Published var folders: [FolderInfo] = []
@@ -48,7 +54,7 @@ final class Onboarding: ObservableObject {
         poll = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        if step == .jev { test() }
+        if step == .jev { test(); askJevLatest() }
         if step == .projects || step == .jev { Task { await loadFolders() } }
     }
 
@@ -68,6 +74,7 @@ final class Onboarding: ObservableObject {
         forward = s.rawValue >= step.rawValue
         withAnimation(Motion.enter) { step = s }
         if s == .jev, ping == .idle { test() }
+        if s == .jev { askJevLatest() }
         if s == .projects || s == .jev { Task { await loadFolders() } }
         if s == .done, !(ping.isOK) { test() }
     }
@@ -102,14 +109,101 @@ final class Onboarding: ObservableObject {
         refresh()
     }
 
-    private static func which(_ name: String) -> Bool {
+    /// Where the login PATH finds it, as the daemon would.
+    private static func path(of name: String) -> String? {
         let path = Daemon.shared.childEnvironment()["PATH"] ?? ""
-        return path.split(separator: ":").contains { FileManager.default.isExecutableFile(atPath: "\($0)/\(name)") }
+        return path.split(separator: ":").map { "\($0)/\(name)" }.first { FileManager.default.isExecutableFile(atPath: $0) }
+    }
+
+    private static func which(_ name: String) -> Bool { path(of: name) != nil }
+
+    // MARK: jev-fabric's version
+
+    /// The oldest jev-fabric a provider works with.
+    static func jevMinimum(_ provider: String) -> String? { provider == "subq" ? "0.7.0" : nil }
+
+    private static func older(_ a: String, than b: String) -> Bool { a.compare(b, options: .numeric) == .orderedAscending }
+
+    /// What `--version` says, down to its number.
+    nonisolated static func version(of path: String) -> String? {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: path)
+        p.arguments = ["--", "--version"]
+        let out = Pipe()
+        p.standardInput = FileHandle.nullDevice
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return nil }
+        let said = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        p.waitUntilExit()
+        return said.firstMatch(of: #/\d+\.\d+\.\d+/#).map { String($0.output) }
+    }
+
+    /// Read again only when the binary changed (an update swaps a symlink).
+    private func readJevVersion() {
+        guard let path = Onboarding.path(of: Tool.jev.rawValue) else { jevSeen = ""; jevVersion = nil; return }
+        let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let date = (try? FileManager.default.attributesOfItem(atPath: real))?[.modificationDate] as? Date
+        let seen = "\(real) \(date?.timeIntervalSince1970 ?? 0)"
+        guard seen != jevSeen else { return }
+        jevSeen = seen
+        Task.detached {
+            let v = Onboarding.version(of: real)
+            await MainActor.run { if self.jevSeen == seen { self.jevVersion = v } }
+        }
+    }
+
+    /// Ask GitHub for the newest release: it answers /releases/latest with a
+    /// redirect to that tag. Only while Setup or Routing is open, once an hour.
+    func askJevLatest() {
+        guard jevInstalled, Date().timeIntervalSince(latestAsked) > 3600 else { return }
+        latestAsked = Date()
+        Task {
+            var r = URLRequest(url: URL(string: "https://github.com/fabric-runtime/jev-fabric/releases/latest")!)
+            r.httpMethod = "HEAD"
+            r.timeoutInterval = 10
+            guard let (_, answer) = try? await URLSession.shared.data(for: r),
+                  let v = answer.url?.lastPathComponent.wholeMatch(of: #/v(\d+\.\d+\.\d+)/#) else { return }
+            jevLatest = String(v.1)
+        }
+    }
+
+    /// Too old for the provider in use: routing fails until it is updated.
+    var jevTooOld: Bool {
+        guard let v = jevVersion, let need = Onboarding.jevMinimum(Settings.shared.jevProvider) else { return false }
+        return Onboarding.older(v, than: need)
+    }
+
+    /// A newer release than the one installed.
+    var jevBehind: Bool {
+        guard let v = jevVersion, let l = jevLatest else { return false }
+        return Onboarding.older(v, than: l)
+    }
+
+    /// What the jev-fabric row says once it is installed.
+    var jevDetail: String? {
+        guard let v = jevVersion else { return nil }
+        if working == Tool.jev.rawValue { return "Downloading and checking it…" }
+        if let why = failures[Tool.jev.rawValue] { return "Didn't update: \(why)" }
+        if jevTooOld, let need = Onboarding.jevMinimum(Settings.shared.jevProvider) {
+            return "This is \(v). SubQ Snap needs \(need) or later."
+        }
+        if jevBehind, let l = jevLatest { return "This is \(v); \(l) is out." }
+        return "Version \(v)."
+    }
+
+    /// The install button's word: an installed jev-fabric is updated.
+    func installLabel(_ tool: Tool) -> String {
+        let update = tool == .jev && jevVersion != nil
+        if working == tool.rawValue { return update ? "Updating…" : "Installing…" }
+        if failures[tool.rawValue] != nil { return "Try Again" }
+        return update ? "Update" : "Install"
     }
 
     func refresh() {
         herdrInstalled = Onboarding.which("herdr")
         jevInstalled = Onboarding.which("jev-fabric")
+        readJevVersion()
         installed = Set(Onboarding.harnesses.filter { Onboarding.which($0) })
         let home = NSHomeDirectory()
         integrations = FileManager.default.fileExists(atPath: home + "/.claude/hooks/herdr-agent-state.sh")
@@ -187,10 +281,18 @@ final class Onboarding: ObservableObject {
     func install(_ tool: Tool) {
         guard working == nil else { return }
         // Without pipefail a failed download is an empty script, which "works".
+        // The same installer updates: it fetches the newest release.
+        let before = tool == .jev ? jevVersion : nil
         run(tool.rawValue, "set -o pipefail; " + tool.command) { [weak self] in
-            guard Onboarding.which(tool.rawValue) else { return "It ran, but \(tool.rawValue) isn't in ~/.local/bin." }
-            // herdr: the store's next refresh starts its server. Jev: see if it answers.
-            if tool == .jev { self?.test() }
+            guard let path = Onboarding.path(of: tool.rawValue) else { return "It ran, but \(tool.rawValue) isn't in ~/.local/bin." }
+            guard tool == .jev else { return nil }  // herdr: the store's next refresh starts its server.
+            guard let before else { self?.test(); return nil }
+            // Another copy earlier on the PATH would still be the one in use.
+            if Onboarding.version(of: path) == before {
+                return "It ran, but \((path as NSString).abbreviatingWithTildeInPath) is still \(before)."
+            }
+            // The daemon's jev-fabric is the old one until it starts again.
+            self?.restartAndTest()
             return nil
         }
     }
@@ -449,8 +551,8 @@ struct OnboardingView: View {
             }
         case .jev:
             VStack(alignment: .leading, spacing: 10) {
-                Check(ok: model.jevInstalled, title: "jev-fabric installed", detail: model.jevInstalled ? nil : model.installDetail(.jev)) {
-                    if !model.jevInstalled { InstallActions(model: model, tool: .jev) }
+                Check(ok: model.jevInstalled && !model.jevTooOld, title: "jev-fabric installed", detail: model.jevInstalled ? model.jevDetail : model.installDetail(.jev)) {
+                    if !model.jevInstalled || model.jevTooOld || model.jevBehind { InstallActions(model: model, tool: .jev) }
                 }
                 Check(ok: pingOK, title: "Jev answering", detail: pingDetail) {
                     GlassAction(model.ping == .testing ? "Testing…" : "Test") { model.test() }
@@ -672,7 +774,7 @@ private struct InstallActions: View {
     var body: some View {
         HStack(spacing: 6) {
             if model.failures[tool.rawValue] != nil { GlassAction("Copy") { model.copy(tool.command) } }
-            GlassAction(model.working == tool.rawValue ? "Installing…" : (model.failures[tool.rawValue] == nil ? "Install" : "Try Again")) {
+            GlassAction(model.installLabel(tool)) {
                 model.install(tool)
             }
             .disabled(model.working != nil)
