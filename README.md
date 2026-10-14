@@ -73,7 +73,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 
 ## Build and run
 
-Building also needs Bend 2.0.36 (`curl -fsSL https://bend-lang.com/install.sh | sh`)
+Building also needs Bend 2.0.37 (`curl -fsSL https://bend-lang.com/install.sh | sh`)
 and Xcode / Swift 6.
 
 ```sh
