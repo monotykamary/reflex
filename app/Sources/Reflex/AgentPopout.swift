@@ -10,14 +10,14 @@ import SwiftUI
 @MainActor
 final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalViewDelegate {
     let pane: String
-    let view: LocalProcessTerminalView
+    let view: AgentTerminalView
     @Published var attached = false
     @Published var ended = false
     private var bag = Set<AnyCancellable>()
 
     init(pane: String) {
         self.pane = pane
-        view = LocalProcessTerminalView(frame: NSRect(x: 0, y: 0, width: 680, height: 420))
+        view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 680, height: 420))
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
@@ -51,6 +51,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// this window is where you asked to see it.
     func attach() {
         ended = false
+        view.keyFlags = [0]
         let script = """
         err=$(mktemp -t reflex-attach)
         takeover=""
@@ -216,9 +217,57 @@ enum TerminalSelect {
     }
 }
 
+/// A terminal that notices when its program asks for the kitty keyboard
+/// protocol (`CSI > flags u` pushes, `CSI < n u` pops, `CSI = flags ; mode u`
+/// sets). SwiftTerm doesn't speak it, so without this Shift-Return reaches
+/// Claude Code (which asks, through herdr) as a plain Return and sends.
+final class AgentTerminalView: LocalProcessTerminalView {
+    /// The flags stack; its last entry is in force, 0 meaning legacy keys.
+    var keyFlags: [Int] = [0]
+    /// The escape sequence being read, which may span reads.
+    private var seq: [UInt8] = []
+
+    var kittyKeys: Bool { (keyFlags.last ?? 0) != 0 }
+
+    override func dataReceived(slice: ArraySlice<UInt8>) {
+        for b in slice { scan(b) }
+        super.dataReceived(slice: slice)
+    }
+
+    private func scan(_ b: UInt8) {
+        if b == 0x1b { seq = [b]; return }
+        guard !seq.isEmpty else { return }
+        seq.append(b)
+        switch seq.count {
+        case 2: if b != UInt8(ascii: "[") { seq = [] }
+        case 3: if !"<=>".utf8.contains(b) { seq = [] }
+        default:
+            if b == UInt8(ascii: "u") { apply(seq[2], seq[3..<seq.count - 1]); seq = [] }
+            else if !(b == UInt8(ascii: ";") || (0x30...0x39).contains(b)) || seq.count > 24 { seq = [] }
+        }
+    }
+
+    private func apply(_ kind: UInt8, _ params: ArraySlice<UInt8>) {
+        let p = String(decoding: params, as: UTF8.self).split(separator: ";", omittingEmptySubsequences: false).map { Int($0) }
+        let first = p.first.flatMap { $0 }
+        switch kind {
+        case UInt8(ascii: ">"): keyFlags.append(first ?? 0)
+        case UInt8(ascii: "<"): keyFlags.removeLast(min(max(first ?? 1, 1), keyFlags.count - 1))
+        default:
+            let f = first ?? 0, top = keyFlags.count - 1
+            switch p.count > 1 ? p[1] ?? 1 : 1 {
+            case 2: keyFlags[top] |= f
+            case 3: keyFlags[top] &= ~f
+            default: keyFlags[top] = f
+            }
+        }
+    }
+}
+
 /// The Mac's line keys, as Ghostty sends them: ⌘⌫ clears the line (^U),
 /// ⌘← and ⌘→ go to its start and end (^A, ^E). SwiftTerm drops ⌘⌫ and moves
-/// by a word for the other two.
+/// by a word for the other two. And Shift-Return, once the program has asked
+/// for the kitty keyboard protocol, as `CSI 13;2u`: Claude Code's newline.
 @MainActor
 enum TerminalKeys {
     private static var monitor: Any?
@@ -226,9 +275,16 @@ enum TerminalKeys {
     static func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
-            guard e.modifierFlags.intersection([.command, .option, .control, .shift]) == .command,
+            let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
+            guard mods == .command || mods == .shift,
                   let view = TerminalScroll.views.values.first(where: { $0.window === e.window && $0.window != nil }),
                   let first = e.window?.firstResponder as? NSView, first.isDescendant(of: view) else { return e }
+            if mods == .shift {
+                guard e.keyCode == 36 || e.keyCode == 76, !view.hasMarkedText(),
+                      (view as? AgentTerminalView)?.kittyKeys == true else { return e }
+                view.send(txt: "\u{1b}[13;2u")
+                return nil
+            }
             switch e.keyCode {
             case 51: view.send(txt: "\u{15}")
             case 123: view.send(txt: "\u{01}")
