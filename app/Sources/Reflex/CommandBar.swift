@@ -584,10 +584,12 @@ final class CommandModel: ObservableObject {
     }
 
     /// Search: the live sessions matching every word (most recent first),
-    /// then earlier sessions that could be resumed. /resume: only those.
+    /// then earlier sessions that could be resumed. /resume: only those until
+    /// you type; then a live session that matches comes first too (it is open
+    /// already, so ⏎ shows it rather than resuming a second copy).
     private var searchRows: [Candidate] {
         let pasts = SessionArchive.shared.matching(request, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
-        if resumeOnly { return pasts }
+        if resumeOnly && request.isEmpty { return pasts }
         return sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
                       title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
