@@ -1052,6 +1052,11 @@ struct CommandBar: View {
         case .return where press.modifiers.contains(.option):
             // A new line in a long request.
             return .ignored
+        case .return where press.modifiers.contains(.shift):
+            // ⇧⏎ too, as in Claude Code; the field itself would take it as ⏎.
+            guard let editor = NSApp.keyWindow?.firstResponder as? NSTextView else { return .handled }
+            editor.insertNewlineIgnoringFieldEditor(nil)
+            return .handled
         case .return:
             // A multi-line field takes Return as a new line and never submits;
             // ⏎ is the bar's main key, so it is handled here.
