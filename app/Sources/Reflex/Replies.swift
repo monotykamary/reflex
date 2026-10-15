@@ -9,11 +9,12 @@ import Foundation
 final class Replies: ObservableObject {
     static let shared = Replies()
 
-    /// Session id → its last reply, as plain text.
-    @Published private(set) var text: [String: String] = [:]
+    /// Inbox item → the reply it finished with, as plain text. Per item, not
+    /// per session: a session's next "finished" never shows the reply before.
+    @Published private(set) var text: [Int: String] = [:]
     private var paths: [String: URL] = [:]
-    private var read: [String: Date] = [:]
-    private var busy: Set<String> = []
+    private var read: [Int: Date] = [:]
+    private var busy: Set<Int> = []
 
     static let kinds: Set<String> = ["claude", "pi"]
 
@@ -24,24 +25,30 @@ final class Replies: ObservableObject {
         return a
     }
 
-    /// Read (again, when the file changed) the replies these items need.
+    /// Read (again, when the file changed) the replies these items need. The
+    /// agent can report done a moment before its last message reaches the
+    /// file, so the inbox asks again while it is open.
     func refresh(_ items: [ItemInfo], agents: [AgentInfo]) {
+        let live = Set(items.map(\.id))
+        for gone in text.keys where !live.contains(gone) { text[gone] = nil; read[gone] = nil }
         for item in items {
-            guard let a = Replies.session(of: item, in: agents), !busy.contains(a.session) else { continue }
+            guard let a = Replies.session(of: item, in: agents), !busy.contains(item.id) else { continue }
             // pi's session is its file's path (as herdr reports it); Claude's an id.
-            let id = a.session, kind = a.kind, last = read[id]
+            let key = item.id, id = a.session, kind = a.kind, last = read[key]
             let known = paths[id] ?? (id.hasPrefix("/") && FileManager.default.fileExists(atPath: id) ? URL(fileURLWithPath: id) : nil)
-            busy.insert(id)
+            busy.insert(key)
             Task.detached(priority: .utility) {
                 let url = known ?? Replies.locate(kind: kind, id: id)
                 let modified = url.flatMap { try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate }
                 let fresh = modified != nil && modified != last
                 let reply = fresh ? url.flatMap(Replies.lastReply) : nil
                 await MainActor.run {
-                    self.busy.remove(id)
+                    self.busy.remove(key)
                     if let url { self.paths[id] = url }
-                    if fresh, let modified { self.read[id] = modified }
-                    if let reply, self.text[id] != reply { self.text[id] = reply }
+                    guard fresh, let modified else { return }
+                    self.read[key] = modified
+                    // No reply to the latest prompt yet: the screen, not the one before.
+                    if self.text[key] != reply { self.text[key] = reply }
                 }
             }
         }
@@ -65,7 +72,10 @@ final class Replies: ObservableObject {
         return nil
     }
 
-    /// The last assistant message with text, from the end of the file.
+    /// The last assistant message with text, from the end of the file: the
+    /// reply to the latest prompt, or nil while that reply is not written yet
+    /// (never the one before it). Claude also copies earlier messages into
+    /// `api-request-blob` lines; only its own `assistant` lines count.
     nonisolated static func lastReply(_ url: URL) -> String? {
         guard let h = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? h.close() }
@@ -75,7 +85,14 @@ final class Replies: ObservableObject {
         let data = (try? h.readToEnd()) ?? Data()
         for line in SessionArchive.lines(data, dropFirst: from > 0).reversed() {
             if (line["isSidechain"] as? Bool) == true { continue }
-            guard let m = line["message"] as? [String: Any], (m["role"] as? String) == "assistant",
+            // Claude's own lines are "assistant" and "user"; pi's are "message".
+            let type = line["type"] as? String
+            guard type == "assistant" || type == "user" || type == "message",
+                  let m = line["message"] as? [String: Any] else { continue }
+            let role = m["role"] as? String
+            if role == "user", (line["isMeta"] as? Bool) != true,
+               SessionArchive.prompt(SessionArchive.text(m["content"])) != nil { return nil }
+            guard role == "assistant",
                   let t = SessionArchive.text(m["content"])?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !t.isEmpty else { continue }
             return plain(t)

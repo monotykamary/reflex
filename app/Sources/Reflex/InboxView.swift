@@ -102,10 +102,18 @@ struct InboxView: View {
             if shown { replies.refresh(items, agents: store.state.agents) }
         }
         .onChange(of: items.map(\.id)) { _, _ in replies.refresh(items, agents: store.state.agents) }
+        // A reply can reach its file after the item: look again while open
+        // (a look is a file date unless the file changed).
+        .task(id: model.shown) {
+            while model.shown && !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(1.5))
+                replies.refresh(items, agents: store.state.agents)
+            }
+        }
     }
 
     private func reply(_ item: ItemInfo) -> String? {
-        Replies.session(of: item, in: store.state.agents).flatMap { replies.text[$0.session] }
+        Replies.session(of: item, in: store.state.agents) == nil ? nil : replies.text[item.id]
     }
 
     // MARK: Pieces

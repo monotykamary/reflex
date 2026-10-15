@@ -75,7 +75,13 @@ final class BackgroundWatch {
 
     private func note(_ b: Bg) async {
         let folder = (b.cwd as NSString).lastPathComponent
-        let reply = await Task.detached { Replies.locate(kind: "claude", id: b.id).flatMap(Replies.lastReply) }.value
+        // The last reply can reach the file a moment after the session stops.
+        var reply: String?
+        for attempt in 0..<5 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(1)) }
+            reply = await Task.detached { Replies.locate(kind: "claude", id: b.id).flatMap(Replies.lastReply) }.value
+            if reply != nil { break }
+        }
         let title = BackgroundWatch.needsYou(b) ? "needs you (background)" : "finished in the background"
         let body = reply ?? (b.name.isEmpty ? "" : b.name)
         await Client.local.note(pane: "bg:" + b.id, agent: "claude · \(folder)", title: title, body: body)

@@ -137,6 +137,12 @@ final class CommandModel: ObservableObject {
     var openSetup: (Onboarding.Step) -> Void = { _ in }
     private var debounce: Task<Void, Never>?
     private var generation = 0
+    /// The generation of the Jev call in flight.
+    private var asking: Int?
+    /// A pause came while a call was in flight: ask again when it is back.
+    private var queued = false
+    /// Jev's answers from the last minute, by `answerKey`.
+    private var answers: [String: (at: Date, r: CandidatesResponse)] = [:]
     private var sendWhenReady = false
     /// Which bar a send belongs to: one that finishes after the bar was
     /// cleared (Esc) must not mark the next request sent, or close it.
@@ -168,6 +174,7 @@ final class CommandModel: ObservableObject {
     func reset() {
         ticket += 1
         debounce?.cancel()
+        queued = false
         listDebounce?.cancel()
         generation += 1
         text = ""
@@ -386,43 +393,102 @@ final class CommandModel: ObservableObject {
     func indexReady() {
         guard !request.isEmpty, phase == .typing else { return }
         jevText = ""
+        answers = [:]
         schedule()
     }
 
-    /// The local list now; Jev's ranking ~280 ms after the last keystroke.
+    /// The local list now; Jev's ranking ~600 ms after the last keystroke.
+    /// Each Jev call is paid for and runs to the end even when the words move
+    /// on, so the bar waits for a real pause, keeps one call in flight at a
+    /// time, and reuses an answer it already has.
     private func schedule() {
         debounce?.cancel()
+        debounce = nil
+        queued = false
+        // Typing is not Jev reading: the indicator waits for a call for these words.
+        thinking = false
         generation += 1
         let gen = generation
         let words = request
-        let h = harness
         Task { [weak self] in
             let fs = await Client.local.folders(words)
             guard let self, self.generation == gen else { return }
             self.local = fs
             self.settle()
         }
-        guard commandQuery == nil, mode == .ask, words.count >= 3 else {
-            thinking = false
+        guard wantsJev else {
             settle()
             return
         }
+        // Words Jev read a moment ago (reopened, or typed back): no call.
+        if let r = remembered(words, harness) { return land(r, words) }
         debounce = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(200))
+            try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled, let self, self.generation == gen else { return }
-            self.thinking = true
+            self.debounce = nil
+            self.askJev()
+        }
+    }
+
+    /// The words are worth a Jev call.
+    private var wantsJev: Bool { commandQuery == nil && mode == .ask && request.count >= 3 }
+
+    /// Jev's answer for the words as they are: remembered, asked now, or
+    /// asked when the call in flight comes back.
+    private func askJev() {
+        let gen = generation, words = request, h = harness
+        if let r = remembered(words, h) { return land(r, words) }
+        if let asking {
+            if asking != gen { queued = true }
+            thinking = true
+            return
+        }
+        asking = gen
+        thinking = true
+        let key = answerKey(words, h)
+        Task { [weak self] in
             let r = try? await Client.local.candidates(words, harness: h)
-            guard self.generation == gen else { return }
-            self.thinking = false
-            self.jev = r ?? CandidatesResponse(ok: false, error: "reflexd did not answer")
-            self.jevStamp += 1
-            self.jevText = words
-            self.settle()
-            if self.sendWhenReady {
-                self.sendWhenReady = false
-                if self.confident { self.submit() } else { self.nudge() }
+            guard let self else { return }
+            self.asking = nil
+            if let r, r.ok {
+                self.answers[key] = (Date(), r)
+                if self.answers.count > 24, let old = self.answers.min(by: { $0.value.at < $1.value.at })?.key {
+                    self.answers[old] = nil
+                }
+            }
+            if self.generation == gen {
+                self.land(r ?? CandidatesResponse(ok: false, error: "reflexd did not answer"), words)
+            } else if self.queued {
+                // The words moved on while Jev read these: ask for where they are now.
+                self.queued = false
+                self.askJev()
+            } else {
+                self.thinking = false
             }
         }
+    }
+
+    private func land(_ r: CandidatesResponse, _ words: String) {
+        thinking = false
+        jev = r
+        jevStamp += 1
+        jevText = words
+        settle()
+        if sendWhenReady {
+            sendWhenReady = false
+            if confident { submit() } else { nudge() }
+        }
+    }
+
+    private func remembered(_ words: String, _ h: String?) -> CandidatesResponse? {
+        guard let a = answers[answerKey(words, h)], Date().timeIntervalSince(a.at) < 60 else { return nil }
+        return a.r
+    }
+
+    /// Answers are for the words, the harness and the sessions that were live.
+    private func answerKey(_ words: String, _ h: String?) -> String {
+        let panes = Store.shared.state.agents.map(\.pane).sorted().joined(separator: ",")
+        return [h ?? "", panes, words].joined(separator: "\u{1}")
     }
 
     /// Jev is sure enough to act on ⏎ without a look at the list.
@@ -672,8 +738,10 @@ final class CommandModel: ObservableObject {
             return
         }
         guard !request.isEmpty else { return }
-        if !userPicked && (thinking || debounce.map { !$0.isCancelled } == true && jevText != request && request.count >= 3) {
+        if !userPicked && (thinking || wantsJev && jevText != request) {
+            // ⏎ is the pause: no waiting out the rest of it.
             sendWhenReady = true
+            if debounce != nil { debounce?.cancel(); debounce = nil; askJev() }
             return
         }
         guard let c = selected else { return }
