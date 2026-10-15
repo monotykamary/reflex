@@ -669,17 +669,35 @@ final class CommandModel: ObservableObject {
     }
 
     /// Search: the live sessions matching every word (most recent first),
-    /// then earlier sessions that could be resumed. /resume: only those until
-    /// you type; then a live session that matches comes first too (it is open
-    /// already, so ⏎ shows it rather than resuming a second copy).
+    /// then earlier sessions that could be resumed, then your folders that
+    /// match, to start a fresh session in. /resume: only earlier sessions
+    /// until you type; then a live session that matches comes first too (it
+    /// is open already, so ⏎ shows it rather than resuming a second copy).
     private var searchRows: [Candidate] {
         let pasts = SessionArchive.shared.matching(request, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
         if resumeOnly && request.isEmpty { return pasts }
-        return sessionMatches.map { a in
+        let live = sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
                       title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
                       detail: "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status), agent: a, path: a.cwd)
-        } + pasts
+        }
+        let kind = Settings.shared.harness
+        let folders = resumeOnly ? [] : folderMatches.prefix(5).map { f in
+            Candidate(id: "f:" + f.path, kind: .folder, title: f.name,
+                      detail: "new \(kind) · \(f.short)" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path)
+        }
+        return live + pasts + folders
+    }
+
+    /// Indexed folders whose name, place or description has every word. The
+    /// index pads its answer with recent folders; a lookup shows only matches.
+    private var folderMatches: [FolderInfo] {
+        let q = request.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
+        guard !q.isEmpty else { return [] }
+        return local.filter { f in
+            let hay = "\(f.name) \(f.short) \(f.desc)".lowercased()
+            return q.allSatisfy { hay.contains($0) }
+        }
     }
 
     private func resumeRow(_ p: PastSession, bp: Int?) -> Candidate {
@@ -734,6 +752,10 @@ final class CommandModel: ObservableObject {
         if selected?.kind == .chooseFolder { chooseFolder(); return }
         if mode == .search {
             if selected?.kind == .resume, let c = selected { send(to: c, open: true); return }
+            // A folder: a fresh session there, nothing sent, its terminal open.
+            if selected?.kind == .folder, let p = selected?.path {
+                return spawn(in: p, kind: Settings.shared.harness, text: "", open: true)
+            }
             if let a = selected?.agent { openPane(a.pane); close() }
             return
         }
