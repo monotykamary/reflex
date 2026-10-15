@@ -180,3 +180,21 @@ final class Daemon: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.start() }
     }
 }
+
+/// A request to reflexd that should be instant (it only queues the work) but
+/// was not: one line in ~/Library/Logs/Reflex/app.log, so a send that sat on
+/// "Sending" says where it waited.
+@MainActor
+enum Diag {
+    static func slow(_ what: String, since started: Date, over limit: TimeInterval = 2) {
+        let took = Date().timeIntervalSince(started)
+        guard took >= limit else { return }
+        let url = Daemon.logURL.deletingLastPathComponent().appendingPathComponent("app.log")
+        let line = "\(ISO8601DateFormatter().string(from: Date())) reflexd took \(String(format: "%.1f", took)) s to accept a \(what)\n"
+        if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+        guard let h = try? FileHandle(forWritingTo: url) else { return }
+        h.seekToEndOfFile()
+        h.write(Data(line.utf8))
+        try? h.close()
+    }
+}

@@ -109,7 +109,13 @@ final class CommandModel: ObservableObject {
     @Published private(set) var local: [FolderInfo] = []
     @Published var selection: String?
     /// The user chose a row (keys or a deliberate click): Jev stops moving it.
-    @Published var userPicked = false
+    @Published var userPicked = false {
+        didSet { if userPicked != oldValue { heldOrder = userPicked ? rows.map(\.id) : nil } }
+    }
+    /// The list's order when you picked a row yourself. Jev's answer landing
+    /// after that adds its weights but moves nothing under you, until you
+    /// type again.
+    private var heldOrder: [String]?
     /// The folder the user chose with the chooser, offered on top.
     /// Naming a new folder: ⏎ on the New folder row asks first.
     @Published var naming = false
@@ -132,6 +138,9 @@ final class CommandModel: ObservableObject {
     private var debounce: Task<Void, Never>?
     private var generation = 0
     private var sendWhenReady = false
+    /// Which bar a send belongs to: one that finishes after the bar was
+    /// cleared (Esc) must not mark the next request sent, or close it.
+    private var ticket = 0
 
     /// An agent picked from elsewhere (the rail): select it, as if by hand.
     var target: String? {
@@ -157,6 +166,7 @@ final class CommandModel: ObservableObject {
     }
 
     func reset() {
+        ticket += 1
         debounce?.cancel()
         listDebounce?.cancel()
         generation += 1
@@ -219,6 +229,7 @@ final class CommandModel: ObservableObject {
     func catchUp() {
         guard listText != text else { return }
         listDebounce?.cancel()
+        heldOrder = nil
         listText = text
         schedule()
     }
@@ -516,9 +527,17 @@ final class CommandModel: ObservableObject {
         h.combine(local.map(\.path)); h.combine(attachments.count); h.combine(s.folders > 0)
         h.combine(s.agents.map { $0.pane + $0.status + $0.title })
         h.combine(SessionArchive.shared.sessions.count); h.combine(Recents.shared.sorted(s.agents).map(\.pane))
+        h.combine(heldOrder)
         let key = h.finalize()
         if let c = rowsCache, c.key == key { return c.rows }
-        let built = buildRows()
+        var built = buildRows()
+        if let held = heldOrder {
+            // Rows that were there keep their places; new ones follow.
+            let place = Dictionary(held.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
+            built = built.enumerated().sorted {
+                (place[$0.element.id] ?? Int.max, $0.offset) < (place[$1.element.id] ?? Int.max, $1.offset)
+            }.map(\.element)
+        }
         rowsCache = (key, built)
         return built
     }
@@ -676,11 +695,13 @@ final class CommandModel: ObservableObject {
     private func resume(_ p: PastSession, mode: String?, text: String, open: Bool) {
         let how = (mode ?? p.mode) == "fork" ? "Forking" : ((mode ?? p.mode) == "attach" ? "Attaching" : "Resuming")
         phase = .sending("\(how) \(p.agent) · \(p.title.prefix(40))")
+        let t = ticket, started = Date()
         Task {
             do {
                 try await Sessions.resume(p, mode: mode, text: text, open: open)
-                done("\(how) \(p.agent) in \(p.folder)")
-            } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
+                Diag.slow("resume", since: started)
+                done("\(how) \(p.agent) in \(p.folder)", ticket: t)
+            } catch { fail("reflexd did not answer — \(error.localizedDescription)", ticket: t) }
         }
     }
 
@@ -732,22 +753,24 @@ final class CommandModel: ObservableObject {
             let side = isSide
             let label = (side ? "btw → " : "") + "\(a.kind) · \(a.folder)"
             phase = .sending(label)
+            let t = ticket, started = Date()
             Task {
                 do {
                     if side {
                         let r = try await Client.local.side(pane: a.pane, text: full)
-                        if let e = r.error ?? r.route?.error { return fail(e) }
+                        if let e = r.error ?? r.route?.error { return fail(e, ticket: t) }
                         if r.route?.decision == "choose" {
-                            return fail("\(a.kind) has no side channel: remove /btw to send it as a prompt.")
+                            return fail("\(a.kind) has no side channel: remove /btw to send it as a prompt.", ticket: t)
                         }
-                        done(label)
+                        done(label, ticket: t)
                     } else {
                         Recents.shared.touch(a.pane)
                         let p = try await Client.local.send(pane: a.pane, text: full, label: label)
-                        await watch(p.id, label: label)
+                        Diag.slow("send", since: started)
+                        await watch(p.id, label: label, ticket: t)
                     }
                     if open { openPane(a.pane) }
-                } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
+                } catch { fail("reflexd did not answer — \(error.localizedDescription)", ticket: t) }
             }
         case .folder:
             guard let path = c.path else { return }
@@ -780,33 +803,36 @@ final class CommandModel: ObservableObject {
     private func spawn(in path: String, kind: String, text: String, isNew: Bool = false, open: Bool = false) {
         let label = "\(kind) in \((path as NSString).lastPathComponent)"
         phase = .sending((isNew ? "new folder · " : "") + label)
+        let t = ticket, started = Date()
         Task {
             do {
                 let p = try await Client.local.spawn(cwd: path, kind: kind, text: text)
+                Diag.slow("spawn", since: started)
                 Sessions.watchStart(p.id, cwd: path, open: open)
                 if isNew {
                     // The new folder is inside a root: the next index finds it.
                     DispatchQueue.main.asyncAfter(deadline: .now() + 4) { Task { await Client.local.reindex() } }
                 }
                 // Starting an agent takes a few seconds; a failure lands in the inbox.
-                done("Starting " + label)
-            } catch { fail("reflexd did not answer — \(error.localizedDescription)") }
+                done("Starting " + label, ticket: t)
+            } catch { fail("reflexd did not answer — \(error.localizedDescription)", ticket: t) }
         }
     }
 
     /// A prompt runs at once: show its receipt, or its failure.
-    private func watch(_ id: Int, label: String) async {
+    private func watch(_ id: Int, label: String, ticket: Int) async {
         for _ in 0..<20 {
             await Store.shared.refresh()
             if let r = Store.shared.state.receipts.first(where: { $0.id == id }) {
-                return r.ok ? done(label) : fail(r.detail)
+                return r.ok ? done(label, ticket: ticket) : fail(r.detail, ticket: ticket)
             }
             try? await Task.sleep(for: .milliseconds(150))
         }
-        done(label)
+        done(label, ticket: ticket)
     }
 
-    private func done(_ label: String) {
+    private func done(_ label: String, ticket: Int? = nil) {
+        guard ticket ?? self.ticket == self.ticket else { return }
         phase = .sent(label)
         arrivals += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
@@ -814,7 +840,8 @@ final class CommandModel: ObservableObject {
         }
     }
 
-    private func fail(_ message: String) {
+    private func fail(_ message: String, ticket: Int? = nil) {
+        guard ticket ?? self.ticket == self.ticket else { return }
         phase = .failed(message)
         nudge()
     }

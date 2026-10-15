@@ -266,8 +266,9 @@ final class AgentTerminalView: LocalProcessTerminalView {
 
 /// The Mac's line keys, as Ghostty sends them: ⌘⌫ clears the line (^U),
 /// ⌘← and ⌘→ go to its start and end (^A, ^E). SwiftTerm drops ⌘⌫ and moves
-/// by a word for the other two. And Shift-Return, once the program has asked
-/// for the kitty keyboard protocol, as `CSI 13;2u`: Claude Code's newline.
+/// by a word for the other two. And once the program has asked for the kitty
+/// keyboard protocol, Shift-Return as `CSI 13;2u` (Claude Code's newline) and
+/// Control-Return as `CSI 13;5u` (its steer: send now, while it works).
 @MainActor
 enum TerminalKeys {
     private static var monitor: Any?
@@ -276,13 +277,13 @@ enum TerminalKeys {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
             let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
-            guard mods == .command || mods == .shift,
+            guard mods == .command || mods == .shift || mods == .control,
                   let view = TerminalScroll.views.values.first(where: { $0.window === e.window && $0.window != nil }),
                   let first = e.window?.firstResponder as? NSView, first.isDescendant(of: view) else { return e }
-            if mods == .shift {
+            if mods != .command {
                 guard e.keyCode == 36 || e.keyCode == 76, !view.hasMarkedText(),
                       (view as? AgentTerminalView)?.kittyKeys == true else { return e }
-                view.send(txt: "\u{1b}[13;2u")
+                view.send(txt: mods == .shift ? "\u{1b}[13;2u" : "\u{1b}[13;5u")
                 return nil
             }
             switch e.keyCode {
