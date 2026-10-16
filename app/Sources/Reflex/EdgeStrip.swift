@@ -365,7 +365,14 @@ struct Rail: View {
         .focusEffectDisabled()
         .onKeyPress(phases: .down) { Rail.key($0) }
         .onChange(of: rail.visible) { _, open in
-            if !open { rail.panel = .auto; rail.hoverDot = nil; rail.filter = ""; rail.stateFilter = nil }
+            guard !open else { return }
+            // Only once it has faded out: reset mid-fade, the leaving list
+            // redraws unfiltered and flashes everything.
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !rail.visible else { return }
+                rail.panel = .auto; rail.hoverDot = nil; rail.filter = ""; rail.stateFilter = nil
+            }
         }
     }
 
