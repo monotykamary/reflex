@@ -122,6 +122,11 @@ final class CommandModel: ObservableObject {
     @Published var newName = ""
     /// When the rows last changed order (a click right after is ignored).
     private(set) var reorderedAt = Date.distantPast
+    /// The list is scrolled down (the view says so): Jev's answer landing
+    /// leaves it where it is, and the list points up at the pick instead.
+    var listScrolled = false
+    /// Jev's pick, selected while the list was scrolled down: not scrolled to.
+    var quietPick: String?
 
     /// The session whose terminal was in front when the bar opened.
     var frontPane: String?
@@ -473,7 +478,9 @@ final class CommandModel: ObservableObject {
         jev = r
         jevStamp += 1
         jevText = words
+        let before = selection
         settle()
+        quietPick = listScrolled && selection != before ? selection : nil
         if sendWhenReady {
             sendWhenReady = false
             if confident { submit() } else { nudge() }
@@ -1006,6 +1013,9 @@ struct CommandBar: View {
     @FocusState private var nameFocused: Bool
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var rowsHeight: CGFloat = 0
+    /// The rows on screen: Jev's pick above them gets a pill.
+    @State private var visibleRows: Set<String> = []
+    @State private var scrolledDown = false
     /// Where the caret was when an arrow last moved the list.
     @State private var listCaret: Caret?
 
@@ -1033,7 +1043,10 @@ struct CommandBar: View {
         // The list follows typing instantly (as Raycast's does); only Jev's
         // answer reorders it with motion. Animating every keystroke's change
         // — rows blurring in and out on each one — was the lag.
-        .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.jevStamp)
+        // Scrolled down, it lands without motion: the scroll view keeps your
+        // rows where they were at once, and animated rows would first jump
+        // with it and then slide back.
+        .animation(model.listScrolled ? nil : Motion.pick(Motion.swap, reduce: reduce), value: model.jevStamp)
         .animation(Motion.pick(Motion.swap, reduce: reduce), value: model.phase)
         .onChange(of: model.focusTick) { _, _ in focused = true; listCaret = nil }
         .onChange(of: store.state.folders > 0) { _, ready in if ready { model.indexReady() } }
@@ -1272,14 +1285,55 @@ struct CommandBar: View {
                             .id(c.id)
                     }
                 }
+                .scrollTargetLayout()
                 .padding(6)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
             }
             .scrollIndicators(.never)
-            .frame(height: min(max(rowsHeight, 44), 340))
-            .onChange(of: model.selection) { _, s in
-                if let s { withAnimation(Motion.pick(Motion.micro, reduce: reduce)) { proxy.scrollTo(s) } }
+            .onScrollGeometryChange(for: Bool.self, of: { $0.contentOffset.y > 8 }) { _, down in
+                model.listScrolled = down
+                scrolledDown = down
             }
+            .onScrollTargetVisibilityChange(idType: String.self, threshold: 0.6) { visibleRows = Set($0) }
+            .frame(height: min(max(rowsHeight, 44), 340))
+            .overlay(alignment: .top) { pickAbove(rows, proxy) }
+            .onChange(of: model.selection) { _, s in
+                guard let s else { return }
+                // Jev's pick, landed while you were scrolled down: ⏎ still
+                // sends there, but the list stays where you are.
+                if s == model.quietPick { model.quietPick = nil; return }
+                withAnimation(Motion.pick(Motion.micro, reduce: reduce)) { proxy.scrollTo(s) }
+            }
+        }
+    }
+
+    /// Jev's pick is above what you are looking at: a pill at the top of the
+    /// list says so and takes you there.
+    @ViewBuilder private func pickAbove(_ rows: [Candidate], _ proxy: ScrollViewProxy) -> some View {
+        let first = rows.firstIndex { visibleRows.contains($0.id) }
+        if scrolledDown, let p = model.pick, model.jevText == model.request, !visibleRows.isEmpty, !visibleRows.contains(p),
+           let i = rows.firstIndex(where: { $0.id == p }), let first, i < first {
+            Button {
+                model.selection = p
+                model.userPicked = true
+                withAnimation(Motion.pick(Motion.micro, reduce: reduce)) { proxy.scrollTo(p, anchor: .top) }
+            } label: {
+                HStack(spacing: 5) {
+                    Image(systemName: "arrow.up").font(.system(size: 9.5, weight: .bold))
+                    Text(model.unsure ? "Jev's best guess" : "Jev's pick").fontWeight(.semibold)
+                    Text(rows[i].title).foregroundStyle(.secondary).lineLimit(1)
+                }
+                .font(.system(size: 11.5))
+                .padding(.horizontal, 10).padding(.vertical, 5)
+                .background(.regularMaterial, in: Capsule())
+                .background(Tone.route.opacity(0.25), in: Capsule())
+                .overlay(Capsule().strokeBorder(Tone.route.opacity(0.5)))
+                .contentShape(Capsule())
+            }
+            .buttonStyle(Pressable())
+            .help("Show Jev's pick")
+            .padding(.top, 6)
+            .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
