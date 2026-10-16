@@ -316,8 +316,15 @@ extension Rail {
         return .handled
     }
 
+    /// Above and below the dots. A state row (glyph and count) fills more of
+    /// its 28 pt than a lone dot, so it gets more room to sit as far from
+    /// the capsule's ends as the icons below sit from theirs.
+    @MainActor static func dotsPad(_ agents: [AgentInfo]) -> CGFloat { agents.count > dotLimit ? 10 : 6 }
+
     /// Top of the column to the centre of dot `i` (see `column`).
-    static func dotCenter(_ i: Int) -> CGFloat { 40 + 10 + 6 + 28 * CGFloat(i) + 14 }
+    @MainActor static func dotCenter(_ i: Int, _ agents: [AgentInfo]) -> CGFloat {
+        40 + 10 + dotsPad(agents) + 28 * CGFloat(i) + 14
+    }
 }
 
 /// The tab, and the open column.
@@ -462,7 +469,7 @@ struct Rail: View {
                         .accessibilityLabel(accessibility(row))
                     }
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, Rail.dotsPad(store.state.agents))
                 .raySurface(Capsule())
                 .help(side == .agents ? "Hide agents" : "Show agents")
             }
@@ -603,7 +610,7 @@ struct RailSide: View {
         case .pill(let i, let status, let label, let word):
             // Level with its dot: the same height as the column, pill at the dot's row.
             VStack(spacing: 0) {
-                Color.clear.frame(height: max(0, Rail.dotCenter(i) - 13))
+                Color.clear.frame(height: max(0, Rail.dotCenter(i, store.state.agents) - 13))
                 StatusPill(status: status, label: label, word: word).fixedSize().frame(height: 26)
                 Spacer(minLength: 0)
             }
@@ -857,15 +864,40 @@ private struct AgentList: View {
                     }
                 }
                 .padding(.horizontal, 4).padding(.top, groups(projects).contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                    // A chip or the filter changes how many rows there are:
+                    // the list grows or shrinks to fit, rather than jumping.
+                    if rowsHeight == 0 { rowsHeight = h } else { withAnimation(Motion.swap) { rowsHeight = h } }
+                }
             }
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
             // As tall as the rows, up to a point; then it scrolls.
             .frame(height: min(max(rowsHeight, 30), 520))
         }
-        .frame(width: 340)
+        .frame(width: width)
         .raySurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// As wide as its longest line needs, from 340 to 480 pt. Measured over
+    /// every agent, not the filtered ones, so a chip never changes it.
+    private var width: CGFloat {
+        func w(_ s: String, _ size: CGFloat, _ weight: NSFont.Weight = .regular) -> CGFloat {
+            ceil((s as NSString).size(withAttributes: [.font: NSFont.systemFont(ofSize: size, weight: weight)]).width)
+        }
+        let projects = self.projects
+        // Glyph, padding and the four actions around a row's two lines.
+        let rows = agents.map { a in
+            max(w(AgentRow.title(a), 12, .semibold), w(AgentRow.subtitle(a, inside(a, projects) ?? a.folder), 10.5)) + 136
+        }.max() ?? 0
+        var top = w(summary, 11, .medium) + 28
+        if waiting > 0 { top += w(waiting == 1 ? "1 question" : "\(waiting) questions", 10.5, .medium) + 37 }
+        var row = 0.0
+        if agents.count > Rail.dotLimit {
+            row = w("All \(agents.count)", 10.5, .medium) + 14 + 20
+                + chips.map { s, n in w("\(StatusPill.word(s)) \(n)", 10.5, .medium) + 27 }.reduce(0, +)
+        }
+        return min(480, max(340, rows, top, row))
     }
 }
 
@@ -926,9 +958,12 @@ private struct AgentRow: View {
     var reveal: () -> Void
     @State private var hover = false
 
-    private var title: String { agent.title.isEmpty ? "\(agent.kind) · \(agent.folder)" : agent.title }
+    private var title: String { AgentRow.title(agent) }
+    private var subtitle: String { AgentRow.subtitle(agent, place) }
 
-    private var subtitle: String {
+    static func title(_ agent: AgentInfo) -> String { agent.title.isEmpty ? "\(agent.kind) · \(agent.folder)" : agent.title }
+
+    static func subtitle(_ agent: AgentInfo, _ place: String?) -> String {
         let state: String
         switch agent.status {
         case "working": state = "working"
