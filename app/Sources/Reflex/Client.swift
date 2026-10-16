@@ -111,6 +111,8 @@ final class Store: ObservableObject {
     private var lastPending: [PendingInfo] = []
     private var seenItems: Set<Int>?
     private var peekClear: Task<Void, Never>?
+    /// When each pane last had a question in the inbox.
+    private var askedAt: [String: Date] = [:]
     private var clearing: Set<Int> = []
 
     func start() {
@@ -150,8 +152,20 @@ final class Store: ObservableObject {
         lastPending = next.pending
 
         let ids = Set(next.inbox.map(\.id))
+        // A question already on screen comes back as a new item whenever its
+        // choices change, and typing an answer into its free-text row changes
+        // them each keystroke. Only a pane's first question in a while, from
+        // a session you are not typing in, surfaces at the edge.
+        let now = Date(), front = watching()
+        let quiet = { (i: ItemInfo) in
+            i.pane != front && now.timeIntervalSince(self.askedAt[i.pane] ?? .distantPast) > 10
+        }
+        defer {
+            for i in next.inbox where i.kind == "ask" { askedAt[i.pane] = now }
+            askedAt = askedAt.filter { now.timeIntervalSince($0.value) < 60 }
+        }
         if let seen = seenItems {
-            if let fresh = next.inbox.first(where: { !seen.contains($0.id) && $0.kind == "ask" }) {
+            if let fresh = next.inbox.first(where: { !seen.contains($0.id) && $0.kind == "ask" && quiet($0) }) {
                 peek = fresh
                 peekClear?.cancel()
                 peekClear = Task { [weak self] in
