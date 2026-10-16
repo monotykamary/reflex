@@ -1058,6 +1058,13 @@ private struct QuestionCard: View {
     var openAgent: (AgentInfo) -> Void
     var showAgents: (() -> Void)?
     @State private var hoverKey: String?
+    @ObservedObject private var asks = Asks.shared
+    /// The command or plan, all of it.
+    @State private var expanded = false
+    @State private var codeHeight: CGFloat = 0
+
+    /// What the agent's session file says it is asking (see Asks).
+    private var ask: AskDetail? { item.kind == "route" ? nil : asks.ask(for: item) }
 
     private var title: String {
         if item.kind == "route" { return "Where should this go?" }
@@ -1066,8 +1073,16 @@ private struct QuestionCard: View {
     }
 
     private var question: String {
-        item.kind == "route" ? item.body : (questionLine(item.body) ?? "Waiting for your answer")
+        item.kind == "route" ? item.body : (ask?.question ?? questionLine(item.body) ?? "Waiting for your answer")
     }
+
+    /// Wider when there is more to read than a short question and its choices.
+    private var width: CGFloat {
+        guard let a = ask else { return 340 }
+        return a.code != nil || a.question.count > 90 || a.choices.values.contains { $0.detail != nil } ? 420 : 340
+    }
+
+    private func choice(_ o: OptionInfo) -> AskChoice { ask?.choices[o.key] ?? AskChoice(label: o.label.bare) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -1109,8 +1124,22 @@ private struct QuestionCard: View {
                         .font(.system(size: 11.5)).foregroundStyle(Ink.dim)
                 }
             }
+            if ask?.header != nil || ask?.step != nil {
+                HStack(spacing: 6) {
+                    if let h = ask?.header {
+                        Text(h).font(.system(size: 10.5, weight: .semibold)).foregroundStyle(Ink.text)
+                            .padding(.horizontal, 7).padding(.vertical, 2)
+                            .background(Color.primary.opacity(0.1), in: Capsule())
+                    }
+                    if let s = ask?.step {
+                        Text("Question \(s.n) of \(s.of)").font(.system(size: 10.5)).foregroundStyle(Ink.dim)
+                    }
+                }
+                .padding(.bottom, -6)
+            }
             Text(question).font(.system(size: 14, weight: .semibold)).foregroundStyle(Ink.text)
-                .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                .lineLimit(10).fixedSize(horizontal: false, vertical: true)
+            if let code = ask?.code { codeBlock(code, note: ask?.note) }
             VStack(spacing: 6) {
                 ForEach(item.options) { o in
                     Button {
@@ -1121,10 +1150,22 @@ private struct QuestionCard: View {
                                 .foregroundStyle(Ink.dim)
                                 .frame(width: 18, height: 18)
                                 .background(Ink.hover, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                            Text(o.label.bare).font(.system(size: 13)).foregroundStyle(Ink.text)
-                                .lineLimit(2).fixedSize(horizontal: false, vertical: true)
-                                .multilineTextAlignment(.leading)
-                                .frame(maxWidth: .infinity, alignment: .leading)
+                            let c = choice(o)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(c.label).font(.system(size: 13)).foregroundStyle(Ink.text)
+                                    .lineLimit(2).fixedSize(horizontal: false, vertical: true)
+                                if let d = c.detail {
+                                    Text(d).font(.system(size: 11.5)).foregroundStyle(Ink.dim)
+                                        .lineLimit(3).fixedSize(horizontal: false, vertical: true)
+                                }
+                                if c.preview {
+                                    Label("Preview in terminal", systemImage: "rectangle.on.rectangle")
+                                        .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.dim)
+                                        .padding(.top, 2)
+                                }
+                            }
+                            .multilineTextAlignment(.leading)
+                            .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.horizontal, 10).padding(.vertical, 9)
                         .background(Color.primary.opacity(hoverKey == o.key ? 0.12 : 0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
@@ -1133,6 +1174,7 @@ private struct QuestionCard: View {
                     }
                     .buttonStyle(Pressable())
                     .onHover { h in hoverKey = h ? o.key : (hoverKey == o.key ? nil : hoverKey) }
+                    .help(choice(o).label == o.label.bare ? "" : o.label.bare)
                     .disabled(pending != nil)
                     .opacity(pending != nil ? 0.5 : 1)
                 }
@@ -1150,9 +1192,45 @@ private struct QuestionCard: View {
             }
         }
         .padding(16)
-        .frame(width: 340)
+        .frame(width: width)
         .raySurface(RoundedRectangle(cornerRadius: 20, style: .continuous))
         .animation(Motion.enter, value: pending?.id)
+        .animation(Motion.swap, value: ask)
+        .task(id: item.id) { await asks.load(item, agent: agent) }
+        .onChange(of: item.pane) { expanded = false }
+    }
+
+    /// The command, plan or file, a few lines of it until you ask for all.
+    private func codeBlock(_ code: String, note: String?) -> some View {
+        let long = code.count > 160 || code.filter { $0 == "\n" }.count > 2
+        let text = Text(code).font(.system(size: 11, design: .monospaced)).foregroundStyle(Ink.text)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 6) {
+            if expanded {
+                ScrollView {
+                    text.textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { codeHeight = $0 }
+                }
+                .scrollIndicators(.automatic)
+                .frame(height: min(max(codeHeight, 14), 220))
+            } else {
+                text.lineLimit(3).truncationMode(.tail)
+            }
+            if long || note != nil {
+                HStack(spacing: 6) {
+                    if let note { Text(note).foregroundStyle(Ink.dim) }
+                    Spacer(minLength: 0)
+                    if long {
+                        Button(expanded ? "Less" : "Show all") { withAnimation(Motion.swap) { expanded.toggle() } }
+                            .buttonStyle(.plain).foregroundStyle(Ink.dim)
+                    }
+                }
+                .font(.system(size: 10.5, weight: .medium))
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 8)
+        .background(Color.primary.opacity(0.06), in: RoundedRectangle(cornerRadius: 9, style: .continuous))
     }
 }
 
