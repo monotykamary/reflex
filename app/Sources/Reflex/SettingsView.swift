@@ -1003,9 +1003,11 @@ private struct SetupPane: View {
                          detail: o.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `herdr` in a terminal.") {
                     Button("Copy Command") { o.copy("herdr") }
                 }
-                CheckRow(ok: o.integrations, title: "Agent integrations", detail: "Exact session ids, so side questions can fork the right session.") {
+                CheckRow(ok: o.integrations, title: "Agent integrations",
+                         detail: o.integrations ? "Exact session ids, so side questions can fork the right session."
+                             : "herdr can't see what \(o.unintegratedNames) is doing without it: no status, and its terminal window shows “no agent”.") {
                     Button(o.working == "integrations" ? "Installing…" : "Install") {
-                        o.run("integrations", "herdr integration install claude; herdr integration install pi")
+                        o.run("integrations", o.integrationCommand)
                     }
                     .disabled(o.working != nil)
                 }

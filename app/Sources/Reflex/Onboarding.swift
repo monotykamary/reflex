@@ -19,7 +19,10 @@ final class Onboarding: ObservableObject {
     @Published var step: Step = .welcome
     @Published var forward = true
     @Published var herdrInstalled = false
-    @Published var integrations = false
+    /// The agents you have whose herdr integration isn't installed: without
+    /// it herdr can't tell what they're doing (pi isn't even seen as an agent).
+    @Published var unintegrated: [String] = []
+    var integrations: Bool { unintegrated.isEmpty }
     /// Reflex's pi extension: pi-fabric's background shells count as work.
     @Published var piShells = false
     @Published var jevInstalled = false
@@ -45,6 +48,29 @@ final class Onboarding: ObservableObject {
     private var poll: Timer?
 
     static let harnesses = ["claude", "codex", "pi", "grok", "opencode", "amp", "gemini"]
+
+    /// Where `herdr integration install <agent>` puts each agent's hook.
+    static let integrationFiles = [
+        "claude": ".claude/hooks/herdr-agent-state.sh",
+        "pi": ".pi/agent/extensions/herdr-agent-state.ts",
+        "codex": ".codex/herdr-agent-state.sh",
+        "opencode": ".config/opencode/plugins/herdr-agent-state.js",
+        "grok": ".grok/hooks/herdr-agent-state.sh",
+    ]
+
+    /// Installs the missing integrations (Claude's and pi's when none is known).
+    var integrationCommand: String {
+        (unintegrated.isEmpty ? ["claude", "pi"] : unintegrated).map { "herdr integration install \($0)" }.joined(separator: "; ")
+    }
+
+    /// "pi and Claude Code".
+    var unintegratedNames: String {
+        ListFormatter.localizedString(byJoining: unintegrated.map { $0 == "claude" ? "Claude Code" : $0 })
+    }
+
+    var integrationDetail: String {
+        unintegrated.isEmpty ? "exact sessions for side questions" : "herdr can't follow \(unintegratedNames) without it"
+    }
 
     func begin(at step: Step = .welcome) {
         self.step = step
@@ -206,8 +232,10 @@ final class Onboarding: ObservableObject {
         readJevVersion()
         installed = Set(Onboarding.harnesses.filter { Onboarding.which($0) })
         let home = NSHomeDirectory()
-        integrations = FileManager.default.fileExists(atPath: home + "/.claude/hooks/herdr-agent-state.sh")
-            || FileManager.default.fileExists(atPath: home + "/.pi/agent/extensions/herdr-agent-state.ts")
+        unintegrated = Onboarding.harnesses.filter { name in
+            guard installed.contains(name), let file = Onboarding.integrationFiles[name] else { return false }
+            return !FileManager.default.fileExists(atPath: home + "/" + file)
+        }
         piShells = FileManager.default.fileExists(atPath: Onboarding.piShellsPath)
         trusted = DoubleOption.trusted
         if folders.isEmpty && Store.shared.state.folders > 0 { Task { await loadFolders() } }
@@ -541,10 +569,10 @@ struct OnboardingView: View {
                 Check(ok: model.herdrRunning, title: "herdr running", detail: model.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : (model.herdrInstalled && Settings.shared.startHerdr ? "starting it…" : "run `herdr` in your terminal")) {
                     if !model.herdrRunning { GlassAction("Copy") { model.copy("herdr") } }
                 }
-                Check(ok: model.integrations, title: "Agent integrations", detail: model.integrations ? "exact sessions for side questions" : "lets side questions fork the exact session") {
+                Check(ok: model.integrations, title: "Agent integrations", detail: model.integrationDetail) {
                     if !model.integrations {
                         GlassAction(model.working == "integrations" ? "Installing…" : "Install") {
-                            model.run("integrations", "herdr integration install claude; herdr integration install pi")
+                            model.run("integrations", model.integrationCommand)
                         }
                     }
                 }

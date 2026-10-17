@@ -13,6 +13,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     let view: AgentTerminalView
     @Published var attached = false
     @Published var ended = false
+    /// The link under the pointer, for the ⌘-click hint.
+    @Published var link: String?
     private var bag = Set<AnyCancellable>()
 
     init(pane: String) {
@@ -21,10 +23,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
+        view.onLink = { [weak self] in self?.link = $0 }
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
         TerminalSelect.install()
         TerminalKeys.install()
+        TerminalLinks.install()
         apply(Themes.shared.current, font: Themes.font(Themes.shared.fontFamily, size: Themes.shared.fontSize))
         Themes.shared.$current.combineLatest(Themes.shared.$fontSize, Themes.shared.$fontFamily)
             .sink { [weak self] t, s, f in self?.apply(t, font: Themes.font(f, size: s)) }
@@ -229,6 +233,90 @@ final class AgentTerminalView: LocalProcessTerminalView {
 
     var kittyKeys: Bool { (keyFlags.last ?? 0) != 0 }
 
+    // MARK: Links
+
+    /// ⌘-click opens a link, as in Ghostty: an OSC 8 hyperlink, or a URL just
+    /// written out (pi and Claude Code print them plain, which SwiftTerm
+    /// ignores). Over one, ⌘ turns the pointer into a hand, and `onLink`
+    /// reports it for the hint at the bottom of the window. The clicks are
+    /// TerminalLinks'.
+    var onLink: ((String?) -> Void)?
+    private(set) var hovered: String?
+    private var hoverArea: NSTrackingArea?
+    /// Owns the tracking area: SwiftTerm's own mouseMoved would also send
+    /// each move to a program that asked for motion, so it can't be the owner.
+    private lazy var hoverOwner = HoverOwner(self)
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(rect: .zero, options: [.activeInKeyWindow, .inVisibleRect, .mouseMoved, .mouseEnteredAndExited],
+                                  owner: hoverOwner, userInfo: nil)
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    func hover(at p: NSPoint?, command: Bool) {
+        let url = p.flatMap { link(at: $0) }
+        if url != hovered {
+            hovered = url
+            onLink?(url)
+        }
+        if p != nil { (url != nil && command ? NSCursor.pointingHand : NSCursor.iBeam).set() }
+    }
+
+    private final class HoverOwner: NSResponder {
+        weak var view: AgentTerminalView?
+        init(_ view: AgentTerminalView) { self.view = view; super.init() }
+        required init?(coder: NSCoder) { fatalError() }
+        override func mouseMoved(with e: NSEvent) {
+            guard let v = view else { return }
+            v.hover(at: v.convert(e.locationInWindow, from: nil), command: e.modifierFlags.contains(.command))
+        }
+        override func mouseExited(with e: NSEvent) { view?.hover(at: nil, command: false) }
+    }
+
+    /// The link under a point in the view, if any.
+    func link(at p: NSPoint) -> String? {
+        let t = getTerminal()
+        let glyph = font.glyph(withName: "W")
+        let cell = CGSize(width: font.advancement(forGlyph: glyph).width,
+                          height: ceil(CTFontGetAscent(font) + CTFontGetDescent(font) + CTFontGetLeading(font)))
+        guard cell.width > 0, cell.height > 0, p.x >= 0, p.y >= 0 else { return nil }
+        let col = Int(p.x / cell.width), row = Int((bounds.height - p.y) / cell.height)
+        guard col < t.cols, row < t.rows, let line = t.getLine(row: row) else { return nil }
+        if let payload = line[col].getPayload() as? String, let semi = payload.firstIndex(of: ";") {
+            let url = String(payload[payload.index(after: semi)...])
+            if AgentTerminalView.opens(url) { return url }
+        }
+        // One character per column, so a match's offset is its column.
+        let text = String((0..<t.cols).map { c -> Character in
+            let ch = line[c].getCharacter()
+            return ch == "\u{0}" || ch.unicodeScalars.count != 1 ? " " : ch
+        })
+        let ns = text as NSString
+        for m in AgentTerminalView.urls.matches(in: text, range: NSRange(location: 0, length: ns.length)) {
+            var url = ns.substring(with: m.range)
+            // Sentence punctuation after a link isn't part of it; a closing
+            // bracket is only when the link opened one.
+            while let last = url.last, ".,;:!?'\"".contains(last)
+                    || (last == ")" && url.filter { $0 == "(" }.count < url.filter { $0 == ")" }.count)
+                    || (last == "]" && !url.contains("[")) {
+                url.removeLast()
+            }
+            if col >= m.range.location && col < m.range.location + url.utf16.count && AgentTerminalView.opens(url) { return url }
+        }
+        return nil
+    }
+
+    private static let urls = try! NSRegularExpression(pattern: #"(?:https?|file)://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+"#)
+
+    /// Web and file links only: an OSC 8 link can name any scheme.
+    static func opens(_ url: String) -> Bool {
+        guard let scheme = URL(string: url)?.scheme?.lowercased() else { return false }
+        return ["http", "https", "file", "mailto"].contains(scheme)
+    }
+
     override func dataReceived(slice: ArraySlice<UInt8>) {
         for b in slice { scan(b) }
         super.dataReceived(slice: slice)
@@ -297,6 +385,44 @@ enum TerminalKeys {
     }
 }
 
+/// ⌘-click on a link in an agent terminal opens it, and the click goes no
+/// further: not to SwiftTerm's selection, nor to the agent. ⌘ pressed or let
+/// go over a link swaps the pointer.
+@MainActor
+enum TerminalLinks {
+    private static var monitor: Any?
+    /// The link a ⌘-click went down on: opened if it comes up on it too.
+    private static var pressed: (view: AgentTerminalView, url: String)?
+
+    static func install() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp, .flagsChanged]) { e in
+            guard let view = TerminalScroll.views.values.first(where: { $0.window === e.window && $0.window != nil }) as? AgentTerminalView
+            else { return e }
+            let p = view.convert(e.locationInWindow, from: nil)
+            switch e.type {
+            case .flagsChanged:
+                // A key event: where the pointer is has to be asked.
+                guard let w = view.window, w.isKeyWindow else { return e }
+                let at = view.convert(w.mouseLocationOutsideOfEventStream, from: nil)
+                view.hover(at: view.bounds.contains(at) ? at : nil, command: e.modifierFlags.contains(.command))
+                return e
+            case .leftMouseDown:
+                guard e.modifierFlags.contains(.command), view.bounds.contains(p), let url = view.link(at: p) else { return e }
+                pressed = (view, url)
+                return nil
+            case .leftMouseDragged:
+                return pressed == nil ? e : nil
+            default:
+                guard let (v, url) = pressed else { return e }
+                pressed = nil
+                if v === view, view.link(at: p) == url, let u = URL(string: url) { NSWorkspace.shared.open(u) }
+                return nil
+            }
+        }
+    }
+}
+
 struct AgentPopout: View {
     @ObservedObject var session: TerminalSession
     /// The window's title-bar height: the header shares that row with the traffic lights.
@@ -317,6 +443,13 @@ struct AgentPopout: View {
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
                     .padding(.bottom, 6)
+                if let link = session.link, !session.ended {
+                    linkHint(link)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        .padding(8)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
                 if session.ended {
                     VStack(spacing: 10) {
                         Text("Detached from \(agent?.kind ?? "the agent")").font(Type.title)
@@ -336,6 +469,27 @@ struct AgentPopout: View {
         // An agent takes the mouse; the shell it leaves behind gives it back.
         .onChange(of: agent == nil, initial: true) { _, gone in TerminalSelect.set(session.view, agent: !gone) }
         .onDisappear { session.detach() }
+        .animation(Motion.micro, value: session.link == nil)
+    }
+
+    /// What a link under the pointer does, at the window's foot as Ghostty
+    /// shows it: the address, and that ⌘-click opens it.
+    private func linkHint(_ link: String) -> some View {
+        HStack(spacing: 6) {
+            Text("⌘-click to open").fontWeight(.semibold)
+            Text(link.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression))
+                .opacity(0.7)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(Color(hex: theme.foreground))
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(Color(hex: theme.background).opacity(0.94), in: Capsule())
+        .overlay(Capsule().strokeBorder(Color(hex: theme.foreground).opacity(0.15)))
+        .frame(maxWidth: 520, alignment: .leading)
+        .animation(Motion.micro, value: link)
     }
 
     /// One line, exactly as tall as the title bar, so it sits level with the
