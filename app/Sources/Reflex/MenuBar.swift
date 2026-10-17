@@ -29,6 +29,7 @@ struct MenuBarPanel: View {
     @ObservedObject var store = Store.shared
     @ObservedObject var archive = SessionArchive.shared
     @ObservedObject var rail = RailModel.shared
+    @ObservedObject var updater = Updater.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @FocusState private var focused: Bool
     var openAgent: (AgentInfo) -> Void
@@ -59,6 +60,7 @@ struct MenuBarPanel: View {
             if model.open {
                 VStack(alignment: .leading, spacing: 8) {
                     content
+                    if let v = updater.pending { update(v) }
                     footer
                 }
                 .padding(10)
@@ -125,7 +127,7 @@ struct MenuBarPanel: View {
             Spacer(minLength: 8)
             Menu {
                 Button("Take Reflex with You…", systemImage: "iphone", action: openPhone)
-                if Updater.available { Button("Check for Updates…") { Updater.check() } }
+                if Updater.available { Button(updater.menuTitle) { Updater.check() } }
                 Divider()
                 Button("Restart reflexd", action: restart)
                 Button("Open log", action: openLog)
@@ -145,6 +147,28 @@ struct MenuBarPanel: View {
         // As wide as what is above it: the stack is as wide as its widest.
         .frame(maxWidth: .infinity)
         .raySurface(Capsule())
+    }
+
+    /// A version Sparkle found while Reflex was in the background.
+    private func update(_ version: String) -> some View {
+        Button {
+            close()
+            Updater.check()
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "arrow.down.circle.fill").foregroundStyle(Tone.done)
+                Text("Reflex \(version) is available").foregroundStyle(Ink.text)
+                Spacer(minLength: 8)
+                Text("Update…").foregroundStyle(Ink.dim)
+            }
+            .font(.system(size: 12, weight: .medium))
+            .padding(.horizontal, 12).padding(.vertical, 8)
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(Pressable())
+        .raySurface(Capsule())
+        .transition(.surface(reduce: reduce))
     }
 
     private func action(_ symbol: String, _ help: String, badge: Int = 0, _ run: @escaping () -> Void) -> some View {

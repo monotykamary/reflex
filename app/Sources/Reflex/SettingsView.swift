@@ -1101,6 +1101,7 @@ private struct CheckRow<Accessory: View>: View {
 // MARK: - About
 
 private struct AboutPane: View {
+    @ObservedObject var updater = Updater.shared
     var body: some View {
         Form {
             Section {
@@ -1113,6 +1114,19 @@ private struct AboutPane: View {
                         .font(.system(size: 12.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 10)
+            }
+            if Updater.available {
+                Section {
+                    LabeledContent {
+                        Button(updater.pending == nil ? "Check for Updates…" : "Update…") { Updater.check() }
+                    } label: {
+                        RowLabel(updater.pending.map { "Reflex \($0) is available" } ?? "Updates",
+                                 updater.lastCheck.map { "Last checked \($0.formatted(.relative(presentation: .named)))." } ?? "Reflex checks once a day.")
+                    }
+                    Toggle(isOn: $updater.automaticallyInstalls) {
+                        RowLabel("Install updates automatically", "Downloaded in the background and installed when Reflex next quits.")
+                    }
+                }
             }
             Section {
                 LabeledContent("Daemon log") { Button("Open") { NSWorkspace.shared.open(Daemon.logURL) } }

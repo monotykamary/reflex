@@ -106,6 +106,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Store.shared.$state.sink { [weak self] _ in
             DispatchQueue.main.async { self?.updateStatusTitle() }
         }.store(in: &bag)
+        Updater.shared.$pending.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateStatusTitle() }
+        }.store(in: &bag)
         MenuBarModel.shared.$size.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeMenuPanel() }
         }.store(in: &bag)
@@ -246,7 +249,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let main = NSMenu()
         let appItem = NSMenuItem()
         let app = NSMenu(title: "Reflex")
-        app.addItem(item("About Reflex", #selector(NSApplication.orderFrontStandardAboutPanel(_:)), target: NSApp))
+        // Settings → About, not the standard panel: it has the version and
+        // Check for Updates.
+        app.addItem(item("About Reflex", #selector(showAbout), key: ""))
         app.addItem(.separator())
         app.addItem(item("Settings…", #selector(showSettings as () -> Void), key: ","))
         app.addItem(item("Welcome Tour…", #selector(openGuide)))
@@ -288,6 +293,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private var statusMenu: NSMenu?
+    private var updateItem: NSMenuItem?
 
     private func setupStatusItem() {
         let s = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -301,6 +307,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(item("Inbox", #selector(showInbox), key: ""))
         m.addItem(.separator())
         m.addItem(item("Settings…", #selector(showSettings as () -> Void), key: ""))
+        if Updater.available {
+            let u = item("Check for Updates…", #selector(checkForUpdates), key: "")
+            m.addItem(u)
+            updateItem = u
+        }
         m.addItem(item("Restart reflexd", #selector(restartDaemon), key: ""))
         m.addItem(item("Open log", #selector(openLog), key: ""))
         m.addItem(.separator())
@@ -333,6 +344,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// would show: questions waiting (amber) and agents working (blue).
     private func updateStatusTitle() {
         guard let button = status?.button else { return }
+        let waiting = Updater.shared.pending != nil
+        if waitingShown != waiting {
+            waitingShown = waiting
+            button.image = AppDelegate.statusIcon(update: waiting)
+        }
+        updateItem?.title = Updater.shared.menuTitle
         let state = Store.shared.state
         guard Settings.shared.menuBar else {
             let n = state.inbox.count
@@ -348,6 +365,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         count(Rail.questions(state.inbox).count, NSColor(Tone.blocked))
         count(state.agents.filter { $0.status == "working" }.count, NSColor(Tone.working))
         if button.attributedTitle != title { button.attributedTitle = title }
+    }
+
+    private var waitingShown = false
+
+    /// Reflex's bolt, with a green dot at its corner while an update waits.
+    /// (Drawn, not a template, so the dot keeps its colour; the bolt takes
+    /// the menu bar's text colour as it draws.)
+    static func statusIcon(update: Bool) -> NSImage? {
+        guard let bolt = NSImage(systemSymbolName: "bolt.horizontal.circle", accessibilityDescription: "Reflex") else { return nil }
+        guard update else { return bolt }
+        let image = NSImage(size: bolt.size, flipped: false) { r in
+            bolt.draw(in: r)
+            NSColor.labelColor.set()
+            r.fill(using: .sourceAtop)
+            let d: CGFloat = 6
+            NSColor.systemGreen.setFill()
+            NSBezierPath(ovalIn: NSRect(x: r.maxX - d, y: r.maxY - d, width: d, height: d)).fill()
+            return true
+        }
+        image.accessibilityDescription = "Reflex — an update is available"
+        return image
     }
 
     // MARK: Menu bar panel
@@ -1018,6 +1056,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: Settings
 
     @objc func showSettings() { showSettings(pane: nil) }
+    @objc func showAbout() { showSettings(pane: .about) }
 
     func showSettings(pane: SettingsPane?) {
         edge.hide(returnFocus: false)

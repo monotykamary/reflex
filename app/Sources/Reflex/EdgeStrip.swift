@@ -338,6 +338,7 @@ struct Rail: View {
     @ObservedObject var rail = RailModel.shared
     @ObservedObject var settings = Settings.shared
     @ObservedObject var inbox = InboxModel.shared
+    @ObservedObject var updater = Updater.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Namespace private var glass
     var openInbox: () -> Void
@@ -486,9 +487,16 @@ struct Rail: View {
             .padding(.vertical, 4)
             .raySurface(Capsule())
 
+            if let v = updater.pending {
+                RoundButton(help: "Update to \(v)", action: Updater.check) {
+                    Image(systemName: "arrow.down.circle.fill").font(.system(size: 17)).foregroundStyle(Tone.done)
+                }
+                .transition(.scale(scale: 0.6).combined(with: .opacity))
+            }
+
             Menu {
                 Button("Take Reflex with You…", systemImage: "iphone", action: openPhone)
-                if Updater.available { Button("Check for Updates…") { Updater.check() } }
+                if Updater.available { Button(updater.menuTitle) { Updater.check() } }
                 Divider()
                 Button("Restart reflexd", action: restart)
                 Button("Open log", action: openLog)
