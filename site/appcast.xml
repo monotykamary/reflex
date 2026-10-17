@@ -3,6 +3,16 @@
     <channel>
         <title>Reflex</title>
         <item>
+            <title>0.1.31</title>
+            <pubDate>Sat, 17 Oct 2026 22:17:44 +0700</pubDate>
+            <link>https://reflex.farm/</link>
+            <sparkle:version>157</sparkle:version>
+            <sparkle:shortVersionString>0.1.31</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.31/Reflex-0.1.31.dmg" length="4791408" type="application/octet-stream" sparkle:edSignature="nNkHMDt2djVKhSCJkignzvSzTnVj8FgjA5oEZsmgN4JJxofvF3/zl4rqdP5GaPA0gL1APmqLE3tsbEAm/7WvDw=="/>
+        </item>
+        <item>
             <title>0.1.30</title>
             <pubDate>Sat, 17 Oct 2026 22:02:29 +0700</pubDate>
             <link>https://reflex.farm/</link>
@@ -21,16 +31,6 @@
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.29/Reflex-0.1.29.dmg" length="5871194" type="application/octet-stream" sparkle:edSignature="76iQmPyLgNcF+WkXsnPoxk3+o4C5t5umE2TS/w71Q5AQ1YxUjmjrblNVhCSQYKB4TlYGxVjtJAeDG9AdfhvuAg=="/>
-        </item>
-        <item>
-            <title>0.1.28</title>
-            <pubDate>Sat, 17 Oct 2026 02:01:01 +0700</pubDate>
-            <link>https://reflex.farm/</link>
-            <sparkle:version>148</sparkle:version>
-            <sparkle:shortVersionString>0.1.28</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.28/Reflex-0.1.28.dmg" length="4771729" type="application/octet-stream" sparkle:edSignature="6kS3p2V3IRf84JqR9CmZAhV7k5BJPUcR7EyP8pdEbrrh+ME3fPCXtphRV6I6gCBMT/VsteSsKGgh/T0Hkoi0DQ=="/>
         </item>
     </channel>
 </rss>
