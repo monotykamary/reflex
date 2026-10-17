@@ -13,8 +13,9 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     let view: AgentTerminalView
     @Published var attached = false
     @Published var ended = false
-    /// The link under the pointer, for the ⌘-click hint.
-    @Published var link: String?
+    /// The link under the pointer, for the ⌘-click hint, and where the
+    /// pointer found it (top-left origin, in the window's content).
+    @Published var link: (url: String, at: CGPoint)?
     private var bag = Set<AnyCancellable>()
 
     init(pane: String) {
@@ -23,7 +24,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
-        view.onLink = { [weak self] in self?.link = $0 }
+        view.onLink = { [weak self] url, at in self?.link = url.map { ($0, at) } }
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
         TerminalSelect.install()
@@ -238,9 +239,9 @@ final class AgentTerminalView: LocalProcessTerminalView {
     /// ⌘-click opens a link, as in Ghostty: an OSC 8 hyperlink, or a URL just
     /// written out (pi and Claude Code print them plain, which SwiftTerm
     /// ignores). Over one, ⌘ turns the pointer into a hand, and `onLink`
-    /// reports it for the hint at the bottom of the window. The clicks are
-    /// TerminalLinks'.
-    var onLink: ((String?) -> Void)?
+    /// reports it, with where the pointer met it, for the hint under the
+    /// pointer. The clicks are TerminalLinks'.
+    var onLink: ((String?, CGPoint) -> Void)?
     private(set) var hovered: String?
     private var hoverArea: NSTrackingArea?
     /// Owns the tracking area: SwiftTerm's own mouseMoved would also send
@@ -260,7 +261,9 @@ final class AgentTerminalView: LocalProcessTerminalView {
         let url = p.flatMap { link(at: $0) }
         if url != hovered {
             hovered = url
-            onLink?(url)
+            // Window content coordinates, top-left origin, as SwiftUI lays out.
+            let w = p.map { convert($0, to: nil) } ?? .zero
+            onLink?(url, CGPoint(x: w.x, y: (window?.contentView?.bounds.height ?? 0) - w.y))
         }
         if p != nil { (url != nil && command ? NSCursor.pointingHand : NSCursor.iBeam).set() }
     }
@@ -430,6 +433,7 @@ struct AgentPopout: View {
     @ObservedObject var store = Store.shared
     @ObservedObject var themes = Themes.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
+    @State private var hintSize = CGSize.zero
 
     private var agent: AgentInfo? { store.state.agents.first { $0.pane == session.pane } }
     private var theme: TermTheme { themes.current }
@@ -443,13 +447,6 @@ struct AgentPopout: View {
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
                     .padding(.bottom, 6)
-                if let link = session.link, !session.ended {
-                    linkHint(link)
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
-                        .padding(8)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
-                }
                 if session.ended {
                     VStack(spacing: 10) {
                         Text("Detached from \(agent?.kind ?? "the agent")").font(Type.title)
@@ -469,18 +466,37 @@ struct AgentPopout: View {
         // An agent takes the mouse; the shell it leaves behind gives it back.
         .onChange(of: agent == nil, initial: true) { _, gone in TerminalSelect.set(session.view, agent: !gone) }
         .onDisappear { session.detach() }
-        .animation(Motion.micro, value: session.link == nil)
+        .overlay(alignment: .topLeading) {
+            if let link = session.link, !session.ended {
+                GeometryReader { g in
+                    linkHint(link.url)
+                        .fixedSize()
+                        .onGeometryChange(for: CGSize.self) { $0.size } action: { hintSize = $0 }
+                        .offset(hintOffset(at: link.at, in: g.size))
+                }
+                .allowsHitTesting(false)
+                .transition(.opacity)
+                .id(link.url)
+            }
+        }
+        .animation(Motion.micro, value: session.link?.url)
     }
 
-    /// What a link under the pointer does, at the window's foot as Ghostty
-    /// shows it: the address, and that ⌘-click opens it.
+    /// Just under the pointer, as a tooltip sits; above it at the window's
+    /// foot, and never past either side.
+    private func hintOffset(at p: CGPoint, in size: CGSize) -> CGSize {
+        let x = min(max(8, p.x - 6), size.width - hintSize.width - 8)
+        let below = p.y + 20
+        return CGSize(width: x, height: below + hintSize.height > size.height - 8 ? p.y - hintSize.height - 8 : below)
+    }
+
+    /// What a link under the pointer does: that ⌘-click opens it, and where to.
     private func linkHint(_ link: String) -> some View {
-        HStack(spacing: 6) {
+        var shown = link.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
+        if shown.count > 64 { shown = shown.prefix(40) + "…" + shown.suffix(23) }
+        return HStack(spacing: 6) {
             Text("⌘-click to open").fontWeight(.semibold)
-            Text(link.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression))
-                .opacity(0.7)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            Text(shown).opacity(0.7)
         }
         .font(.system(size: 11))
         .foregroundStyle(Color(hex: theme.foreground))
@@ -488,8 +504,7 @@ struct AgentPopout: View {
         .padding(.vertical, 4)
         .background(Color(hex: theme.background).opacity(0.94), in: Capsule())
         .overlay(Capsule().strokeBorder(Color(hex: theme.foreground).opacity(0.15)))
-        .frame(maxWidth: 520, alignment: .leading)
-        .animation(Motion.micro, value: link)
+        .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
     }
 
     /// One line, exactly as tall as the title bar, so it sits level with the
