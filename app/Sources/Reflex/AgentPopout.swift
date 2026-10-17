@@ -146,6 +146,8 @@ enum TerminalScroll {
             guard let view = views.values.first(where: { $0.window === e.window && $0.window != nil }) else { return e }
             let p = view.convert(e.locationInWindow, from: nil)
             guard view.bounds.contains(p) else { return e }
+            // The text moves out from under a link's hint; the next move finds what's there.
+            (view as? AgentTerminalView)?.hover(at: nil, command: false)
             return handle(e, view: view, at: p) ? nil : e
         }
     }
@@ -469,10 +471,10 @@ struct AgentPopout: View {
         .overlay(alignment: .topLeading) {
             if let link = session.link, !session.ended {
                 GeometryReader { g in
-                    linkHint(link.url)
+                    linkHint
                         .fixedSize()
                         .onGeometryChange(for: CGSize.self) { $0.size } action: { hintSize = $0 }
-                        .offset(hintOffset(at: link.at, in: g.size))
+                        .offset(hintOffset(at: link.at, in: g.frame(in: .global)))
                 }
                 .allowsHitTesting(false)
                 .transition(.opacity)
@@ -483,28 +485,25 @@ struct AgentPopout: View {
     }
 
     /// Just under the pointer, as a tooltip sits; above it at the window's
-    /// foot, and never past either side.
-    private func hintOffset(at p: CGPoint, in size: CGSize) -> CGSize {
-        let x = min(max(8, p.x - 6), size.width - hintSize.width - 8)
-        let below = p.y + 20
-        return CGSize(width: x, height: below + hintSize.height > size.height - 8 ? p.y - hintSize.height - 8 : below)
+    /// foot, and never past either side. The pointer is in window content
+    /// coordinates; the frame (below the title bar) is too.
+    private func hintOffset(at p: CGPoint, in frame: CGRect) -> CGSize {
+        let x = min(max(8, p.x - frame.minX - 6), frame.width - hintSize.width - 8)
+        let y = p.y - frame.minY
+        let below = y + 14
+        return CGSize(width: x, height: below + hintSize.height > frame.height - 8 ? y - hintSize.height - 10 : below)
     }
 
-    /// What a link under the pointer does: that ⌘-click opens it, and where to.
-    private func linkHint(_ link: String) -> some View {
-        var shown = link.replacingOccurrences(of: #"^https?://"#, with: "", options: .regularExpression)
-        if shown.count > 64 { shown = shown.prefix(40) + "…" + shown.suffix(23) }
-        return HStack(spacing: 6) {
-            Text("⌘-click to open").fontWeight(.semibold)
-            Text(shown).opacity(0.7)
-        }
-        .font(.system(size: 11))
-        .foregroundStyle(Color(hex: theme.foreground))
-        .padding(.horizontal, 9)
-        .padding(.vertical, 4)
-        .background(Color(hex: theme.background).opacity(0.94), in: Capsule())
-        .overlay(Capsule().strokeBorder(Color(hex: theme.foreground).opacity(0.15)))
-        .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
+    /// What a link under the pointer does; the link itself is right there.
+    private var linkHint: some View {
+        Text("⌘-click to open")
+            .font(.system(size: 11, weight: .semibold))
+            .foregroundStyle(Color(hex: theme.foreground))
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
+            .background(Color(hex: theme.background).opacity(0.94), in: Capsule())
+            .overlay(Capsule().strokeBorder(Color(hex: theme.foreground).opacity(0.15)))
+            .shadow(color: .black.opacity(0.18), radius: 6, y: 2)
     }
 
     /// One line, exactly as tall as the title bar, so it sits level with the
