@@ -849,3 +849,95 @@ def Out.pending(o: M.Out) -> List<&2, M.Dispatch>:
   match o:
     case M.Out{M.State{now, next, undo, herdr, agents, inbox, pending, receipts, folders}, run, reply}:
       pending
+
+# A sent prompt, on screen
+# ------------------------
+# Claude Code and pi draw their input between two rules. Split the screen
+# there: the conversation above the box, and what is typed in it. Matched
+# with spaces, line breaks and box sides squashed out, so wrapping in the
+# box can't hide the words.
+
+type Box is Data:
+  Box{above: String, inside: String, found: Bool}
+
+def is_rule(+l: String) -> Bool:
+  String.contains(l, "──────────")
+
+def squash(s: String) -> String:
+  String.join(String.split(String.join(String.split(String.join(String.split(s, ' '), ""), '\n'), ""), '│'), "")
+
+# Bottom up: past the footer to the box's foot (foot), then up to its top
+# (top); what is between is typed, what is above is the conversation.
+type BoxScan is Data:
+  BoxScan{foot: Bool, top: Bool, inside: List<&2, String>, above: List<&2, String>}
+
+def box.step(rule: Bool, h: String, sc: BoxScan) -> BoxScan:
+  match rule sc:
+    case True{} BoxScan{False{}, top, inside, above}:
+      BoxScan{True{}, False{}, inside, above}
+    case False{} BoxScan{False{}, top, inside, above}:
+      BoxScan{False{}, False{}, inside, above}
+    case True{} BoxScan{True{}, False{}, inside, above}:
+      BoxScan{True{}, True{}, inside, above}
+    case False{} BoxScan{True{}, False{}, inside, above}:
+      BoxScan{True{}, False{}, h <> inside, above}
+    case _ BoxScan{True{}, True{}, inside, above}:
+      BoxScan{True{}, True{}, inside, h <> above}
+
+def box.go(rev: List<&2, String>, sc: BoxScan) -> BoxScan:
+  match rev:
+    case Nil{}:
+      sc
+    case Con{+h, t}:
+      box.go(t, box.step(is_rule(h), h, sc))
+
+def box.of(sc: BoxScan) -> Box:
+  match sc:
+    case BoxScan{foot, top, inside, above}:
+      Box{String.join(above, "\n"), String.join(inside, "\n"), top}
+
+def box(screen: String) -> Box:
+  box.of(box.go(List.reverse(&2, String, String.lines(screen)), BoxScan{False{}, False{}, [], []}))
+
+# The words to look for: the request's first line, squashed, 20 characters.
+def probe.of(lines: List<&2, String>) -> String:
+  match lines:
+    case Nil{}:
+      ""
+    case Con{h, t}:
+      String.take(squash(h), 20n)
+
+def probe(text: String) -> String:
+  probe.of(String.lines(text))
+
+# A long paste shows as "[Pasted text #1 +12 lines]" rather than its words.
+def holds(+s: String, +probe: String) -> Bool:
+  String.contains(squash(s), probe) || String.contains(s, "[Pasted text")
+
+def ready(+status: String) -> Bool:
+  String.eq(status, "idle") || String.eq(status, "done")
+
+# Still idle with the request in its input: typed, not sent (its Enter read
+# as a new line). With no box to read, the words anywhere on screen will do.
+def prompt_typed.in(b: Box, +screen: String, +probe: String) -> Bool:
+  match b:
+    case Box{above, inside, True{}}:
+      holds(inside, probe)
+    case Box{above, inside, False{}}:
+      String.contains(squash(screen), probe)
+
+def prompt_typed(+status: String, +screen: String, +probe: String) -> Bool:
+  ready(status) && bool_not(String.is_empty(probe)) && prompt_typed.in(box(screen), screen, probe)
+
+# Still idle, an input box on screen, and the request nowhere: not in the
+# box, not in the conversation above it. It never arrived.
+def prompt_missing.in(b: Box, +probe: String) -> Bool:
+  match b:
+    case Box{+above, +inside, True{}}:
+      bool_not(holds(inside, probe)) && bool_not(holds(above, probe))
+    case Box{above, inside, False{}}:
+      False{}
+
+def prompt_missing(+status: String, +screen: String, +probe: String) -> Bool:
+  ready(status) && bool_not(String.is_empty(probe)) && prompt_missing.in(box(screen), probe)
+

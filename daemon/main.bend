@@ -423,23 +423,17 @@ def prompt_retry(fuel: Nat, +sock: String, +pane: String, +text: String, st: PTr
         next : PTry <- prompt_step(sock, pane, text, st)
         prompt_retry(p, sock, pane, text, next)
 
-# A prompt taken as typing, never sent
-# ------------------------------------
-# A freshly started TUI can read a prompt and its Enter as one paste, and in a
-# paste Enter is a new line: the words sit in its input and nothing runs. So
-# after each prompt, in the background: still idle a moment later, with the
-# request's opening words on its screen, it gets an Enter (at most three
-# times; an Enter on an empty input does nothing).
-
-def opening.of(lines: List<&2, String>) -> String:
-  match lines:
-    case Nil{}:
-      ""
-    case Con{h, t}:
-      String.take(String.trim(h), 24n)
-
-def opening(+text: String) -> String:
-  opening.of(String.lines(text))
+# A prompt taken as typing, or never taken
+# ----------------------------------------
+# Herdr pastes a prompt, then presses Enter 300 ms later. A TUI that is busy
+# (just started, or on a Mac under load) can read both as one paste, and in
+# a paste Enter is a new line: the words sit in its input and nothing runs.
+# Or the paste lands before its input is listening and is lost: an idle,
+# empty agent. So after each prompt, in the background, while the agent
+# stays idle (at most six looks, 2.5 s apart): the request in its input box
+# gets an Enter (an Enter on an empty input does nothing); the request
+# nowhere on screen, twice running (a slow paste is not a lost one), is sent
+# once more.
 
 def screen_of(r: Result<&1, &1, U32 & String, String>) -> String:
   match r:
@@ -448,39 +442,55 @@ def screen_of(r: Result<&1, &1, U32 & String, String>) -> String:
     case Fail{e}:
       ""
 
-def unsent(+status: String, +screen: String, +probe: String) -> Bool:
-  ready_status(status) && Core.bool_not(String.is_empty(probe)) && String.contains(screen, probe)
+# Whether to look again, whether the last look found the request nowhere,
+# and whether it has been sent again (only ever once).
+type Watch is Data:
+  Watch{go: Bool, missing: Bool, resent: Bool}
 
-def press_if(go: Bool, +sock: String, +pane: String) -> IO(Bool):
-  match go:
-    case True{}:
-      do IO<Bool>:
+def confirm.gone(missing: Bool, resent: Bool, +sock: String, +pane: String, +text: String) -> IO(Watch):
+  match missing resent:
+    case True{} False{}:
+      do IO<Watch>:
+        k : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(sock, pane, text)
+        IO.print("prompt in " ++ pane ++ " never arrived: sent it again")
+        return Watch{True{}, False{}, True{}}
+    case True{} True{}:
+      IO.pure(Watch, Watch{True{}, True{}, True{}})
+    case False{} r:
+      IO.pure(Watch, Watch{True{}, True{}, r})
+
+def confirm.act(typed: Bool, gone: Bool, missing: Bool, resent: Bool, +sock: String, +pane: String, +text: String) -> IO(Watch):
+  match typed gone:
+    case True{} _:
+      do IO<Watch>:
         k : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(sock, pane, "enter")
         IO.print("prompt in " ++ pane ++ " was typed but not sent: pressed Enter")
-        return True{}
-    case False{}:
-      IO.pure(Bool, False{})
+        return Watch{True{}, False{}, resent}
+    case False{} True{}:
+      confirm.gone(missing, resent, sock, pane, text)
+    case False{} False{}:
+      IO.pure(Watch, Watch{False{}, False{}, resent})
 
-# Checks while the last one pressed Enter (live), up to fuel times.
-def confirm(fuel: Nat, live: Bool, +sock: String, +pane: String, +probe: String) -> IO(Unit):
-  match fuel live:
+def confirm(fuel: Nat, w: Watch, +sock: String, +pane: String, +text: String, +probe: String) -> IO(Unit):
+  match fuel w:
     case 0n _:
       IO.pure(Unit, Unit{})
-    case 1n+p False{}:
+    case 1n+p Watch{False{}, missing, resent}:
       IO.pure(Unit, Unit{})
-    case 1n+p True{}:
+    case 1n+p Watch{True{}, missing, resent}:
       do IO<Unit>:
         IO.sleep(2500)
-        s : String <- Herdr.pane_status(sock, pane)
-        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(sock, pane, "visible", 40)
-        pressed : Bool <- press_if(unsent(s, screen_of(r), probe), sock, pane)
-        confirm(p, pressed, sock, pane, probe)
+        +s : String <- Herdr.pane_status(sock, pane)
+        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(sock, pane, "visible", 60)
+        +screen : String <- IO.pure(String, screen_of(r))
+        next : Watch <- confirm.act(Core.prompt_typed(s, screen, probe), Core.prompt_missing(s, screen, probe), missing, resent, sock, pane, text)
+        confirm(p, next, sock, pane, text, probe)
 
 def confirm.start(go: Bool, +sock: String, +pane: String, +text: String) -> IO(Unit):
   match go:
     case True{}:
       do IO<Unit>:
-        IO.spawn(Unit, confirm(4n, True{}, sock, pane, opening(text)))
+        IO.spawn(Unit, confirm(6n, Watch{True{}, False{}, False{}}, sock, pane, text, Core.probe(text)))
         return Unit{}
     case False{}:
       IO.pure(Unit, Unit{})
