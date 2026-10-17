@@ -34,6 +34,9 @@ final class Settings: ObservableObject {
     /// Start herdr's server when it isn't running (after a restart).
     @Published var startHerdr: Bool { didSet { d.set(startHerdr, forKey: "startHerdr") } }
     @Published var showStrip: Bool { didSet { d.set(showStrip, forKey: "showStrip") } }
+    /// The rail lives under the menu bar icon instead of at the edge, and
+    /// Reflex leaves the Dock.
+    @Published var menuBar: Bool { didSet { d.set(menuBar, forKey: "menuBar") } }
     /// Keep the rail on screen instead of revealing it at the edge.
     @Published var railAlways: Bool { didSet { d.set(railAlways, forKey: "railAlways") } }
     /// Let a new question surface at the edge on its own for a few seconds.
@@ -51,6 +54,8 @@ final class Settings: ObservableObject {
     @Published var onboarded: Bool { didSet { d.set(onboarded, forKey: "onboarded") } }
     /// A regular app (Dock, ⌘Tab, menu bar) rather than menu-bar only.
     @Published var showInDock: Bool { didSet { d.set(showInDock, forKey: "showInDock") } }
+    /// Dock and ⌘Tab, unless the menu bar is Reflex's home.
+    var regularApp: Bool { showInDock && !menuBar }
     /// "system", "light" or "dark": Reflex's surfaces in either of Raycast's tones.
     @Published var appearance: String { didSet { d.set(appearance, forKey: "appearance") } }
 
@@ -77,6 +82,7 @@ final class Settings: ObservableObject {
         awakeBattery = d.object(forKey: "awakeBattery") as? Int ?? 20
         onboarded = d.bool(forKey: "onboarded")
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true
+        menuBar = d.bool(forKey: "menuBar")
         appearance = d.string(forKey: "appearance") ?? "system"
         Settings.writeFolders(extraFolders)
     }

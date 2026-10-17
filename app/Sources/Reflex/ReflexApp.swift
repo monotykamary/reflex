@@ -20,7 +20,7 @@ struct ReflexMain {
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
-        app.setActivationPolicy(Settings.shared.showInDock ? .regular : .accessory)
+        app.setActivationPolicy(Settings.shared.regularApp ? .regular : .accessory)
         app.run()
     }
 }
@@ -81,12 +81,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Settings.shared.$appearance.dropFirst().removeDuplicates().sink { _ in
             DispatchQueue.main.async { Settings.shared.applyAppearance() }
         }.store(in: &bag)
-        Settings.shared.$showInDock.dropFirst().removeDuplicates().sink { dock in
-            NSApp.setActivationPolicy(dock ? .regular : .accessory)
+        Settings.shared.$showInDock.combineLatest(Settings.shared.$menuBar).dropFirst().sink { _, _ in
+            DispatchQueue.main.async { NSApp.setActivationPolicy(Settings.shared.regularApp ? .regular : .accessory) }
         }.store(in: &bag)
-        Store.shared.$state.map(\.inbox.count).removeDuplicates().sink { [weak self] n in
-            self?.status?.button?.title = n > 0 ? " \(n)" : ""
+        Settings.shared.$menuBar.dropFirst().removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                if !Settings.shared.menuBar { self.closeMenuPanel() }
+                self.configureStatusItem()
+                self.placeStrip()
+            }
+        }.store(in: &bag)
+        Store.shared.$state.map(\.inbox.count).removeDuplicates().sink { n in
             NSApp.dockTile.badgeLabel = n > 0 ? "\(n)" : nil
+        }.store(in: &bag)
+        Store.shared.$state.sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateStatusTitle() }
+        }.store(in: &bag)
+        MenuBarModel.shared.$size.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.placeMenuPanel() }
         }.store(in: &bag)
         debugShow()
     }
@@ -266,10 +279,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         NSApp.windowsMenu = window
     }
 
+    private var statusMenu: NSMenu?
+
     private func setupStatusItem() {
         let s = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         s.button?.image = NSImage(systemSymbolName: "bolt.horizontal.circle", accessibilityDescription: "Reflex")
         s.button?.imagePosition = .imageLeading
+        s.button?.target = self
+        s.button?.action = #selector(statusClicked)
+        s.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
         let m = NSMenu()
         m.addItem(item("Ask… (⌥⌥)", #selector(toggleBar), key: ""))
         m.addItem(item("Inbox", #selector(showInbox), key: ""))
@@ -279,8 +297,127 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(item("Open log", #selector(openLog), key: ""))
         m.addItem(.separator())
         m.addItem(item("Quit Reflex", #selector(quit), key: ""))
-        s.menu = m
+        statusMenu = m
         status = s
+        configureStatusItem()
+    }
+
+    /// At the edge, the icon is a menu. In menu bar mode a click opens the
+    /// panel and a right-click (or ⌃-click) the menu.
+    private func configureStatusItem() {
+        status?.menu = Settings.shared.menuBar ? nil : statusMenu
+        updateStatusTitle()
+    }
+
+    @objc private func statusClicked() {
+        let e = NSApp.currentEvent
+        if e?.type == .rightMouseUp || e?.modifierFlags.contains(.control) == true {
+            closeMenuPanel()
+            status?.menu = statusMenu
+            status?.button?.performClick(nil)
+            status?.menu = nil
+            return
+        }
+        toggleMenuPanel()
+    }
+
+    /// The inbox count at the edge; in menu bar mode, what the edge tab
+    /// would show: questions waiting (amber) and agents working (blue).
+    private func updateStatusTitle() {
+        guard let button = status?.button else { return }
+        let state = Store.shared.state
+        guard Settings.shared.menuBar else {
+            let n = state.inbox.count
+            button.title = n > 0 ? " \(n)" : ""
+            return
+        }
+        let title = NSMutableAttributedString()
+        func count(_ n: Int, _ color: NSColor) {
+            guard n > 0 else { return }
+            title.append(NSAttributedString(string: " ●", attributes: [.foregroundColor: color, .font: NSFont.systemFont(ofSize: 8), .baselineOffset: 1.5]))
+            title.append(NSAttributedString(string: "\u{2009}\(n)", attributes: [.font: NSFont.menuBarFont(ofSize: 0)]))
+        }
+        count(Rail.questions(state.inbox).count, NSColor(Tone.blocked))
+        count(state.agents.filter { $0.status == "working" }.count, NSColor(Tone.working))
+        if button.attributedTitle != title { button.attributedTitle = title }
+    }
+
+    // MARK: Menu bar panel
+
+    private var menuPanel: KeyPanel?
+    private var menuClosedAt = Date.distantPast
+
+    private func toggleMenuPanel() {
+        if MenuBarModel.shared.open { closeMenuPanel(); return }
+        // The click that closed it (landing on the icon) must not reopen it.
+        guard Date().timeIntervalSince(menuClosedAt) > 0.3 else { return }
+        openMenuPanel()
+    }
+
+    private func openMenuPanel() {
+        if menuPanel == nil {
+            let view = MenuBarPanel(openAgent: { [weak self] a in self?.showPane(a.pane) },
+                                    openBar: { [weak self] a in self?.openBar(pinned: a) },
+                                    reveal: { [weak self] a in self?.closeMenuPanel(); HerdrWindow.reveal(pane: a.pane) },
+                                    openInbox: { [weak self] in self?.showInbox() },
+                                    openSettings: { [weak self] in self?.showSettings() },
+                                    openPhone: { [weak self] in self?.showPairing() },
+                                    restart: { Daemon.shared.restart() },
+                                    openLog: { NSWorkspace.shared.open(Daemon.logURL) },
+                                    quit: { NSApp.terminate(nil) },
+                                    close: { [weak self] in self?.closeMenuPanel() })
+            let p = Panels.floating(view, size: MenuBarPanel.windowSize, key: true)
+            p.identifier = MenuBarPanel.window
+            p.level = .statusBar
+            p.onEscape = { [weak self] in self?.closeMenuPanel() }
+            menuPanel = p
+        }
+        guard let p = menuPanel else { return }
+        if InboxModel.shared.shown { hideInbox() }
+        RailModel.shared.panel = .auto
+        placeMenuPanel()
+        MenuBarModel.shared.open = true
+        p.orderFrontRegardless()
+        p.makeKey()
+    }
+
+    func closeMenuPanel() {
+        let model = MenuBarModel.shared
+        guard model.open else { return }
+        model.open = false
+        menuClosedAt = Date()
+        if let p = menuPanel, p.isKeyWindow { p.resignKey() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+            guard !model.open else { return }
+            self?.menuPanel?.orderOut(nil)
+            let rail = RailModel.shared
+            rail.panel = .auto; rail.filter = ""; rail.stateFilter = nil
+        }
+    }
+
+    /// Under the icon, as a menu sits: lined up with its left edge, or
+    /// against the screen's right edge when there's no room. The window
+    /// stays put while open; the content moves inside it.
+    private func placeMenuPanel() {
+        guard let p = menuPanel, let bw = status?.button?.window,
+              let s = (bw.screen ?? NSScreen.main)?.frame else { return }
+        let icon = bw.frame
+        let size = MenuBarPanel.windowSize
+        // The content has 10 pt of padding (for its shadow) on every side.
+        let left = icon.minX - 18
+        let x = min(max(left, s.minX), s.maxX - size.width).rounded()
+        let frame = NSRect(x: x, y: (icon.minY + 6 - size.height).rounded(), width: size.width, height: size.height)
+        if !p.isVisible || !MenuBarModel.shared.open, p.frame != frame { p.setFrame(frame, display: false) }
+        let width = MenuBarModel.shared.size.width
+        let inset = max(0, min(left, s.maxX - width) - p.frame.minX).rounded()
+        if MenuBarModel.shared.inset != inset { MenuBarModel.shared.inset = inset }
+    }
+
+    /// Where the panel's content is on screen.
+    private func menuRect() -> NSRect? {
+        let m = MenuBarModel.shared
+        guard let p = menuPanel, p.isVisible, m.open, m.size.width > 0 else { return nil }
+        return NSRect(x: p.frame.minX + m.inset, y: p.frame.maxY - m.size.height, width: m.size.width, height: m.size.height)
     }
 
     @objc private func restartDaemon() { Daemon.shared.restart() }
@@ -294,7 +431,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var railY: CGFloat?
 
     private var tabShown: Bool {
-        Settings.shared.showStrip && !Rail.active(Store.shared.state.agents).isEmpty
+        Settings.shared.showStrip && !Settings.shared.menuBar && !Rail.active(Store.shared.state.agents).isEmpty
     }
 
     private func setupRail() {
@@ -372,6 +509,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return bar || inbox
         }
         edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
+        edge.enabled = { !Settings.shared.menuBar }
         edge.start()
         // A pairing code never outlives the app that made it.
         Pairing.shared.stop()
@@ -436,6 +574,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func clickAway(at p: NSPoint, in window: NSWindow?) {
+        // The menu bar panel: a click off it closes it (its icon toggles it itself).
+        if MenuBarModel.shared.open, !(menuRect()?.contains(p) ?? false),
+           window == nil || (window !== menuPanel && window !== status?.button?.window) {
+            closeMenuPanel()
+        }
         let mine = [strip, side, railKeys, inbox, pairing].compactMap { $0 }
         if let window, mine.contains(where: { $0 === window }) { return }
         if InboxModel.shared.shown, !(inboxRect()?.contains(p) ?? false) {
@@ -446,6 +589,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if RailModel.shared.visible && !Settings.shared.railAlways && !pinned && !edge.near(p) {
             // The click is activating whatever it landed on; leave focus to it.
             edge.hide(returnFocus: false)
+        closeMenuPanel()
         }
     }
 
@@ -547,6 +691,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         gate(strip, r.column)
         gate(side, r.side)
         if let ib = inbox, ib.isVisible { gate(ib, inboxRect()) }
+        if let mp = menuPanel, mp.isVisible { gate(mp, menuRect()) }
     }
 
     // MARK: Command bar — shown instantly (used all day; no entrance animation)
@@ -613,6 +758,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// bar (pinned to an agent, when one was picked).
     func openBar(pinned: AgentInfo?) {
         edge.hide(returnFocus: false)
+        closeMenuPanel()
         if let b = bar, b.isVisible { b.makeKey() } else { toggleBar() }
         if let a = pinned { command.target = a.pane }
     }
@@ -641,6 +787,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc func showPairing() {
         edge.hide(returnFocus: false)
+        closeMenuPanel()
         if InboxModel.shared.shown { hideInbox() }
         if pairing == nil {
             let view = PairingHost(done: { [weak self] in self?.hidePairing() })
@@ -678,6 +825,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         if inbox!.isVisible && InboxModel.shared.shown { hideInbox(); return }
         edge.hide(returnFocus: false)
+        closeMenuPanel()
         InboxModel.shared.maxList = inboxMaxHeight - 120
         placeInbox()
         inbox!.makeKeyAndOrderFront(nil)
@@ -765,6 +913,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Recents.shared.touch(pane)
         Store.shared.seen(pane)
         edge.hide(returnFocus: false)
+        closeMenuPanel()
         if InboxModel.shared.shown { hideInbox() }
         // The bar goes first, at once: left to fade while still key, it would
         // hand focus back to the app it came from as it left.
@@ -825,6 +974,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showOnboarding(at step: Onboarding.Step = .welcome) {
         edge.hide(returnFocus: false)
+        closeMenuPanel()
         if onboarding == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 920, height: 600),
                              styleMask: [.titled, .closable, .fullSizeContentView], backing: .buffered, defer: false)
@@ -855,6 +1005,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func showSettings(pane: SettingsPane?) {
         edge.hide(returnFocus: false)
+        closeMenuPanel()
         if let pane { SettingsNav.shared.pane = pane }
         if settings == nil {
             let host = NSHostingController(rootView: SettingsView())

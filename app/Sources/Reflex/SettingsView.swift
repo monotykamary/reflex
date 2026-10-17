@@ -67,7 +67,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
     var keywords: String {
         switch self {
         case .general: return "login startup dock cmd tab hotkey option double agent harness claude codex pi daemon reflexd restart log appearance light dark keep awake caffeinate sleep battery display"
-        case .rail: return "edge tab rail hover delay rest questions surface visible sliver"
+        case .rail: return "edge tab rail hover delay rest questions surface visible sliver menu bar menubar status icon dock"
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
@@ -317,8 +317,10 @@ private struct GeneralPane: View {
                     RowLabel("Appearance", "Reflex's surfaces follow macOS, or stay light or dark.")
                 }
                 Toggle(isOn: $s.showInDock) {
-                    RowLabel("Show in the Dock and ⌘Tab", "When off, Reflex lives in the menu bar and at the edge.")
+                    RowLabel("Show in the Dock and ⌘Tab", s.menuBar ? "Off while the rail lives in the menu bar (see Rail)."
+                        : "When off, Reflex lives in the menu bar and at the edge.")
                 }
+                .disabled(s.menuBar)
                 LabeledContent {
                     HStack(spacing: 4) { KeyCap(key: "⌥"); KeyCap(key: "⌥") }
                 } label: {
@@ -368,6 +370,16 @@ private struct RailPane: View {
         Form {
             Section { PaneHeader(pane: .rail) }
             Section {
+                Picker(selection: $s.menuBar) {
+                    Text("Screen edge").tag(false)
+                    Text("Menu bar").tag(true)
+                } label: {
+                    RowLabel("Where the rail lives", s.menuBar
+                        ? "Click Reflex's menu bar icon for the waiting question or every agent; right-click for the menu. No edge, no Dock icon."
+                        : "At the right edge of the screen. In the menu bar, Reflex also leaves the Dock.")
+                }
+            }
+            Section {
                 Toggle(isOn: $s.showStrip) {
                     RowLabel("Show the tab while agents are active", "A small tab at the edge: a ring per working agent, amber when one waits, green when done.")
                 }
@@ -378,6 +390,7 @@ private struct RailPane: View {
                     RowLabel("Keep the rail open", "Otherwise it opens when you hover the tab or rest on the edge.")
                 }
             }
+            .disabled(s.menuBar)
             Section {
                 Picker(selection: $s.edgeDelay) {
                     Text("Quick (0.3 s)").tag(0.3)
@@ -388,6 +401,7 @@ private struct RailPane: View {
                 }
                 .disabled(s.railAlways)
             }
+            .disabled(s.menuBar)
         }
     }
 }

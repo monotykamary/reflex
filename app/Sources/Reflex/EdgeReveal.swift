@@ -44,6 +44,8 @@ final class EdgeReveal {
     /// Another Reflex panel (the bar, the inbox) has the keys: leave them there.
     var othersKey: () -> Bool = { false }
     var onReveal: () -> Void = {}
+    /// Off while the rail lives in the menu bar.
+    var enabled: () -> Bool = { true }
 
     private var timer: Timer?
     private var dwellStart: NSPoint?
@@ -74,6 +76,11 @@ final class EdgeReveal {
     private func tick() {
         if debugDwell { return }
         let rail = RailModel.shared
+        guard enabled() else {
+            if rail.visible { hide() }
+            if dwellStart != nil || rail.dwell != 0 { dwellStart = nil; rail.dwell = 0 }
+            return
+        }
         let p = NSEvent.mouseLocation
         if Settings.shared.railAlways {
             if !rail.visible, let (s, y) = fallbackAnchor() { show(on: s, y: y) }
@@ -187,7 +194,7 @@ final class EdgeReveal {
 
     /// A new question: open the rail where it is anchored, like a notification.
     func surface() {
-        guard !RailModel.shared.visible, let (s, y) = fallbackAnchor() else { return }
+        guard enabled(), !RailModel.shared.visible, let (s, y) = fallbackAnchor() else { return }
         show(on: s, y: y, hold: 6)
     }
 }

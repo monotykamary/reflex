@@ -291,9 +291,14 @@ extension Rail {
     /// With the pointer over the rail: 1–9 answer the card, ⇥ shows the next
     /// one, U takes back the last send.
     @MainActor static func key(_ press: KeyPress) -> KeyPress.Result {
-        let rail = RailModel.shared, store = Store.shared
+        let rail = RailModel.shared
         guard rail.visible else { return .ignored }
-        let mode = side(rail, store, inboxShown: InboxModel.shared.shown)
+        return key(press, mode: side(rail, Store.shared, inboxShown: InboxModel.shared.shown))
+    }
+
+    /// The same, for whatever shows the question or the list (the menu bar's panel too).
+    @MainActor static func key(_ press: KeyPress, mode: RailSideMode) -> KeyPress.Result {
+        let rail = RailModel.shared, store = Store.shared
         if mode == .agents {
             if press.key == .escape { rail.filter = ""; return .handled }
             if press.key == .delete { if !rail.filter.isEmpty { rail.filter.removeLast() }; return .handled }
@@ -517,7 +522,7 @@ struct RailTab: View {
     var body: some View {
         Anchored(y: rail.tabAnchor) {
             ZStack(alignment: .trailing) {
-                if !rail.visible && !Rail.active(store.state.agents).isEmpty && settings.showStrip {
+                if !rail.visible && !Rail.active(store.state.agents).isEmpty && settings.showStrip && !settings.menuBar {
                     tab.transition(.opacity.combined(with: .offset(x: reduce ? 0 : 14)))
                 }
             }
@@ -658,7 +663,7 @@ private struct StatusPill: View {
 
 /// Every agent, grouped by project: what it is doing, and one click to its
 /// terminal, a message, or herdr.
-private struct AgentList: View {
+struct AgentList: View {
     var agents: [AgentInfo]
     var pulses: [String: Int]
     var waiting: Int
@@ -1049,7 +1054,7 @@ func questionLine(_ body: String) -> String? {
     return first > 0 ? lines[first - 1] : nil
 }
 
-private struct QuestionCard: View {
+struct QuestionCard: View {
     var item: ItemInfo
     var count: Int
     var index: Int
@@ -1234,7 +1239,7 @@ private struct QuestionCard: View {
     }
 }
 
-private struct KeyHint: View {
+struct KeyHint: View {
     var keys: [String]
     var body: some View {
         HStack(spacing: 6) {
