@@ -82,8 +82,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             DispatchQueue.main.async { Settings.shared.applyAppearance() }
         }.store(in: &bag)
         Settings.shared.$showInDock.combineLatest(Settings.shared.$menuBar).dropFirst().sink { _, _ in
-            DispatchQueue.main.async { NSApp.setActivationPolicy(Settings.shared.regularApp ? .regular : .accessory) }
+            DispatchQueue.main.async { AppDelegate.applyPolicy() }
         }.store(in: &bag)
+        // Opening Reflex through Launch Services (see activateSelf) makes it a
+        // Dock app again, and nothing would undo it: whenever it activates or
+        // a window closes, it goes back to what Settings say.
+        for name in [NSApplication.didBecomeActiveNotification, NSWindow.willCloseNotification] {
+            NotificationCenter.default.addObserver(forName: name, object: nil, queue: .main) { _ in
+                DispatchQueue.main.async { AppDelegate.applyPolicy() }
+            }
+        }
         Settings.shared.$menuBar.dropFirst().removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async {
                 guard let self else { return }
@@ -887,6 +895,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// event is ours, not the user's).
     static var selfActivatedAt = Date.distantPast
 
+    /// In the Dock and ⌘Tab, or menu bar only, as Settings say.
+    static func applyPolicy() {
+        let want: NSApplication.ActivationPolicy = Settings.shared.regularApp ? .regular : .accessory
+        if NSApp.activationPolicy() != want { NSApp.setActivationPolicy(want) }
+    }
+
     static func activateSelf() {
         NSApp.activate()
         guard !NSApp.isActive else { return }
@@ -894,7 +908,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let config = NSWorkspace.OpenConfiguration()
         config.activates = true
         config.addsToRecentItems = false
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config)
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: config) { _, _ in
+            DispatchQueue.main.async { applyPolicy() }
+        }
     }
 
     /// A session ended from Reflex: its terminal window goes too.
