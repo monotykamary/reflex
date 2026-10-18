@@ -317,8 +317,8 @@ private struct GeneralPane: View {
                     RowLabel("Appearance", "Reflex's surfaces follow macOS, or stay light or dark.")
                 }
                 Toggle(isOn: $s.showInDock) {
-                    RowLabel("Show in the Dock and ⌘Tab", s.menuBar ? "Off while the rail lives in the menu bar (see Rail)."
-                        : "When off, Reflex lives in the menu bar and at the edge.")
+                    RowLabel("Show in the Dock and ⌘Tab", s.menuBar ? "Off while the rail lives in the menu bar (see Rail), except while a terminal window is open."
+                        : "When off, Reflex lives in the menu bar and at the edge, and in the Dock only while a terminal window is open.")
                 }
                 .disabled(s.menuBar)
                 LabeledContent {

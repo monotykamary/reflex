@@ -933,9 +933,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// event is ours, not the user's).
     static var selfActivatedAt = Date.distantPast
 
-    /// In the Dock and ⌘Tab, or menu bar only, as Settings say.
+    /// In the Dock and ⌘Tab, or menu bar only, as Settings say. Without a
+    /// Dock icon, Reflex still takes one while an agent's terminal window is
+    /// open, so ⌘Tab and the Dock can bring it back; it goes when the last does.
     static func applyPolicy() {
-        let want: NSApplication.ActivationPolicy = Settings.shared.regularApp ? .regular : .accessory
+        let terminals = !(current?.popouts.isEmpty ?? true)
+        let want: NSApplication.ActivationPolicy = Settings.shared.regularApp || terminals ? .regular : .accessory
         if NSApp.activationPolicy() != want { NSApp.setActivationPolicy(want) }
     }
 
@@ -1006,6 +1009,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 session.detach()
                 self?.popouts[pane] = nil
                 self?.terminals[pane] = nil
+                AppDelegate.applyPolicy()
             }
         }
         // Clicking between terminals counts as switching, for the bar's order.
@@ -1014,6 +1018,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         popouts[pane] = w
         terminals[pane] = session
+        AppDelegate.applyPolicy()
         w.makeFirstResponder(session.view)
         // Shown the way an open one is brought back: activation is cooperative,
         // and a new window asked for once would open behind the app you're in.
