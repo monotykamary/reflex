@@ -987,6 +987,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             bringForward(w)
             return
         }
+        NSLog("Reflex: new terminal window for %@", pane)
         let session = TerminalSession(pane: pane)
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 540),
                          styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],

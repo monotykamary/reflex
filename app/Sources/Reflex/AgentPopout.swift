@@ -13,6 +13,11 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     let view: AgentTerminalView
     @Published var attached = false
     @Published var ended = false
+    /// Ended because another window (or terminal) has this agent: herdr
+    /// gives a terminal to one attached client at a time.
+    @Published var elsewhere = false
+    /// Where the attach script says why it stopped.
+    private let why = FileManager.default.temporaryDirectory.appendingPathComponent("reflex-attach-\(UUID().uuidString)")
     /// The link under the pointer, for the ⌘-click hint, and where the
     /// pointer found it (top-left origin, in the window's content).
     @Published var link: (url: String, at: CGPoint)?
@@ -51,18 +56,29 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     }
 
     /// Attach, retrying quietly: Herdr refuses an attach while a read is in
-    /// flight. A terminal takes one attached client; if another holds it (a
-    /// window left behind by a Reflex that was killed or crashed), take over:
-    /// this window is where you asked to see it.
-    func attach() {
+    /// flight. A terminal takes one attached client. One left behind by a
+    /// Reflex that was killed or crashed is ended first (see endOrphans); one
+    /// that is live — another window — keeps it, and this window says so and
+    /// offers to take it (`takeover`), rather than the two taking it in turns.
+    func attach(takeover: Bool = false, reason: String) {
+        NSLog("Reflex: attach %@ (%@%@)", pane, reason, takeover ? ", taking over" : "")
         ended = false
+        elsewhere = false
         view.keyFlags = [0]
+        TerminalSession.endOrphans(pane: pane)
+        try? FileManager.default.removeItem(at: why)
         let script = """
         err=$(mktemp -t reflex-attach)
-        takeover=""
         for i in 1 2 3 4 5 6 7 8 9 10; do
-          herdr agent attach "$1" $takeover 2>"$err" && { rm -f "$err"; exit 0; }
-          if grep -q "already has an attached client" "$err"; then takeover=--takeover; continue; fi
+          herdr agent attach "$1" $3 2>"$err"; status=$?
+          # Taken by another window, or held by one (a client just ended may
+          # still hold it for a moment: ask again a few times first).
+          if grep -q "taken over" "$err"; then echo elsewhere > "$2"; rm -f "$err"; exit 1; fi
+          [ $status = 0 ] && { rm -f "$err"; exit 0; }
+          if grep -q "already has an attached client" "$err"; then
+            [ $i -lt 4 ] && { sleep 0.3; continue; }
+            echo elsewhere > "$2"; rm -f "$err"; exit 1
+          fi
           grep -q retry "$err" || { cat "$err"; rm -f "$err"; exit 1; }
           printf '\\033[2J\\033[H'; sleep 0.3
         done
@@ -71,19 +87,43 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         var env = Daemon.shared.childEnvironment()
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        view.startProcess(executable: "/bin/sh", args: ["-c", script, "reflex-attach", pane],
+        view.startProcess(executable: "/bin/sh", args: ["-c", script, "reflex-attach", pane, why.path, takeover ? "--takeover" : ""],
                           environment: env.map { "\($0.key)=\($0.value)" })
         attached = true
     }
 
     func detach() {
-        // The attach runs in its own session (setsid): end the whole group, as
-        // herdr's client outlives a closed terminal and would keep the pane.
-        if attached, let pid = view.process?.shellPid, pid > 0 { kill(-pid, SIGTERM) }
+        // The attach runs in its own session (setsid): end the whole group.
+        // herdr's client ignores SIGTERM and could outlive the window,
+        // keeping the pane from the next one.
+        if attached, let pid = view.process?.shellPid, pid > 0 { kill(-pid, SIGKILL) }
         if attached { view.terminate() }
         attached = false
+        try? FileManager.default.removeItem(at: why)
         TerminalScroll.views[ObjectIdentifier(view)] = nil
         TerminalSelect.toAgent[ObjectIdentifier(view)] = nil
+    }
+
+    /// Attach scripts for this pane whose Reflex is gone (killed, crashed):
+    /// their parent is launchd. Their clients would hold the terminal.
+    static func endOrphans(pane: String) {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/ps")
+        p.arguments = ["-axo", "pid=,ppid=,command="]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return }
+        let text = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        p.waitUntilExit()
+        for line in text.split(separator: "\n") {
+            let f = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
+            guard f.count == 3, f[1] == "1", let pid = Int32(f[0]),
+                  f[2].hasPrefix("/bin/sh -c "), f[2].contains(" reflex-attach \(pane) ") || f[2].hasSuffix(" reflex-attach \(pane)")
+            else { continue }
+            NSLog("Reflex: ending an orphaned attach to %@ (%d)", pane, pid)
+            kill(-pid, SIGKILL)
+        }
     }
 
     // MARK: LocalProcessTerminalViewDelegate
@@ -93,7 +133,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
         Task { @MainActor in
+            let elsewhere = (try? String(contentsOf: self.why, encoding: .utf8))?.hasPrefix("elsewhere") == true
+            NSLog("Reflex: attach to %@ ended%@", self.pane, elsewhere ? " (open elsewhere)" : "")
             self.attached = false
+            self.elsewhere = elsewhere
             withAnimation(Motion.enter) { self.ended = true }
         }
     }
@@ -451,8 +494,15 @@ struct AgentPopout: View {
                     .padding(.bottom, 6)
                 if session.ended {
                     VStack(spacing: 10) {
-                        Text("Detached from \(agent?.kind ?? "the agent")").font(Type.title)
-                        Button("Reattach") { session.attach() }.buttonStyle(.glassProminent)
+                        if session.elsewhere {
+                            Text("Open in another window").font(Type.title)
+                            Text("herdr shows \(agent?.kind ?? "an agent") in one window at a time.")
+                                .font(.system(size: 12)).foregroundStyle(Ink.dim)
+                            Button("Take It Back") { session.attach(takeover: true, reason: "take back") }.buttonStyle(.glassProminent)
+                        } else {
+                            Text("Detached from \(agent?.kind ?? "the agent")").font(Type.title)
+                            Button("Reattach") { session.attach(reason: "reattach") }.buttonStyle(.glassProminent)
+                        }
                     }
                     .padding(18)
                     .raySurface(RoundedRectangle(cornerRadius: 18, style: .continuous))
@@ -464,7 +514,7 @@ struct AgentPopout: View {
         .environment(\.colorScheme, theme.isDark ? .dark : .light)
         .ignoresSafeArea(edges: .top)
         .frame(minWidth: 520, minHeight: 320)
-        .onAppear { session.attach() }
+        .onAppear { session.attach(reason: "window opened") }
         // An agent takes the mouse; the shell it leaves behind gives it back.
         .onChange(of: agent == nil, initial: true) { _, gone in TerminalSelect.set(session.view, agent: !gone) }
         .onDisappear { session.detach() }
