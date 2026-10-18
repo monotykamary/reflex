@@ -65,9 +65,16 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
   offers OpenRouter, Vercel and [SubQ Snap](https://docs.subq.ai/), which needs
   jev-fabric 0.7 or later; each provider keeps its own key. Setup shows the
   jev-fabric version you have and offers **Update** when a newer release is
-  out or the provider needs one (it asks GitHub for the newest release only
-  while Setup or Routing is open). Without them everything else works and you
+  out or the provider needs one. Without them everything else works and you
   pick where requests go.
+- Updates: once at launch and then daily, Reflex checks for newer herdr and
+  jev-fabric releases (herdr's `latest.json`, GitHub's latest jev-fabric) next
+  to its own. One that's out shows like a Reflex update: a dot on the menu bar
+  icon, a row in the menu bar panel, a button on the rail, and **Update** in
+  Settings → Setup. herdr updates with `herdr update`, but its running server
+  keeps the old version until it restarts, and restarting stops every agent
+  (herdr resumes the ones it can). So Reflex offers **Restart herdr…** and asks
+  first; it never restarts herdr by itself.
 - For the phone: [Tailscale](https://tailscale.com) on the Mac and the phone
   (the Mac app, Homebrew or a headless `tailscaled` all work).
 

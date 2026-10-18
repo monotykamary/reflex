@@ -109,6 +109,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Updater.shared.$pending.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.updateStatusTitle() }
         }.store(in: &bag)
+        Onboarding.shared.$updates.removeDuplicates().sink { [weak self] _ in
+            DispatchQueue.main.async { self?.updateStatusTitle() }
+        }.store(in: &bag)
         MenuBarModel.shared.$size.removeDuplicates().sink { [weak self] _ in
             DispatchQueue.main.async { self?.placeMenuPanel() }
         }.store(in: &bag)
@@ -344,7 +347,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// would show: questions waiting (amber) and agents working (blue).
     private func updateStatusTitle() {
         guard let button = status?.button else { return }
-        let waiting = Updater.shared.pending != nil
+        let waiting = Updater.shared.pending != nil || !Onboarding.shared.updates.isEmpty
         if waitingShown != waiting {
             waitingShown = waiting
             button.image = AppDelegate.statusIcon(update: waiting)
@@ -561,6 +564,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         Pairing.shared.stop()
         KeepAwake.shared.start()
         Updater.start()
+        Onboarding.shared.startChecks()
         BackgroundWatch.shared.start()
         Store.shared.watching = { [weak self] in
             self?.popouts.first { $0.value.isKeyWindow }?.key

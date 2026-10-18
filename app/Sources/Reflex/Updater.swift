@@ -37,7 +37,9 @@ final class Updater: NSObject, ObservableObject, SPUStandardUserDriverDelegate {
     static var available: Bool { shared.controller != nil }
 
     /// Ask now; with an update already waiting, bring its window forward.
+    /// herdr and jev-fabric are asked about too (their reminders sit beside this one).
     static func check() {
+        Onboarding.shared.checkTools()
         NSApp.activate()
         shared.controller?.checkForUpdates(nil)
     }

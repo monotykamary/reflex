@@ -339,6 +339,7 @@ struct Rail: View {
     @ObservedObject var settings = Settings.shared
     @ObservedObject var inbox = InboxModel.shared
     @ObservedObject var updater = Updater.shared
+    @ObservedObject var tools = Onboarding.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @Namespace private var glass
     var openInbox: () -> Void
@@ -487,8 +488,10 @@ struct Rail: View {
             .padding(.vertical, 4)
             .raySurface(Capsule())
 
-            if let v = updater.pending {
-                RoundButton(help: "Update to \(v)", action: Updater.check) {
+            if updater.pending != nil || !tools.updates.isEmpty {
+                // Reflex's own update first; herdr's and jev-fabric's are in Setup.
+                RoundButton(help: updater.pending.map { "Update to \($0)" } ?? tools.updates.map(\.title).joined(separator: "\n"),
+                            action: { if updater.pending != nil { Updater.check() } else { AppDelegate.current?.showSettings(pane: .setup) } }) {
                     Image(systemName: "arrow.down.circle.fill").font(.system(size: 17)).foregroundStyle(Tone.done)
                 }
                 .transition(.scale(scale: 0.6).combined(with: .opacity))
@@ -497,6 +500,7 @@ struct Rail: View {
             Menu {
                 Button("Take Reflex with You…", systemImage: "iphone", action: openPhone)
                 if Updater.available { Button(updater.menuTitle) { Updater.check() } }
+                ForEach(tools.updates) { u in Button(u.menuTitle) { tools.perform(u) } }
                 Divider()
                 Button("Restart reflexd", action: restart)
                 Button("Open log", action: openLog)

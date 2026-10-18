@@ -705,7 +705,7 @@ private struct RoutingPane: View {
                 .onAppear {
                     if onboarding.ping == .idle { onboarding.test() }
                     onboarding.refresh()
-                    onboarding.askJevLatest()
+                    onboarding.askLatest()
                 }
             Section {
                 LabeledContent {
@@ -1008,10 +1008,20 @@ private struct SetupPane: View {
     var body: some View {
         Form {
             Section { PaneHeader(pane: .setup) }
-                .onAppear { o.refresh(); o.askJevLatest() }
+                .onAppear { o.refresh(); o.readHerdrServer(); o.askLatest() }
             Section("herdr") {
-                CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? nil : o.installDetail(.herdr)) {
-                    installButtons(.herdr)
+                CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? o.herdrDetail : o.installDetail(.herdr),
+                         showAccessory: o.herdrBehind || o.herdrRestartDue) {
+                    if !o.herdrInstalled {
+                        installButtons(.herdr)
+                    } else if o.herdrBehind {
+                        Button(o.working == "herdr" ? "Updating…" : "Update") { o.updateHerdr() }
+                            .disabled(o.working != nil)
+                            .help("herdr update")
+                    } else {
+                        Button(o.working == "herdr-restart" ? "Restarting…" : "Restart herdr…") { o.confirmHerdrRestart() }
+                            .disabled(o.working != nil)
+                    }
                 }
                 CheckRow(ok: o.herdrRunning, title: "herdr running",
                          detail: o.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `herdr` in a terminal.") {

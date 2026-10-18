@@ -27,11 +27,19 @@ final class Onboarding: ObservableObject {
     @Published var piShells = false
     @Published var jevInstalled = false
     /// jev-fabric as installed ("0.7.0"), and the newest release once asked.
-    @Published var jevVersion: String?
-    @Published var jevLatest: String?
+    @Published var jevVersion: String? { didSet { recount() } }
+    @Published var jevLatest: String? { didSet { recount() } }
     /// The binary (and its date) the version was read from.
     private var jevSeen = ""
     private var latestAsked = Date.distantPast
+    /// herdr as installed, as its running server is (it keeps the version it
+    /// started with until it restarts), and the newest release once asked.
+    @Published var herdrVersion: String? { didSet { recount() } }
+    @Published var herdrServer: String? { didSet { recount() } }
+    @Published var herdrLatest: String? { didSet { recount() } }
+    private var herdrSeen = ""
+    /// What's out for herdr and jev-fabric, for the reminders beside Reflex's own.
+    @Published private(set) var updates: [ToolUpdate] = []
     @Published var ping: Ping = .idle
     @Published var installed: Set<String> = []
     @Published var folders: [FolderInfo] = []
@@ -80,7 +88,7 @@ final class Onboarding: ObservableObject {
         poll = Timer.scheduledTimer(withTimeInterval: 1.2, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
         }
-        if step == .jev { test(); askJevLatest() }
+        if step == .jev { test(); askLatest() }
         if step == .projects || step == .jev { Task { await loadFolders() } }
     }
 
@@ -100,7 +108,7 @@ final class Onboarding: ObservableObject {
         forward = s.rawValue >= step.rawValue
         withAnimation(Motion.enter) { step = s }
         if s == .jev, ping == .idle { test() }
-        if s == .jev { askJevLatest() }
+        if s == .jev { askLatest() }
         if s == .projects || s == .jev { Task { await loadFolders() } }
         if s == .done, !(ping.isOK) { test() }
     }
@@ -151,14 +159,15 @@ final class Onboarding: ObservableObject {
     private static func older(_ a: String, than b: String) -> Bool { a.compare(b, options: .numeric) == .orderedAscending }
 
     /// What `--version` says, down to its number.
-    nonisolated static func version(of path: String) -> String? {
+    nonisolated static func version(of path: String, _ args: [String] = ["--", "--version"], env: [String: String]? = nil) -> String? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = ["--", "--version"]
+        p.arguments = args
         let out = Pipe()
         p.standardInput = FileHandle.nullDevice
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
+        if let env { p.environment = env }
         guard (try? p.run()) != nil else { return nil }
         let said = String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
         p.waitUntilExit()
@@ -179,18 +188,160 @@ final class Onboarding: ObservableObject {
         }
     }
 
-    /// Ask GitHub for the newest release: it answers /releases/latest with a
-    /// redirect to that tag. Only while Setup or Routing is open, once an hour.
-    func askJevLatest() {
-        guard jevInstalled, Date().timeIntervalSince(latestAsked) > 3600 else { return }
+    /// Ask for the newest releases, at most once an hour: GitHub answers
+    /// jev-fabric's /releases/latest with a redirect to that tag, and herdr
+    /// publishes latest.json (what `herdr update` reads).
+    func askLatest(force: Bool = false) {
+        guard force || Date().timeIntervalSince(latestAsked) > 3600 else { return }
         latestAsked = Date()
         Task {
-            var r = URLRequest(url: URL(string: "https://github.com/fabric-runtime/jev-fabric/releases/latest")!)
-            r.httpMethod = "HEAD"
-            r.timeoutInterval = 10
-            guard let (_, answer) = try? await URLSession.shared.data(for: r),
-                  let v = answer.url?.lastPathComponent.wholeMatch(of: #/v(\d+\.\d+\.\d+)/#) else { return }
-            jevLatest = String(v.1)
+            if jevInstalled, let v = await Onboarding.jevRelease() { jevLatest = v }
+            if herdrInstalled, let v = await Onboarding.herdrRelease() { herdrLatest = v }
+        }
+    }
+
+    nonisolated static func jevRelease() async -> String? {
+        var r = URLRequest(url: URL(string: "https://github.com/fabric-runtime/jev-fabric/releases/latest")!)
+        r.httpMethod = "HEAD"
+        r.timeoutInterval = 10
+        guard let (_, answer) = try? await URLSession.shared.data(for: r),
+              let v = answer.url?.lastPathComponent.wholeMatch(of: #/v(\d+\.\d+\.\d+)/#) else { return nil }
+        return String(v.1)
+    }
+
+    nonisolated static func herdrRelease() async -> String? {
+        var r = URLRequest(url: URL(string: "https://herdr.dev/latest.json")!)
+        r.timeoutInterval = 10
+        guard let (data, _) = try? await URLSession.shared.data(for: r),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let v = json["version"] as? String, v.wholeMatch(of: #/\d+\.\d+\.\d+/#) != nil else { return nil }
+        return v
+    }
+
+    // MARK: herdr's version
+
+    /// Read again only when the binary changed: `herdr update` replaces it,
+    /// and herdr's own client can update it too.
+    private func readHerdrVersion() {
+        guard let path = Onboarding.path(of: Tool.herdr.rawValue) else { herdrSeen = ""; herdrVersion = nil; return }
+        let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let date = (try? FileManager.default.attributesOfItem(atPath: real))?[.modificationDate] as? Date
+        let seen = "\(real) \(date?.timeIntervalSince1970 ?? 0)"
+        guard seen != herdrSeen else { return }
+        herdrSeen = seen
+        Task.detached {
+            let v = Onboarding.version(of: real, ["--version"])
+            await MainActor.run {
+                guard self.herdrSeen == seen else { return }
+                self.herdrVersion = v
+                self.readHerdrServer()
+            }
+        }
+    }
+
+    /// The running server's version, from `herdr status server`; nil when none runs.
+    func readHerdrServer() {
+        guard let path = Onboarding.path(of: Tool.herdr.rawValue) else { herdrServer = nil; return }
+        let env = Daemon.shared.childEnvironment()
+        Task.detached {
+            let v = Onboarding.version(of: path, Onboarding.herdrArgs(env) + ["status", "server"], env: env)
+            await MainActor.run { self.herdrServer = v }
+        }
+    }
+
+    /// The configured session, as herdr's own flag.
+    nonisolated private static func herdrArgs(_ env: [String: String]) -> [String] {
+        env["HERDR_SESSION"].map { ["--session", $0] } ?? []
+    }
+
+    /// Installed but not what the server runs: it keeps its version until it restarts.
+    var herdrRestartDue: Bool {
+        guard let v = herdrVersion, let r = herdrServer else { return false }
+        return Onboarding.older(r, than: v)
+    }
+
+    var herdrBehind: Bool {
+        guard let v = herdrVersion, let l = herdrLatest else { return false }
+        return Onboarding.older(v, than: l)
+    }
+
+    /// What the herdr row says once it is installed.
+    var herdrDetail: String? {
+        guard let v = herdrVersion else { return nil }
+        if working == Tool.herdr.rawValue { return "Updating…" }
+        if working == "herdr-restart" { return "Restarting herdr…" }
+        if let why = failures[Tool.herdr.rawValue] ?? failures["herdr-restart"] { return "Didn't work: \(why)" }
+        if herdrBehind, let l = herdrLatest { return "This is \(v); \(l) is out." }
+        if herdrRestartDue, let r = herdrServer { return "\(v) is installed, but herdr is still running \(r) until it restarts." }
+        return "Version \(v)."
+    }
+
+    // MARK: Tool updates
+
+    /// Once at launch and then daily, like Reflex's own check, so the
+    /// reminders show without opening Setup.
+    func startChecks() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in self?.checkTools() }
+        Timer.scheduledTimer(withTimeInterval: 24 * 3600, repeats: true) { [weak self] _ in
+            Task { @MainActor in self?.checkTools() }
+        }
+    }
+
+    func checkTools() {
+        refresh()
+        readHerdrServer()
+        askLatest(force: true)
+    }
+
+    private func recount() {
+        var next: [ToolUpdate] = []
+        if herdrBehind, let l = herdrLatest { next.append(ToolUpdate(tool: .herdr, version: l, restart: false)) }
+        else if herdrRestartDue, let v = herdrVersion { next.append(ToolUpdate(tool: .herdr, version: v, restart: true)) }
+        if jevBehind, let l = jevLatest { next.append(ToolUpdate(tool: .jev, version: l, restart: false)) }
+        if next != updates { updates = next }
+    }
+
+    func perform(_ u: ToolUpdate) {
+        if u.restart { confirmHerdrRestart() } else if u.tool == .herdr { updateHerdr() } else { install(.jev) }
+    }
+
+    /// herdr's own updater. It replaces the binary; the running server
+    /// keeps the old version until it restarts (see restartHerdr).
+    func updateHerdr() {
+        guard working == nil else { return }
+        let before = herdrVersion
+        run(Tool.herdr.rawValue, "herdr update") {
+            guard let path = Onboarding.path(of: Tool.herdr.rawValue) else { return "It ran, but herdr isn't in ~/.local/bin." }
+            if let before, Onboarding.version(of: path, ["--version"]) == before { return "It ran, but herdr is still \(before)." }
+            return nil
+        }
+    }
+
+    /// Restarting herdr's server ends every agent's process; herdr then
+    /// reopens your workspaces and resumes the agents it can. So it only
+    /// happens when you say so.
+    func confirmHerdrRestart() {
+        guard working == nil, let v = herdrVersion else { return }
+        let busy = Store.shared.state.agents.filter { $0.status == "working" }.count
+        AppDelegate.activateSelf()
+        let a = NSAlert()
+        a.messageText = "Restart herdr to use \(v)?"
+        a.informativeText = "herdr is still running \(herdrServer ?? "an older version"). Restarting stops every agent; herdr then reopens your workspaces and resumes the agents it can."
+            + (busy == 0 ? "" : busy == 1 ? " One agent is working right now." : " \(busy) agents are working right now.")
+        a.addButton(withTitle: "Restart herdr")
+        a.addButton(withTitle: "Cancel")
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        restartHerdr()
+    }
+
+    private func restartHerdr() {
+        let session = Settings.shared.herdrSession
+        let h = session.isEmpty ? "herdr" : "herdr --session '\(session.replacingOccurrences(of: "'", with: "'\\''"))'"
+        // Stop, wait for it to be gone (up to 10 s), start it detached as HerdrServer does.
+        let script = "\(h) server stop; for i in $(seq 1 50); do \(h) status server 2>/dev/null | grep -q 'status: running' || break; sleep 0.2; done; nohup \(h) server >/dev/null 2>&1 &"
+        run("herdr-restart", script) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { self?.readHerdrServer() }
+            return nil
         }
     }
 
@@ -230,6 +381,7 @@ final class Onboarding: ObservableObject {
         herdrInstalled = Onboarding.which("herdr")
         jevInstalled = Onboarding.which("jev-fabric")
         readJevVersion()
+        readHerdrVersion()
         installed = Set(Onboarding.harnesses.filter { Onboarding.which($0) })
         let home = NSHomeDirectory()
         unintegrated = Onboarding.harnesses.filter { name in
@@ -1234,4 +1386,16 @@ private extension View {
         background((tint ?? .primary).opacity(tint == nil ? 0.07 : 0.12), in: shape)
             .overlay(shape.strokeBorder(.primary.opacity(0.1), lineWidth: 0.5))
     }
+}
+
+/// A newer herdr or jev-fabric, or a herdr installed but not yet running.
+struct ToolUpdate: Equatable, Identifiable {
+    var tool: Onboarding.Tool
+    var version: String
+    /// Installed already; herdr's server runs the old one until it restarts.
+    var restart: Bool
+    var id: String { "\(tool.rawValue) \(version)\(restart ? " restart" : "")" }
+    var title: String { restart ? "herdr \(version) needs a restart" : "\(tool.rawValue) \(version) is available" }
+    var action: String { restart ? "Restart…" : "Update" }
+    var menuTitle: String { restart ? "Restart herdr to Use \(version)…" : "Update \(tool.rawValue) to \(version)" }
 }
