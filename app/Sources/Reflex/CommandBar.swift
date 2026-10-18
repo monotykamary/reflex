@@ -1505,11 +1505,10 @@ private struct CandidateRow: View, Equatable {
                 Text(verbatim: "\(bp / 100)%").font(.system(size: 11, design: .monospaced)).foregroundStyle(.tertiary)
                     .frame(width: 36, alignment: .trailing)
             }
-            if index < 9 {
-                Text(verbatim: "⌘\(index + 1)").font(.system(size: 10.5, weight: .medium, design: .rounded)).foregroundStyle(.tertiary)
-                    .frame(width: 24, alignment: .trailing)
-                    .opacity(selected || hover ? 1 : 0)
-            }
+            // Past ⌘9 the slot stays, empty, so the weights line up down the list.
+            Text(verbatim: index < 9 ? "⌘\(index + 1)" : "").font(.system(size: 10.5, weight: .medium, design: .rounded)).foregroundStyle(.tertiary)
+                .frame(width: 24, alignment: .trailing)
+                .opacity(selected || hover ? 1 : 0)
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
         .background {
