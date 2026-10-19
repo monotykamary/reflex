@@ -15,9 +15,14 @@ final class KeyPanel: NSPanel {
     /// ⌘V before the text field sees it: true when the panel took the paste
     /// (images), false to paste as usual.
     var onPaste: (() -> Bool)?
+    /// ⌘Z the same way: true when the panel took it (the bar bringing back a
+    /// request), false to undo as usual.
+    var onUndo: (() -> Bool)?
     override func performKeyEquivalent(with e: NSEvent) -> Bool {
         if e.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, e.charactersIgnoringModifiers == "v",
            onPaste?() == true { return true }
+        if e.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command, e.charactersIgnoringModifiers == "z",
+           onUndo?() == true { return true }
         return super.performKeyEquivalent(with: e)
     }
     /// ⌫ before the text field sees it: true when the panel took it (the bar

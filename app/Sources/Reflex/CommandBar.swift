@@ -177,6 +177,8 @@ final class CommandModel: ObservableObject {
     }
 
     func reset() {
+        // Let go unsent (Esc, or a request left too long): ⌘Z still has it.
+        if let d = draft { lost = d; Draft.write(d) }
         ticket += 1
         debounce?.cancel()
         queued = false
@@ -216,7 +218,34 @@ final class CommandModel: ObservableObject {
 
     /// The bar went away, the request did not: you clicked into another app
     /// (to copy the next image), or pressed ⌥⌥.
-    func left() { leftAt = Date() }
+    func left() { leftAt = Date(); saveForRestart() }
+
+    /// The last request that went unsent: ⌘Z on an empty bar brings it back,
+    /// after a restart too.
+    @Published private(set) var lost: Draft? = Draft.read()
+
+    /// What is in the bar, while it is a request still to send.
+    private var draft: Draft? {
+        guard hasDraft, phase == .typing || isFailed, mode == .ask || !attachments.isEmpty else { return nil }
+        return Draft(text: text, images: attachments.map(\.url.path), harness: harness)
+    }
+
+    /// Reflex quitting (an update, a restart): what is in the bar is the one
+    /// to bring back next time.
+    func saveForRestart() { Draft.write(draft ?? lost) }
+
+    @discardableResult
+    func restore() -> Bool {
+        guard let d = lost, text.isEmpty, attachments.isEmpty else { return false }
+        lost = nil
+        harness = d.harness ?? harness
+        attachments = d.images.compactMap { Attachments.file(URL(fileURLWithPath: $0)) }
+        text = d.text
+        Draft.write(draft)
+        focusTick += 1
+        schedule()
+        return true
+    }
 
     /// The bar opens with what was left in it, or fresh. A request waits
     /// until it is sent or Esc lets it go. A lookup is only worth a minute
@@ -931,6 +960,8 @@ final class CommandModel: ObservableObject {
     private func done(_ label: String, ticket: Int? = nil) {
         guard ticket ?? self.ticket == self.ticket else { return }
         phase = .sent(label)
+        // Sent: no longer one to bring back after a restart.
+        Draft.write(lost)
         arrivals += 1
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.7) { [weak self] in
             if case .sent = self?.phase { self?.close() }
@@ -989,6 +1020,33 @@ final class CommandModel: ObservableObject {
         if naming { naming = false; focusTick += 1; return }
         if case .failed = phase { phase = .typing; focusTick += 1; return }
         close()
+    }
+}
+
+/// A request's words, images (their files) and harness, as kept for ⌘Z.
+struct Draft: Codable, Equatable {
+    var text: String
+    var images: [String]
+    var harness: String?
+
+    /// "fix the login page…" + 2 images
+    var summary: String {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines).replacingOccurrences(of: "\n", with: " ")
+        let short = words.count > 36 ? words.prefix(36) + "…" : words
+        let pics = images.isEmpty ? "" : "\(images.count) image\(images.count == 1 ? "" : "s")"
+        if short.isEmpty { return pics }
+        return pics.isEmpty ? "“\(short)”" : "“\(short)” + \(pics)"
+    }
+
+    private static var file: URL { Settings.supportDir.appendingPathComponent("draft.json") }
+
+    static func read() -> Draft? {
+        (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode(Draft.self, from: $0) }
+    }
+
+    static func write(_ d: Draft?) {
+        guard let d, let data = try? JSONEncoder().encode(d) else { try? FileManager.default.removeItem(at: file); return }
+        try? data.write(to: file, options: .atomic)
     }
 }
 
@@ -1406,6 +1464,11 @@ struct CommandBar: View {
                         Text("Jev isn't answering — ↑↓ to choose · Settings → Routing").foregroundStyle(Tone.blocked).lineLimit(1)
                             .help(j.error ?? "")
                     }
+                } else if model.text.isEmpty, model.attachments.isEmpty, let d = model.lost {
+                    Button { model.restore() } label: { hint("⌘Z", "bring back \(d.summary)") }
+                        .buttonStyle(.plain)
+                        .help("The last request you didn't send")
+                    hint("/", "commands")
                 } else if model.mode == .search {
                     hint("⏎", "open")
                     if model.selected?.kind == .session { hint("⌘⌫", "close") }
