@@ -758,9 +758,11 @@ struct AgentPopout: View {
     private var header: some View {
         HStack(spacing: 8) {
             AgentGlyph(status: agent?.status ?? "unknown", size: 10, pulse: store.pulses[session.pane] ?? 0, machine: Machines.machine(of: session.pane))
-            Text(agent.map { $0.label } ?? session.pane)
+            Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
+            // Another Mac's agent wears its name here, as in the rail.
+            MachineChip(machine: Machines.machine(of: session.pane))
             Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
                 .font(.system(size: 12))
                 .opacity(0.55)
