@@ -73,6 +73,9 @@ struct Client {
         await post("/api/note", ["pane": pane, "agent": agent, "title": title, "body": body])
     }
     func focus(_ pane: String) async { await post("/api/focus", ["pane": pane]) }
+    /// Bytes into a pane as typed (herdr pane.send_text): a shared terminal's keys.
+    @discardableResult
+    func type(_ pane: String, _ text: String) async -> Bool { await post("/api/text", ["pane": pane, "text": text]) }
     /// Bring an earlier session back in a new herdr workspace (resume, fork
     /// or attach), then submit `text` there if it is not empty.
     func resume(_ p: PastSession, mode: String, text: String) async throws -> PendingInfo {

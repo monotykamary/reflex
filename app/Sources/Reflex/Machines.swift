@@ -146,6 +146,10 @@ final class Machines: @unchecked Sendable {
         lock.unlock()
         for pid in running { kill(pid, SIGTERM) }
         try? "".write(to: Self.dir.appendingPathComponent("list"), atomically: true, encoding: .utf8)
+        // No socket file outlives its tunnel: one left would look connected.
+        for name in (try? FileManager.default.contentsOfDirectory(atPath: Self.dir.path)) ?? [] where name.hasSuffix(".sock") {
+            try? FileManager.default.removeItem(at: Self.dir.appendingPathComponent(name))
+        }
     }
 
     /// herdr's machines, again: a new one gets a tunnel, a removed or disabled
@@ -227,6 +231,9 @@ final class Machines: @unchecked Sendable {
             backOff(t)
             return
         }
+        // A socket file left from before (a crash) would pass for this tunnel.
+        try? FileManager.default.removeItem(atPath: api)
+        try? FileManager.default.removeItem(atPath: client)
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         p.arguments = ["-N", "-o", "BatchMode=yes", "-o", "ExitOnForwardFailure=yes",

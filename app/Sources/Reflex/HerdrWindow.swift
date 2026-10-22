@@ -11,6 +11,11 @@ enum HerdrWindow {
         Task {
             await Client.local.focus(pane)
             if let m = MachinesModel.shared.row(Machines.machine(of: pane)) {
+                // Its herdr already open here (`herdr --remote <target>`): that window.
+                if let app = hostOfClient(remote: m.target) {
+                    app.activate()
+                    return
+                }
                 let session = m.session.isEmpty || m.session == "default" ? "" : " --session \(quoted(m.session))"
                 openClient("herdr --remote \(quoted(m.target))" + session)
             } else if let app = hostOfClient() {
@@ -24,12 +29,13 @@ enum HerdrWindow {
 
     private static func quoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
-    /// The app (Ghostty, Terminal, …) whose process tree runs a herdr TUI client.
-    private static func hostOfClient() -> NSRunningApplication? {
+    /// The app (Ghostty, Terminal, …) whose process tree runs a herdr TUI
+    /// client: this Mac's, or with `remote`, one attached to that machine.
+    private static func hostOfClient(remote: String? = nil) -> NSRunningApplication? {
         let rows = processes()
         let byPid = Dictionary(rows.map { ($0.pid, $0) }, uniquingKeysWith: { a, _ in a })
         let mine = ProcessInfo.processInfo.processIdentifier
-        for r in rows where isClient(r.command) {
+        for r in rows where isClient(r.command, remote: remote) {
             var pid = r.ppid
             var hops = 0
             while pid > 1 && hops < 32 {
@@ -46,11 +52,22 @@ enum HerdrWindow {
     }
 
     /// `herdr`, `herdr --session x`, `herdr session attach x` — not the server
-    /// or one-shot API commands, and not Reflex's own terminal attaches.
-    private static func isClient(_ command: String) -> Bool {
+    /// or one-shot API commands, and not Reflex's own terminal attaches. With
+    /// `remote`: `herdr --remote <remote>` only; without, not those.
+    private static func isClient(_ command: String, remote: String? = nil) -> Bool {
         let parts = command.split(separator: " ").map(String.init)
         guard let exe = parts.first, (exe as NSString).lastPathComponent == "herdr" else { return false }
-        let args = Array(parts.dropFirst()).filter { !$0.hasPrefix("-") }
+        let to = parts.firstIndex(of: "--remote").flatMap { parts.indices.contains($0 + 1) ? parts[$0 + 1] : nil }
+        guard to == remote else { return false }
+        // The words left once options and their values are gone: `--session x`
+        // names a session, not a subcommand.
+        var args: [String] = []
+        var skip = false
+        for p in parts.dropFirst() {
+            if skip { skip = false; continue }
+            if ["--session", "--remote", "--remote-keybindings", "--machine"].contains(p) { skip = true; continue }
+            if !p.hasPrefix("-") { args.append(p) }
+        }
         guard let verb = args.first else { return true }
         if verb == "session" { return args.dropFirst().first == "attach" }
         return false

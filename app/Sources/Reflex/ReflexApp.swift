@@ -187,6 +187,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
+            case let s where s.hasPrefix("pane:"): self.showPane(String(s.dropFirst(5)))
+            // Dev: open a terminal, close it, open it again (a reopen's attach).
+            case let s where s.hasPrefix("reopen:"):
+                let pane = String(s.dropFirst(7))
+                self.showPane(pane)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 12) { self.popouts[pane]?.close() }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { self.showPane(pane) }
             case let s where s.hasPrefix("settings:"): self.showSettings(pane: SettingsPane(rawValue: String(s.dropFirst(9))) ?? .general)
             case "railclick":
                 // Dev: the rail as its column, then the dots "clicked" a moment later.
@@ -988,7 +995,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             b.orderOut(nil)
             if case .sent = command.phase { command.reset() } else { command.left() }
         }
-        if let w = popouts[pane] {
+        // Bookkeeping aside, a terminal already open for it is the one to show.
+        if let w = popouts[pane] ?? NSApp.windows.first(where: { $0.identifier?.rawValue == "terminal:" + pane && ($0.isVisible || $0.isMiniaturized) }) {
+            popouts[pane] = w
             bringForward(w)
             return
         }
@@ -1006,6 +1015,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let titlebar = w.frame.height - w.contentLayoutRect.height
         w.contentView = NSHostingView(rootView: AgentPopout(session: session, titlebar: max(titlebar, 28)))
         w.isReleasedWhenClosed = false
+        w.identifier = NSUserInterfaceItemIdentifier("terminal:" + pane)
         // One window per session — never merged into tabs, whatever the
         // system's "prefer tabs" setting says.
         w.tabbingMode = .disallowed
@@ -1014,11 +1024,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             w?.backgroundColor = NSColor(hex: t.background)
             w?.appearance = NSAppearance(named: t.isDark ? .darkAqua : .aqua)
         }.store(in: &bag)
+        let closing = ObjectIdentifier(w)
         NotificationCenter.default.addObserver(forName: NSWindow.willCloseNotification, object: w, queue: .main) { [weak self] _ in
             Task { @MainActor in
                 session.detach()
-                self?.popouts[pane] = nil
-                self?.terminals[pane] = nil
+                // Reopened meanwhile: that window is the pane's now, keep it.
+                if let open = self?.popouts[pane], ObjectIdentifier(open) == closing { self?.popouts[pane] = nil }
+                if self?.terminals[pane] === session { self?.terminals[pane] = nil }
                 AppDelegate.applyPolicy()
             }
         }

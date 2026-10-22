@@ -9,9 +9,11 @@ import SwiftUI
 //
 // herdr gives a terminal to one attached client at a time. When another has
 // it — another window, or the same agent open on the Mac it runs on — this one
-// watches instead: `herdr terminal session observe`, a live read-only mirror
-// any number of clients can keep, with Take Over a click away. Taken from,
-// it goes back to watching rather than going blank.
+// shares it instead: `herdr terminal session observe` draws it live (any
+// number of clients can), and what you type goes in through herdr's
+// pane.send_text, so both windows see and type at once. The attached one sets
+// the size; Take Over makes it this one. Taken from, it goes back to sharing
+// rather than going blank.
 
 @MainActor
 final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalViewDelegate {
@@ -22,8 +24,13 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// Ended because another window (or terminal) has this agent: herdr
     /// gives a terminal to one attached client at a time.
     @Published var elsewhere = false
-    /// Showing a live mirror, read-only, while another client has the terminal.
+    /// Sharing: a live mirror while another client has the terminal; keys
+    /// go in through herdr's API (see type(_:)).
     @Published var watching = false
+    /// Keys typed while sharing, not yet sent, and whether a send is out:
+    /// sent in order, a burst as one.
+    private var outbox: [UInt8] = []
+    private var sending = false
     /// The process ending now was ended on purpose, to start `next`.
     private var next: (() -> Void)?
     /// Where the attach script says why it stopped.
@@ -39,6 +46,11 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
+        view.onInput = { [weak self] data in
+            guard let self, self.watching else { return false }
+            self.type(data)
+            return true
+        }
         view.onLink = { [weak self] url, at in self?.link = url.map { ($0, at) } }
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
@@ -80,6 +92,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         TerminalSession.endOrphans(pane: pane)
         try? FileManager.default.removeItem(at: why)
         let script = """
+        \(Self.waitForTunnel)
         err=$(mktemp -t reflex-attach)
         for i in 1 2 3 4 5 6 7 8 9 10; do
           herdr agent attach "$4" $3 2>"$err"; status=$?
@@ -88,10 +101,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
           if grep -q "taken over" "$err"; then echo elsewhere > "$2"; rm -f "$err"; exit 1; fi
           [ $status = 0 ] && { rm -f "$err"; exit 0; }
           if grep -q "already has an attached client" "$err"; then
-            [ $i -lt 4 ] && { sleep 0.3; continue; }
+            [ $i -lt 2 ] && { sleep 0.2; continue; }
             echo elsewhere > "$2"; rm -f "$err"; exit 1
           fi
-          grep -q retry "$err" || { cat "$err"; rm -f "$err"; exit 1; }
+          # A window not laid out yet (opened at launch) is a 0×0 terminal, and
+          # another Mac's tunnel may be reconnecting: both pass in a moment.
+          grep -q -e retry -e "zero-sized" -e server_not_running "$err" || { cat "$err"; { printf 'error '; cat "$err"; } > "$2"; rm -f "$err"; exit 1; }
           printf '\\033[2J\\033[H'; sleep 0.3
         done
         rm -f "$err"; exit 1
@@ -99,6 +114,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.startProcess(executable: "/bin/sh", args: ["-c", script, "reflex-attach", pane, why.path, takeover ? "--takeover" : "", herdrPane],
                           environment: herdrEnv())
         attached = true
+        watchExit()
     }
 
     /// Watch without taking the terminal: herdr streams the screen as ANSI
@@ -130,6 +146,56 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                           environment: herdrEnv())
         attached = true
         watching = true
+        watchExit()
+    }
+
+    private func type(_ data: ArraySlice<UInt8>) {
+        outbox.append(contentsOf: data)
+        guard !sending else { return }
+        sending = true
+        Task { @MainActor in
+            while !outbox.isEmpty {
+                let chunk = outbox
+                outbox = []
+                await Client.local.type(pane, String(decoding: chunk, as: UTF8.self))
+            }
+            sending = false
+        }
+    }
+
+    /// The process started last, until its end is handled.
+    private var live: pid_t = 0
+
+    /// SwiftTerm misses a process that ends at once: it watches for the exit
+    /// only after the fork, and its end-of-output path doesn't report it. A
+    /// quick failure (a tunnel not up yet) left the window blank. So look too:
+    /// gone without a word, it is reaped here and handled as an end.
+    private func watchExit() {
+        guard let pid = view.process?.shellPid, pid > 0 else { return }
+        live = pid
+        check(pid)
+    }
+
+    private func check(_ pid: pid_t) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self, self.live == pid else { return }
+            var status: Int32 = 0
+            if waitpid(pid, &status, WNOHANG) == pid || self.view.process?.running == false {
+                NSLog("Reflex: %@ ended unreported; handling it", self.pane)
+                self.handleEnd()
+            } else {
+                self.check(pid)
+            }
+        }
+    }
+
+    /// SwiftTerm says a process ended before it lets go of it, and ignores a
+    /// start until it has: wait for that (briefly) before starting the next.
+    private func whenStopped(_ then: @escaping () -> Void, tries: Int = 40) {
+        guard view.process?.running == true, tries > 0 else { return then() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            self?.whenStopped(then, tries: tries - 1)
+        }
     }
 
     /// Ends what runs now and starts `then` once it has: true if it had to.
@@ -139,6 +205,18 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         kill(-pid, SIGKILL)
         return true
     }
+
+    /// Another Mac's terminal opened while its tunnel is (re)connecting, at
+    /// launch say: wait until its herdr answers through it (a socket file can
+    /// be left from before; `status server` succeeds either way, so read it),
+    /// a little, before trying.
+    private static let waitForTunnel = """
+    if [ -n "$HERDR_SOCKET_PATH" ]; then
+      i=0; until herdr status server --json 2>/dev/null | grep -q '"running":true'; do
+        [ $i = 0 ] && printf 'Connecting…\\r'; i=$((i+1)); [ $i -ge 40 ] && break; sleep 0.5
+      done
+    fi
+    """
 
     /// The pane's id in its own herdr (another Mac's, through the tunnel).
     private var herdrPane: String { Machines.route(pane)?.pane ?? pane }
@@ -164,6 +242,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         attached = false
         watching = false
         next = nil
+        // What was killed here ends unheard: nothing comes next.
+        live = 0
         try? FileManager.default.removeItem(at: why)
         TerminalScroll.views[ObjectIdentifier(view)] = nil
         TerminalSelect.toAgent[ObjectIdentifier(view)] = nil
@@ -198,28 +278,36 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     nonisolated func setTerminalTitle(source: LocalProcessTerminalView, title: String) {}
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
-        Task { @MainActor in
-            self.attached = false
-            if let next = self.next {
-                self.next = nil
-                next()
-                return
-            }
-            if self.watching {
-                NSLog("Reflex: watching %@ ended", self.pane)
-                self.watching = false
-                withAnimation(Motion.enter) { self.ended = true }
-                return
-            }
-            let elsewhere = (try? String(contentsOf: self.why, encoding: .utf8))?.hasPrefix("elsewhere") == true
-            NSLog("Reflex: attach to %@ ended%@", self.pane, elsewhere ? " (open elsewhere)" : "")
-            // Someone else has it: keep it in view, read-only.
-            if elsewhere {
-                self.watch(reason: "open elsewhere")
-                return
-            }
-            withAnimation(Motion.enter) { self.ended = true }
+        Task { @MainActor in self.handleEnd() }
+    }
+
+    /// The process ended (SwiftTerm said so, or watchExit saw it): start what
+    /// comes next — the one asked for, sharing when another has the terminal,
+    /// or the ended state.
+    private func handleEnd() {
+        guard live != 0 else { return }
+        live = 0
+        attached = false
+        if let next {
+            self.next = nil
+            whenStopped(next)
+            return
         }
+        if watching {
+            NSLog("Reflex: watching %@ ended", pane)
+            watching = false
+            withAnimation(Motion.enter) { ended = true }
+            return
+        }
+        let said = (try? String(contentsOf: why, encoding: .utf8)) ?? ""
+        let elsewhere = said.hasPrefix("elsewhere")
+        NSLog("Reflex: attach to %@ ended%@", pane, elsewhere ? " (open elsewhere)" : said.isEmpty ? "" : ": " + said.trimmingCharacters(in: .whitespacesAndNewlines))
+        // Another window or Mac has it: share it.
+        if elsewhere {
+            whenStopped { [weak self] in self?.watch(reason: "open elsewhere") }
+            return
+        }
+        withAnimation(Motion.enter) { ended = true }
     }
 }
 
@@ -368,6 +456,14 @@ final class AgentTerminalView: LocalProcessTerminalView {
     /// reports it, with where the pointer met it, for the hint under the
     /// pointer. The clicks are TerminalLinks'.
     var onLink: ((String?, CGPoint) -> Void)?
+    /// Keys and pastes on their way to the process: true takes them (a shared
+    /// terminal types through herdr instead).
+    var onInput: ((ArraySlice<UInt8>) -> Bool)?
+
+    override func send(source: TerminalView, data: ArraySlice<UInt8>) {
+        if let onInput, onInput(data) { return }
+        super.send(source: source, data: data)
+    }
     private(set) var hovered: String?
     private var hoverArea: NSTrackingArea?
     /// Owns the tracking area: SwiftTerm's own mouseMoved would also send
@@ -574,21 +670,22 @@ struct AgentPopout: View {
                     .padding(.trailing, 4)
                     .padding(.bottom, 6)
                 if session.watching {
+                    // Top right, small: the input box is at the bottom, and you type here too.
                     VStack {
-                        Spacer()
-                        HStack(spacing: 10) {
-                            Image(systemName: "eye").font(.system(size: 12, weight: .semibold))
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text("Watching").font(.system(size: 12.5, weight: .semibold))
-                                Text("Another window or Mac has \(agent?.kind ?? "the agent") — you see it live, it takes the keys.")
-                                    .font(.system(size: 11)).foregroundStyle(Ink.dim)
+                        HStack(spacing: 8) {
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Image(systemName: "rectangle.on.rectangle").font(.system(size: 11, weight: .semibold))
+                                Text("Shared").font(.system(size: 12, weight: .semibold))
+                                Button("Take Over") { session.attach(takeover: true, reason: "take over") }
+                                    .buttonStyle(.glassProminent).controlSize(.small)
                             }
-                            Spacer(minLength: 8)
-                            Button("Take Over") { session.attach(takeover: true, reason: "take over") }.buttonStyle(.glassProminent)
+                            .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 5)
+                            .raySurface(Capsule())
+                            .help("Another window or Mac has \(agent?.kind ?? "the agent") open too: both see it and type here. That one sets the size; Take Over makes it this one, with the mouse.")
                         }
-                        .padding(.horizontal, 14).padding(.vertical, 9)
-                        .raySurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
-                        .padding(12)
+                        .padding(10)
+                        Spacer()
                     }
                     .transition(.surface(reduce: reduce))
                 }
@@ -672,11 +769,11 @@ struct AgentPopout: View {
             Spacer(minLength: 8)
             if session.attached && !session.watching {
                 Button { session.watch(reason: "let go") } label: {
-                    Image(systemName: "eye").font(.system(size: 11, weight: .medium))
+                    Image(systemName: "rectangle.on.rectangle").font(.system(size: 11, weight: .medium))
                 }
                 .buttonStyle(.borderless)
                 .foregroundStyle(Color(hex: theme.foreground).opacity(0.6))
-                .help("Watch only: let go of the keys, so it can be used on another Mac or window")
+                .help("Share: let another window or Mac have the size and mouse; this one still sees and types")
             }
             OpenInButton(agent: agent, pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
             CloseSessionButton(pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
