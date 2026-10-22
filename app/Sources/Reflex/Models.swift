@@ -13,7 +13,18 @@ struct AgentInfo: Codable, Identifiable, Hashable {
     var session: String
     var id: String { pane }
 
-    var place: String { cwd.abbreviatingHome }
+    /// The machine it runs on ("" for this Mac; see Machines).
+    var machine: String { Machines.machine(of: pane) }
+    var remote: Bool { !machine.isEmpty }
+    /// "claude · reflex", or "claude · reflex on work" for another Mac's.
+    var label: String { "\(kind) · \(folder)" + (remote ? " on \(machine)" : "") }
+    var place: String {
+        guard !machine.isEmpty else { return cwd.abbreviatingHome }
+        // Its own home, not this Mac's: /Users/<anyone>/x reads ~/x there.
+        let parts = cwd.split(separator: "/", omittingEmptySubsequences: false)
+        let path = parts.count >= 3 && parts[1] == "Users" ? "~" + parts.dropFirst(3).map { "/" + $0 }.joined() : cwd
+        return "\(machine): \(path)"
+    }
     var folder: String { (cwd as NSString).lastPathComponent }
 }
 

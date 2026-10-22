@@ -44,6 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ note: Notification) {
         AppDelegate.current = self
         Daemon.shared.start()
+        Machines.shared.start()
         Store.shared.start()
         setupMainMenu()
         setupStatusItem()
@@ -123,6 +124,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // quits and relaunches it) and holds its pane from the next one.
         for t in terminals.values { t.detach() }
         command.saveForRestart()
+        Machines.shared.stop()
         Daemon.shared.stop()
     }
 
@@ -185,6 +187,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
+            case let s where s.hasPrefix("settings:"): self.showSettings(pane: SettingsPane(rawValue: String(s.dropFirst(9))) ?? .general)
             case "railclick":
                 // Dev: the rail as its column, then the dots "clicked" a moment later.
                 if let s = NSScreen.main { self.edge.show(on: s, y: s.visibleFrame.midY, hold: 3600) }
@@ -995,7 +998,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                          styleMask: [.titled, .closable, .resizable, .miniaturizable, .fullSizeContentView],
                          backing: .buffered, defer: false)
         let a = Store.shared.state.agents.first { $0.pane == pane }
-        w.title = a.map { "\($0.kind) · \($0.folder)" } ?? pane
+        w.title = a.map { $0.label } ?? pane
         w.titleVisibility = .hidden
         w.titlebarAppearsTransparent = true
         w.backgroundColor = NSColor(hex: Themes.shared.current.background)

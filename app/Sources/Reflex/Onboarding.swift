@@ -10,7 +10,7 @@ import SwiftUI
 final class Onboarding: ObservableObject {
     static let shared = Onboarding()
 
-    enum Step: Int, CaseIterable { case welcome, herdr, jev, projects, keys, done }
+    enum Step: Int, CaseIterable { case welcome, herdr, jev, projects, machines, keys, done }
     enum Ping: Equatable {
         case idle, testing, ok(Int), failed(String)
         var isOK: Bool { if case .ok = self { return true } else { return false } }
@@ -111,6 +111,7 @@ final class Onboarding: ObservableObject {
         if s == .jev { askLatest() }
         if s == .projects || s == .jev { Task { await loadFolders() } }
         if s == .done, !(ping.isOK) { test() }
+        if s == .machines { Machines.shared.refresh() }
     }
 
     func next() { if let n = Step(rawValue: step.rawValue + 1) { go(n) } else { end() } }
@@ -610,6 +611,7 @@ struct OnboardingView: View {
     @ObservedObject var model = Onboarding.shared
     @ObservedObject var store = Store.shared
     @ObservedObject var settings = Settings.shared
+    @ObservedObject var machines = MachinesModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var key = ""
 
@@ -674,6 +676,7 @@ struct OnboardingView: View {
         case .herdr: return "1 of 4 · Your agents"
         case .jev: return "2 of 4 · The reflex"
         case .projects: return "3 of 4 · Your work"
+        case .machines: return "Optional · Your other Macs"
         case .keys: return "4 of 4 · Your hands"
         case .done: return "Ready"
         }
@@ -685,6 +688,7 @@ struct OnboardingView: View {
         case .herdr: return "Agents live\nin herdr."
         case .jev: return "A reflex,\nnot a conversation."
         case .projects: return "Where do\nyou work?"
+        case .machines: return "Agents on\nother Macs?"
         case .keys: return "Two taps,\none edge."
         case .done: return "Welcome to\nReflex."
         }
@@ -700,6 +704,8 @@ struct OnboardingView: View {
             return "No chat model rewrites your words. Jev, a System 1 model, answers typed questions — which session, which folder, is it a side question — in about a second. Unsure, it asks you instead. Try one: nothing is sent."
         case .projects:
             return "Reflex indexes the repositories under these folders — names, descriptions, recent commits — so a request like “fix the flaky test in jev fabric” starts in the right place."
+        case .machines:
+            return "A work laptop, a Mac mini under the desk: their agents can show up here too, with their questions and terminals. Reflex reaches them over SSH — Tailscale works — through herdr. Only use this Mac? Skip it."
         case .keys:
             return "Double-tap ⌥ anywhere to ask. Rest your pointer on the right edge for half a second to see your agents. Try both now."
         case .done:
@@ -798,6 +804,19 @@ struct OnboardingView: View {
                     }
                 }
             }
+        case .machines:
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(machines.rows) { m in
+                    Check(ok: m.link == .connected, title: m.label,
+                          detail: m.link == .connected ? "connected · ssh \(m.target)" : (m.link == .off ? "disabled in herdr" : "connecting to \(m.target)…")) { EmptyView() }
+                }
+                VStack(alignment: .leading, spacing: 12) {
+                    MachineSteps()
+                    AddMachineView()
+                }
+                .padding(14)
+                .pane(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            }
         case .keys:
             VStack(alignment: .leading, spacing: 10) {
                 Check(ok: model.trusted, title: "Accessibility", detail: model.trusted ? "⌥⌥ works everywhere" : "needed to hear ⌥⌥ in other apps") {
@@ -838,6 +857,7 @@ struct OnboardingView: View {
             case .herdr: PanesIllustration(agents: store.state.agents)
             case .jev: TryReflex(model: model)
             case .projects: FoldersIllustration(folders: model.folders)
+            case .machines: MachinesIllustration(rows: machines.rows, agents: store.state.agents)
             case .keys: KeysIllustration(hotkey: model.triedHotkey, edge: model.triedEdge)
             case .done: MemberCard(repos: store.state.folders, agents: store.state.agents.count,
                                    harness: settings.harness, ping: model.ping)
@@ -890,6 +910,7 @@ struct OnboardingView: View {
         case .herdr: return model.herdrRunning ? "Continue" : "Skip for now"
         case .jev: return pingOK ? "Continue" : "Skip for now"
         case .keys: return model.triedHotkey || model.triedEdge ? "Continue" : "Skip for now"
+        case .machines: return machines.rows.isEmpty ? "Skip for now" : "Continue"
         default: return "Continue"
         }
     }
@@ -994,7 +1015,7 @@ private struct Backdrop: View {
 private struct PanesIllustration: View {
     var agents: [AgentInfo]
     private var rows: [(String, String)] {
-        let live = agents.prefix(4).map { ("\($0.kind) · \($0.folder)", $0.status) }
+        let live = agents.prefix(4).map { ($0.label, $0.status) }
         return live.isEmpty ? [("claude · api", "working"), ("pi · web", "blocked"), ("codex · infra", "done")] : Array(live)
     }
     var body: some View {
@@ -1041,6 +1062,47 @@ private struct FoldersIllustration: View {
             }
         }
         .frame(width: 320)
+    }
+}
+
+/// This Mac, and the others its agents come from.
+private struct MachinesIllustration: View {
+    var rows: [MachinesModel.Row]
+    var agents: [AgentInfo]
+
+    private var others: [(String, Int, Bool)] {
+        rows.isEmpty ? [("work-laptop", 3, true), ("mac-mini", 1, true)]
+            : rows.prefix(3).map { r in (r.key, agents.filter { $0.machine == r.key }.count, r.link == .connected) }
+    }
+
+    var body: some View {
+        HStack(spacing: 18) {
+            computer("laptopcomputer", "this Mac", agents.filter { !$0.remote }.count, tint: Tone.working)
+            VStack(spacing: 14) {
+                ForEach(Array(others.enumerated()), id: \.offset) { i, o in
+                    HStack(spacing: 12) {
+                        Capsule().fill(Tone.remote.opacity(o.2 ? 0.7 : 0.25)).frame(width: 46, height: 2)
+                        computer("desktopcomputer", o.0, o.1, tint: Tone.remote)
+                    }
+                    .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.06)))
+                }
+            }
+        }
+        .frame(width: 340)
+    }
+
+    private func computer(_ symbol: String, _ name: String, _ n: Int, tint: Color) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(tint)
+            Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            HStack(spacing: 3) {
+                ForEach(0..<min(n, 5), id: \.self) { _ in Circle().fill(tint.opacity(0.8)).frame(width: 6, height: 6) }
+                if n == 0 { Text("no agents").font(.system(size: 10)).foregroundStyle(.primary.opacity(0.45)) }
+            }
+            .frame(height: 8)
+        }
+        .padding(.horizontal, 14).padding(.vertical, 12)
+        .pane(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 }
 

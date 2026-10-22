@@ -300,6 +300,7 @@ private struct Row: View {
             HStack(spacing: 8) {
                 Circle().fill(tone).frame(width: 7, height: 7)
                 Text(item.agent).font(Type.title).lineLimit(1)
+                MachineChip(machine: Machines.machine(of: item.pane))
                 Text(item.title).font(Type.meta).foregroundStyle(.secondary).lineLimit(1)
                 Spacer(minLength: 6)
                 ZStack(alignment: .trailing) {

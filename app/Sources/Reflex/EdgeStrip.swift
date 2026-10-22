@@ -88,9 +88,27 @@ struct AgentGlyph: View {
     var status: String
     var size: CGFloat = 12
     var pulse: Int = 0
+    /// Another Mac's agent: a small badge at its shoulder, and faded while
+    /// that Mac's tunnel is down (what it shows is the last seen).
+    var machine: String = ""
+    @ObservedObject private var machines = MachinesModel.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
 
     var body: some View {
+        mark
+            .overlay(alignment: .topTrailing) {
+                if !machine.isEmpty {
+                    Circle().fill(Tone.remote)
+                        .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 0.8))
+                        .frame(width: max(4, size * 0.42), height: max(4, size * 0.42))
+                        .offset(x: size * 0.16, y: -size * 0.16)
+                        .help("On \(machine)")
+                }
+            }
+            .opacity(!machine.isEmpty && machines.away(machine) ? 0.4 : 1)
+    }
+
+    private var mark: some View {
         ZStack {
             switch status {
             case "working":
@@ -118,6 +136,27 @@ struct AgentGlyph: View {
                 SpringKeyframe(1.5, duration: 0.14, spring: .snappy)
                 SpringKeyframe(1, duration: 0.3, spring: .bouncy)
             }
+        }
+    }
+}
+
+/// The name of another Mac, beside an agent or item that lives on it.
+struct MachineChip: View {
+    var machine: String
+    @ObservedObject private var machines = MachinesModel.shared
+
+    var body: some View {
+        if !machine.isEmpty {
+            let away = machines.away(machine)
+            HStack(spacing: 3) {
+                Image(systemName: away ? "bolt.horizontal.circle" : "desktopcomputer").font(.system(size: 8, weight: .semibold))
+                Text(machine).font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundStyle(away ? Color.secondary : Tone.remote)
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(Tone.remote.opacity(away ? 0.06 : 0.13), in: Capsule())
+            .fixedSize()
+            .help(away ? "On \(machine) — not connected; this is what it showed last" : "On \(machine)")
         }
     }
 }
@@ -281,7 +320,7 @@ extension Rail {
         let rows = dots(agents, limit: dotLimit)
         if rail.panel != .agents, let id = rail.hoverDot, let i = rows.firstIndex(where: { $0.id == id }) {
             switch rows[i] {
-            case .agent(let a): return .pill(index: i, status: norm(a.status), label: a.folder, word: StatusPill.word(a.status))
+            case .agent(let a): return .pill(index: i, status: norm(a.status), label: a.remote ? "\(a.folder) · \(a.machine)" : a.folder, word: StatusPill.word(a.status))
             case .state(let s, let n): return .pill(index: i, status: s, label: "\(n)", word: StatusPill.word(s).lowercased())
             }
         }
@@ -406,7 +445,7 @@ struct Rail: View {
 
     private func accessibility(_ row: RailDot) -> String {
         switch row {
-        case .agent(let a): return "\(a.kind) in \(a.folder), \(StatusPill.word(a.status))"
+        case .agent(let a): return "\(a.kind) in \(a.folder)\(a.remote ? " on \(a.machine)" : ""), \(StatusPill.word(a.status))"
         case .state(let s, let n): return "\(n) agents \(StatusPill.word(s).lowercased())"
         }
     }
@@ -449,7 +488,7 @@ struct Rail: View {
                             Group {
                                 switch row {
                                 case .agent(let a):
-                                    AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0)
+                                    AgentGlyph(status: a.status, size: 12, pulse: store.pulses[a.pane] ?? 0, machine: a.machine)
                                 case .state(let s, let n):
                                     VStack(spacing: 0) {
                                         AgentGlyph(status: s, size: 10)
@@ -549,7 +588,7 @@ struct RailTab: View {
             ForEach(Rail.dots(Rail.active(store.state.agents), limit: Rail.tabLimit)) { row in
                 switch row {
                 case .agent(let a):
-                    AgentGlyph(status: a.status, size: 11, pulse: store.pulses[a.pane] ?? 0)
+                    AgentGlyph(status: a.status, size: 11, pulse: store.pulses[a.pane] ?? 0, machine: a.machine)
                         .transition(.scale(scale: 0.6).combined(with: .opacity))
                 case .state(let s, let n):
                     // Many agents: the state, and how many are in it.
@@ -701,7 +740,7 @@ struct AgentList: View {
         let inState = rail.stateFilter.map { s in agents.filter { Rail.norm($0.status) == s } } ?? agents
         guard !q.isEmpty else { return inState }
         return inState.filter { a in
-            [a.title, a.folder, a.kind, a.status].contains { $0.localizedCaseInsensitiveContains(q) }
+            [a.title, a.folder, a.kind, a.status, a.machine].contains { $0.localizedCaseInsensitiveContains(q) }
         }
     }
 
@@ -978,7 +1017,7 @@ private struct AgentRow: View {
     private var title: String { AgentRow.title(agent) }
     private var subtitle: String { AgentRow.subtitle(agent, place) }
 
-    static func title(_ agent: AgentInfo) -> String { agent.title.isEmpty ? "\(agent.kind) · \(agent.folder)" : agent.title }
+    static func title(_ agent: AgentInfo) -> String { agent.title.isEmpty ? agent.label : agent.title }
 
     static func subtitle(_ agent: AgentInfo, _ place: String?) -> String {
         let state: String
@@ -993,9 +1032,12 @@ private struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            AgentGlyph(status: agent.status, size: 9, pulse: pulse).frame(width: 12)
+            AgentGlyph(status: agent.status, size: 9, pulse: pulse, machine: agent.machine).frame(width: 12)
             VStack(alignment: .leading, spacing: 0) {
-                Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
+                HStack(spacing: 5) {
+                    Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
+                    MachineChip(machine: agent.machine)
+                }
                 Text(subtitle).font(.system(size: 10.5)).foregroundStyle(Ink.dim).lineLimit(1)
             }
             Spacer(minLength: 4)
@@ -1035,7 +1077,7 @@ private struct OpenInAction: View {
     @ObservedObject private var settings = Settings.shared
 
     var body: some View {
-        let t = OpenIn.preferred
+        let t = agent.remote ? OpenIn.herdr : OpenIn.preferred
         Menu {
             OpenInItems(agent: agent, pane: agent.pane)
         } label: {
@@ -1137,7 +1179,7 @@ struct QuestionCard: View {
                     .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: 7, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(item.agent).font(.system(size: 13, weight: .semibold)).foregroundStyle(Ink.text)
-                    Text(item.kind == "route" ? "Pick where your request goes" : "Waiting for your answer · \(agent?.folder ?? "")")
+                    Text(item.kind == "route" ? "Pick where your request goes" : "Waiting for your answer · \(agent.map { $0.remote ? "\($0.folder) on \($0.machine)" : $0.folder } ?? "")")
                         .font(.system(size: 11.5)).foregroundStyle(Ink.dim)
                 }
             }

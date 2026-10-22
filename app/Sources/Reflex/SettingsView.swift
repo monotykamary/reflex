@@ -8,7 +8,7 @@ import SwiftUI
 // the control on the right — so nothing is ever cut off.
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, rail, terminal, routing, projects, phone, setup, about
+    case general, rail, terminal, routing, projects, machines, phone, setup, about
     var id: String { rawValue }
 
     var title: String {
@@ -18,6 +18,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "Terminal"
         case .routing: return "Routing"
         case .projects: return "Projects"
+        case .machines: return "Machines"
         case .phone: return "Phone"
         case .setup: return "Setup"
         case .about: return "About"
@@ -31,6 +32,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "terminal.fill"
         case .routing: return "arrow.triangle.branch"
         case .projects: return "folder.fill"
+        case .machines: return "desktopcomputer"
         case .phone: return "iphone"
         case .setup: return "checklist"
         case .about: return "info.circle.fill"
@@ -44,6 +46,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return Color(white: 0.16)
         case .routing: return Tone.route
         case .projects: return Color(red: 0.2, green: 0.6, blue: 0.95)
+        case .machines: return Tone.remote
         case .phone: return Tone.done
         case .setup: return Tone.blocked
         case .about: return Color(white: 0.45)
@@ -57,6 +60,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "Font and colours for agent terminals."
         case .routing: return "Jev decides where each request goes. Pick its provider; it learns from your choices."
         case .projects: return "The folders Reflex can start new sessions in."
+        case .machines: return "Your other Macs, from herdr's saved machines: their agents show up here with this Mac's."
         case .phone: return "Answer your agents from your phone."
         case .setup: return "Everything Reflex needs, checked live."
         case .about: return "Reflex, herdr and Jev."
@@ -71,6 +75,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
+        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
         case .about: return "version"
@@ -146,6 +151,7 @@ struct SettingsView: View {
                 case .terminal: TerminalPane()
                 case .routing: RoutingPane()
                 case .projects: ProjectsPane()
+                case .machines: MachinesPane()
                 case .phone: PhonePane()
                 case .setup: SetupPane()
                 case .about: AboutPane()
@@ -915,6 +921,76 @@ private struct ProjectsPane: View {
                 }
             }
         }
+    }
+}
+
+// MARK: - Machines
+
+private struct MachinesPane: View {
+    @ObservedObject var machines = MachinesModel.shared
+    @ObservedObject var store = Store.shared
+
+    var body: some View {
+        Form {
+            Section { PaneHeader(pane: .machines) }
+                .onAppear { Machines.shared.refresh() }
+            Section {
+                if machines.rows.isEmpty {
+                    RowLabel(machines.loaded ? "No machines yet" : "Asking herdr…",
+                             "Add one below, or in a terminal with `herdr machine add <ssh-host>`.")
+                }
+                ForEach(machines.rows) { m in
+                    MachineRow(machine: m, agents: store.state.agents.filter { $0.machine == m.key }.count)
+                }
+            } header: {
+                Text("From herdr")
+            } footer: {
+                Text("Reflex keeps one SSH tunnel to each enabled machine, with your own ssh config, keys and agent, and reconnects when it drops. Their agents wear the machine's name (and a \(Image(systemName: "circle.fill")) badge) in the rail, the inbox and the ⌥⌥ bar. `herdr machine disable`, `enable` and `remove` change this list.")
+                    .font(Type.meta).foregroundStyle(.secondary)
+            }
+            Section("Add a Mac") {
+                MachineSteps()
+                AddMachineView()
+            }
+        }
+    }
+}
+
+private struct MachineRow: View {
+    var machine: MachinesModel.Row
+    var agents: Int
+
+    private var state: (symbol: String, tone: Color, text: String) {
+        switch machine.link {
+        case .connected: return ("checkmark.circle.fill", Tone.done, agents == 1 ? "Connected · 1 agent" : "Connected · \(agents) agents")
+        case .connecting: return ("arrow.triangle.2.circlepath", Tone.working, "Connecting…")
+        case .off: return ("pause.circle", Color.secondary, "Disabled in herdr")
+        case .down(let why): return ("exclamationmark.circle.fill", Tone.blocked, why)
+        }
+    }
+
+    var body: some View {
+        LabeledContent {
+            if machine.link != .off {
+                Button("Reconnect") { Machines.shared.reconnect(machine.key) }
+                    .disabled(machine.link == .connecting)
+            }
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: state.symbol).foregroundStyle(state.tone)
+                    .contentTransition(.symbolEffect(.replace))
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        Text(machine.label)
+                        if machine.key != machine.label { MachineChip(machine: machine.key) }
+                    }
+                    Text("ssh \(machine.target)" + (machine.session.isEmpty || machine.session == "default" ? "" : " · session \(machine.session)"))
+                        .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                    Text(state.text).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+        .animation(Motion.enter, value: machine)
     }
 }
 

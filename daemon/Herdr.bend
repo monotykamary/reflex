@@ -50,6 +50,93 @@ def call(sock: String, method: String, params: String, timeout_ms: U32) -> IO(Re
     r : Result<&1, &1, U32 & String, String> <- H.Host.unix_call(sock, request(method, params), 8388608, timeout_ms)
     return answer_line(r)
 
+# Machines
+# --------
+# An agent on another Mac (a herdr saved machine whose sockets the app
+# forwards here) has the pane "<machine>/<pane>"; one on this Mac has herdr's
+# own id. Herdr's ids never hold a '/', so everything above the socket treats
+# both alike.
+
+def machine.go(+m: String, rest: List<&2, String>) -> String:
+  match rest:
+    case Nil{}:
+      ""
+    case Con{p, t}:
+      m
+
+def machine.of(parts: List<&2, String>) -> String:
+  match parts:
+    case Nil{}:
+      ""
+    case Con{+m, t}:
+      machine.go(m, t)
+
+# The machine a pane is on ("" for this Mac).
+def machine(pane: String) -> String:
+  machine.of(String.split(pane, '/'))
+
+def bare.go(+m: String, rest: List<&2, String>) -> String:
+  match rest:
+    case Nil{}:
+      m
+    case Con{p, t}:
+      p
+
+def bare.of(parts: List<&2, String>) -> String:
+  match parts:
+    case Nil{}:
+      ""
+    case Con{+m, t}:
+      bare.go(m, t)
+
+# The pane's id in its own machine's herdr.
+def bare(pane: String) -> String:
+  bare.of(String.split(pane, '/'))
+
+# Where a machine's herdr socket is forwarded to, in `dir`.
+def machine_sock(dir: String, m: String) -> String:
+  dir ++ "/" ++ m ++ ".sock"
+
+def at.of(sock: String, dir: String, +m: String) -> String:
+  Js.or_else.pick(String.is_empty(m), machine_sock(dir, m), sock)
+
+# The socket of the herdr a pane lives in: this Mac's `sock`, or its machine's.
+def at(sock: String, dir: String, pane: String) -> String:
+  at.of(sock, dir, machine(pane))
+
+def tag(+m: String, a: M.Agent) -> M.Agent:
+  match a:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+      M.Agent{m ++ "/" ++ pane, name, kind, status, cwd, title, seq, session, screen}
+
+# A machine's agents, as seen from here.
+def tags(+m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{a, t}:
+      tag(m, a) <> tags(m, t)
+
+def on.put(keep: Bool, a: M.Agent, rest: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match keep:
+    case True{}:
+      a <> rest
+    case False{}:
+      rest
+
+def on.pane(a: M.Agent) -> String:
+  match a:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+      pane
+
+# The agents in `xs` on machine `m`.
+def on(+m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+a, t}:
+      on.put(String.eq(machine(on.pane(a)), m), a, on(m, t))
+
 # Reading agents
 # --------------
 

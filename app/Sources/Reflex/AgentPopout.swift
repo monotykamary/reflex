@@ -6,6 +6,12 @@ import SwiftUI
 // A raw terminal onto one agent: SwiftTerm runs `herdr agent attach <pane>` in
 // a PTY, so this is the agent's own TUI — colors, keys, mouse and resizing go
 // straight through. Themed with any Ghostty theme (Tokyo Night by default).
+//
+// herdr gives a terminal to one attached client at a time. When another has
+// it — another window, or the same agent open on the Mac it runs on — this one
+// watches instead: `herdr terminal session observe`, a live read-only mirror
+// any number of clients can keep, with Take Over a click away. Taken from,
+// it goes back to watching rather than going blank.
 
 @MainActor
 final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalViewDelegate {
@@ -16,6 +22,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// Ended because another window (or terminal) has this agent: herdr
     /// gives a terminal to one attached client at a time.
     @Published var elsewhere = false
+    /// Showing a live mirror, read-only, while another client has the terminal.
+    @Published var watching = false
+    /// The process ending now was ended on purpose, to start `next`.
+    private var next: (() -> Void)?
     /// Where the attach script says why it stopped.
     private let why = FileManager.default.temporaryDirectory.appendingPathComponent("reflex-attach-\(UUID().uuidString)")
     /// The link under the pointer, for the ⌘-click hint, and where the
@@ -61,16 +71,18 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// that is live — another window — keeps it, and this window says so and
     /// offers to take it (`takeover`), rather than the two taking it in turns.
     func attach(takeover: Bool = false, reason: String) {
+        if switchFromRunning({ [weak self] in self?.attach(takeover: takeover, reason: reason) }) { return }
         NSLog("Reflex: attach %@ (%@%@)", pane, reason, takeover ? ", taking over" : "")
         ended = false
         elsewhere = false
+        watching = false
         view.keyFlags = [0]
         TerminalSession.endOrphans(pane: pane)
         try? FileManager.default.removeItem(at: why)
         let script = """
         err=$(mktemp -t reflex-attach)
         for i in 1 2 3 4 5 6 7 8 9 10; do
-          herdr agent attach "$1" $3 2>"$err"; status=$?
+          herdr agent attach "$4" $3 2>"$err"; status=$?
           # Taken by another window, or held by one (a client just ended may
           # still hold it for a moment: ask again a few times first).
           if grep -q "taken over" "$err"; then echo elsewhere > "$2"; rm -f "$err"; exit 1; fi
@@ -84,12 +96,63 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         done
         rm -f "$err"; exit 1
         """
+        view.startProcess(executable: "/bin/sh", args: ["-c", script, "reflex-attach", pane, why.path, takeover ? "--takeover" : "", herdrPane],
+                          environment: herdrEnv())
+        attached = true
+    }
+
+    /// Watch without taking the terminal: herdr streams the screen as ANSI
+    /// frames (JSON lines, base64), drawn here as they come; the size follows
+    /// this window's (the stream restarts on a resize). Keys go nowhere.
+    func watch(reason: String) {
+        if switchFromRunning({ [weak self] in self?.watch(reason: reason) }) { return }
+        NSLog("Reflex: watch %@ (%@)", pane, reason)
+        ended = false
+        elsewhere = false
+        view.keyFlags = [0]
+        let script = """
+        stty -echo -icanon 2>/dev/null
+        printf '\\033[?25l'
+        while :; do
+          resized=
+          trap 'resized=1; kill $obs 2>/dev/null' WINCH
+          herdr terminal session observe "$1" --cols "$(tput cols)" --rows "$(tput lines)" 2>/dev/null |
+            /usr/bin/perl -MJSON::PP -MMIME::Base64 -ne '$|=1; my $d = eval { decode_json($_) } or next;
+              exit 0 if $d->{type} eq "terminal.closed";
+              print decode_base64($d->{bytes}) if $d->{type} eq "terminal.frame"' &
+          obs=$!
+          wait $obs
+          [ -n "$resized" ] || exit 0
+          pkill -P $$ -f "terminal session observe" 2>/dev/null
+        done
+        """
+        view.startProcess(executable: "/bin/sh", args: ["-c", script, "reflex-watch", herdrPane, pane],
+                          environment: herdrEnv())
+        attached = true
+        watching = true
+    }
+
+    /// Ends what runs now and starts `then` once it has: true if it had to.
+    private func switchFromRunning(_ then: @escaping () -> Void) -> Bool {
+        guard attached, let pid = view.process?.shellPid, pid > 0 else { return false }
+        next = then
+        kill(-pid, SIGKILL)
+        return true
+    }
+
+    /// The pane's id in its own herdr (another Mac's, through the tunnel).
+    private var herdrPane: String { Machines.route(pane)?.pane ?? pane }
+
+    private func herdrEnv() -> [String] {
         var env = Daemon.shared.childEnvironment()
         env["TERM"] = "xterm-256color"
         env["COLORTERM"] = "truecolor"
-        view.startProcess(executable: "/bin/sh", args: ["-c", script, "reflex-attach", pane, why.path, takeover ? "--takeover" : ""],
-                          environment: env.map { "\($0.key)=\($0.value)" })
-        attached = true
+        // On another machine: its herdr, through the tunnel (see Machines).
+        if let remote = Machines.route(pane) {
+            env["HERDR_SOCKET_PATH"] = remote.sock
+            env["HERDR_SESSION"] = nil
+        }
+        return env.map { "\($0.key)=\($0.value)" }
     }
 
     func detach() {
@@ -99,6 +162,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         if attached, let pid = view.process?.shellPid, pid > 0 { kill(-pid, SIGKILL) }
         if attached { view.terminate() }
         attached = false
+        watching = false
+        next = nil
         try? FileManager.default.removeItem(at: why)
         TerminalScroll.views[ObjectIdentifier(view)] = nil
         TerminalSelect.toAgent[ObjectIdentifier(view)] = nil
@@ -119,7 +184,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         for line in text.split(separator: "\n") {
             let f = line.split(separator: " ", maxSplits: 2, omittingEmptySubsequences: true)
             guard f.count == 3, f[1] == "1", let pid = Int32(f[0]),
-                  f[2].hasPrefix("/bin/sh -c "), f[2].contains(" reflex-attach \(pane) ") || f[2].hasSuffix(" reflex-attach \(pane)")
+                  f[2].hasPrefix("/bin/sh -c "),
+                  f[2].contains(" reflex-attach \(pane) ") || f[2].hasSuffix(" reflex-attach \(pane)") || f[2].hasSuffix(" \(pane)") && f[2].contains(" reflex-watch ")
             else { continue }
             NSLog("Reflex: ending an orphaned attach to %@ (%d)", pane, pid)
             kill(-pid, SIGKILL)
@@ -133,10 +199,25 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     nonisolated func hostCurrentDirectoryUpdate(source: TerminalView, directory: String?) {}
     nonisolated func processTerminated(source: TerminalView, exitCode: Int32?) {
         Task { @MainActor in
+            self.attached = false
+            if let next = self.next {
+                self.next = nil
+                next()
+                return
+            }
+            if self.watching {
+                NSLog("Reflex: watching %@ ended", self.pane)
+                self.watching = false
+                withAnimation(Motion.enter) { self.ended = true }
+                return
+            }
             let elsewhere = (try? String(contentsOf: self.why, encoding: .utf8))?.hasPrefix("elsewhere") == true
             NSLog("Reflex: attach to %@ ended%@", self.pane, elsewhere ? " (open elsewhere)" : "")
-            self.attached = false
-            self.elsewhere = elsewhere
+            // Someone else has it: keep it in view, read-only.
+            if elsewhere {
+                self.watch(reason: "open elsewhere")
+                return
+            }
             withAnimation(Motion.enter) { self.ended = true }
         }
     }
@@ -492,6 +573,25 @@ struct AgentPopout: View {
                     .padding(.leading, 10)
                     .padding(.trailing, 4)
                     .padding(.bottom, 6)
+                if session.watching {
+                    VStack {
+                        Spacer()
+                        HStack(spacing: 10) {
+                            Image(systemName: "eye").font(.system(size: 12, weight: .semibold))
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text("Watching").font(.system(size: 12.5, weight: .semibold))
+                                Text("Another window or Mac has \(agent?.kind ?? "the agent") — you see it live, it takes the keys.")
+                                    .font(.system(size: 11)).foregroundStyle(Ink.dim)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Take Over") { session.attach(takeover: true, reason: "take over") }.buttonStyle(.glassProminent)
+                        }
+                        .padding(.horizontal, 14).padding(.vertical, 9)
+                        .raySurface(RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .padding(12)
+                    }
+                    .transition(.surface(reduce: reduce))
+                }
                 if session.ended {
                     VStack(spacing: 10) {
                         if session.elsewhere {
@@ -560,8 +660,8 @@ struct AgentPopout: View {
     /// traffic lights.
     private var header: some View {
         HStack(spacing: 8) {
-            AgentGlyph(status: agent?.status ?? "unknown", size: 10, pulse: store.pulses[session.pane] ?? 0)
-            Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane)
+            AgentGlyph(status: agent?.status ?? "unknown", size: 10, pulse: store.pulses[session.pane] ?? 0, machine: Machines.machine(of: session.pane))
+            Text(agent.map { $0.label } ?? session.pane)
                 .font(.system(size: 13, weight: .semibold))
                 .lineLimit(1)
             Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
@@ -570,6 +670,14 @@ struct AgentPopout: View {
                 .lineLimit(1)
                 .contentTransition(.interpolate)
             Spacer(minLength: 8)
+            if session.attached && !session.watching {
+                Button { session.watch(reason: "let go") } label: {
+                    Image(systemName: "eye").font(.system(size: 11, weight: .medium))
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(Color(hex: theme.foreground).opacity(0.6))
+                .help("Watch only: let go of the keys, so it can be used on another Mac or window")
+            }
             OpenInButton(agent: agent, pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
             CloseSessionButton(pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
         }

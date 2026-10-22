@@ -90,6 +90,8 @@ enum Tone {
     static let done = Color(red: 0.25, green: 0.82, blue: 0.53)
     static let idle = Color.secondary.opacity(0.55)
     static let route = Color(red: 0.62, green: 0.48, blue: 1.0)
+    /// Another Mac (its agents' badge and name).
+    static let remote = Color(red: 0.16, green: 0.70, blue: 0.78)
 
     static func of(_ status: String) -> Color {
         switch status {

@@ -56,7 +56,8 @@ enum OpenIn {
 
     static func open(_ t: OpenTarget, agent: AgentInfo?, pane: String, remember: Bool = false) {
         if remember { Settings.shared.openIn = t.id }
-        guard t.kind != .herdr, let cwd = agent?.cwd, !cwd.isEmpty else {
+        // Another Mac's folder isn't on this one: herdr is the way in.
+        guard t.kind != .herdr, agent?.remote != true, let cwd = agent?.cwd, !cwd.isEmpty else {
             HerdrWindow.reveal(pane: pane)
             return
         }
@@ -87,7 +88,7 @@ struct OpenInItems: View {
         Button { OpenIn.open(OpenIn.herdr, agent: agent, pane: pane, remember: true) } label: {
             Label { Text("Show in herdr") } icon: { Image(systemName: "arrow.up.forward.app") }
         }
-        if agent?.cwd.isEmpty == false {
+        if agent?.cwd.isEmpty == false, agent?.remote != true {
             Section(agent.map { "Open \($0.folder) in" } ?? "Open in") {
                 ForEach(OpenIn.installed.filter { $0.kind != .herdr }) { t in
                     Button { OpenIn.open(t, agent: agent, pane: pane, remember: true) } label: {
@@ -107,7 +108,7 @@ struct OpenInButton: View {
     @ObservedObject private var settings = Settings.shared
 
     var body: some View {
-        let t = OpenIn.preferred
+        let t = agent?.remote == true ? OpenIn.herdr : OpenIn.preferred
         Menu {
             OpenInItems(agent: agent, pane: pane)
         } label: {

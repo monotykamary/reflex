@@ -135,6 +135,15 @@ def Cfg.data(c: Cfg) -> String:
     case Cfg{sock, bind, port, token, jev, harness, threshold, home, data, web, scan, fork, undo, shown}:
       data
 
+# Where the app forwards other machines' herdr sockets (see Herdr: Machines),
+# and `list` there names the machines it keeps a tunnel to.
+def Cfg.machines(+c: Cfg) -> String:
+  Cfg.data(c) ++ "/machines"
+
+# The herdr socket a pane lives behind.
+def Cfg.at(+c: Cfg, pane: String) -> String:
+  Herdr.at(Cfg.sock(c), Cfg.machines(c), pane)
+
 def Cfg.web(c: Cfg) -> String:
   match c:
     case Cfg{sock, bind, port, token, jev, harness, threshold, home, data, web, scan, fork, undo, shown}:
@@ -314,7 +323,7 @@ def Settle.text(s: Settle) -> String:
 def capture_btw(+cfg: Cfg, +chan: Chan(Env), +pane: String, +label: String) -> IO(Unit):
   do IO<Unit>:
     IO.sleep(2500)
-    st : Settle <- settle(30n, Cfg.sock(cfg), pane, Settle{"", 0})
+    st : Settle <- settle(30n, Cfg.at(cfg, pane), Herdr.bare(pane), Settle{"", 0})
     post(chan, M.Post{M.IReply{}, pane, label, "btw answer", Core.tail_lines(Settle.text(st), 30n), []})
 
 # The actor
@@ -584,25 +593,34 @@ def resume_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +args: List<&2, 
         st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent_args(Cfg.sock(cfg), name, kind, pane, args)
         resumed(String.is_empty(text), cfg, cwd, name, pane, text, st)
 
+# A headless fork runs where the session's files are: on this Mac. One on
+# another machine isn't forked (yet): its own terminal can take the question.
+def side_fork(here: Bool, +cfg: Cfg, +chan: Chan(Env), +pane: String, +label: String, kind: String, cwd: String, session: String, text: String) -> IO(Result<&1, &1, U32 & String, String>):
+  match here:
+    case True{}:
+      do IO<Result<&1, &1, U32 & String, String>>:
+        r : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.fork(cfg), [kind, cwd, session, text], "", 4194304, 300000)
+        post_fork_reply(chan, pane, label, stdout_of(r))
+    case False{}:
+      IO.pure(Result<&1, &1, U32 & String, String>, Fail{(1, "a side question for an agent on " ++ Herdr.machine(pane) ++ " needs it free to take /btw: ask in its terminal")})
+
 def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) -> IO(Result<&1, &1, U32 & String, String>):
   match a:
     case M.Prompt{+pane, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(Cfg.sock(cfg), pane, text)
-        prompted(Cfg.sock(cfg), pane, text, r)
-    case M.Press{pane, +key}:
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(Cfg.at(cfg, pane), Herdr.bare(pane), text)
+        prompted(Cfg.at(cfg, pane), Herdr.bare(pane), text, r)
+    case M.Press{+pane, +key}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.sock(cfg), pane, key)
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.at(cfg, pane), Herdr.bare(pane), key)
         return ok_detail(r, "pressed " ++ key)
     case M.SideNative{+pane, text}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(Cfg.sock(cfg), pane, "/btw " ++ text)
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.prompt(Cfg.at(cfg, pane), Herdr.bare(pane), "/btw " ++ text)
         IO.spawn(Unit, capture_btw(cfg, chan, pane, label))
         return ok_detail(r, "asked with /btw")
     case M.SideFork{+pane, kind, cwd, session, text}:
-      do IO<Result<&1, &1, U32 & String, String>>:
-        r : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.fork(cfg), [kind, cwd, session, text], "", 4194304, 300000)
-        post_fork_reply(chan, pane, label, stdout_of(r))
+      side_fork(String.is_empty(Herdr.machine(pane)), cfg, chan, pane, label, kind, cwd, session, text)
     case M.Resume{+cwd, +kind, +session, +mode, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
         w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(Cfg.sock(cfg), cwd, Core.base_name(cwd))
@@ -702,23 +720,23 @@ def with_screen(a: M.Agent, r: Result<&1, &1, U32 & String, String>) -> M.Agent:
     case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
       M.Agent{pane, name, kind, status, cwd, title, seq, session, text_or(r, "")}
 
-def screen_for(want: Bool, +sock: String, a: M.Agent) -> IO(M.Agent):
+def screen_for(want: Bool, +cfg: Cfg, a: M.Agent) -> IO(M.Agent):
   match want a:
     case False{} _:
       IO.pure(M.Agent, a)
     case True{} M.Agent{+pane, name, kind, +status, cwd, title, seq, session, screen}:
       do IO<M.Agent>:
-        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(sock, pane, source_for(status), 40)
+        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(Cfg.at(cfg, pane), Herdr.bare(pane), source_for(status), 40)
         return with_screen(M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, r)
 
-def screens(cur: List<&2, M.Agent>, +sock: String, +prev: List<&2, M.Agent>) -> IO(List<&2, M.Agent>):
+def screens(cur: List<&2, M.Agent>, +cfg: Cfg, +prev: List<&2, M.Agent>) -> IO(List<&2, M.Agent>):
   match cur:
     case Nil{}:
       IO.pure(List<&2, M.Agent>, [])
     case Con{+a, t}:
       do IO<List<&2, M.Agent>>:
-        h : M.Agent <- screen_for(wants_screen(Core.find_agent(prev, Core.Agent.pane(a)), a), sock, a)
-        rest : List<&2, M.Agent> <- screens(t, sock, prev)
+        h : M.Agent <- screen_for(wants_screen(Core.find_agent(prev, Core.Agent.pane(a)), a), cfg, a)
+        rest : List<&2, M.Agent> <- screens(t, cfg, prev)
         return h <> rest
 
 type Snap is Data:
@@ -817,15 +835,56 @@ def marks(xs: List<&2, M.Agent>, +busy: List<&2, String>) -> List<&2, M.Agent>:
     case Con{a, t}:
       mark_busy(a, busy) <> marks(t, busy)
 
-def snap(r: Result<&1, &1, U32 & String, List<&2, M.Agent>>, +sock: String, +prev: List<&2, M.Agent>) -> IO(Snap):
+# This Mac's agents (marked busy from its own session files), then the other
+# machines'. If this Mac's herdr didn't answer, everything stays as it was.
+def snap(r: Result<&1, &1, U32 & String, List<&2, M.Agent>>, remote: List<&2, M.Agent>, +cfg: Cfg, +prev: List<&2, M.Agent>) -> IO(Snap):
   match r:
     case Fail{e}:
       IO.pure(Snap, Snap{False{}, prev})
     case Done{cur}:
       do IO<Snap>:
         +busy : List<&2, String> <- read_busy()
-        xs : List<&2, M.Agent> <- screens(marks(cur, busy), sock, prev)
+        xs : List<&2, M.Agent> <- screens(List.append(&2, M.Agent, marks(cur, busy), remote), cfg, prev)
         return Snap{True{}, xs}
+
+# Machines
+# --------
+# Other Macs' herdr (saved machines), polled through the sockets the app
+# forwards: their agents join this Mac's with the machine in their pane id.
+
+def trims(xs: List<&2, String>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{x, t}:
+      String.trim(x) <> trims(t)
+
+def machine_names(r: Result<&1, &1, U32 & String, String>) -> List<&2, String>:
+  Herdr.words(trims(String.lines(text_or(r, ""))))
+
+def read_machines(+cfg: Cfg) -> IO(List<&2, String>):
+  do IO<List<&2, String>>:
+    r : Result<&1, &1, U32 & String, String> <- Fs.read(Cfg.machines(cfg) ++ "/list", 65536)
+    return machine_names(r)
+
+# A machine that didn't answer (its tunnel is reconnecting, it sleeps) keeps
+# the agents it had, so coming back isn't a burst of new agents.
+def remote_of(r: Result<&1, &1, U32 & String, List<&2, M.Agent>>, +m: String, prev: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match r:
+    case Fail{e}:
+      Herdr.on(m, prev)
+    case Done{xs}:
+      Herdr.tags(m, xs)
+
+def remotes(ms: List<&2, String>, +cfg: Cfg, +prev: List<&2, M.Agent>) -> IO(List<&2, M.Agent>):
+  match ms:
+    case Nil{}:
+      IO.pure(List<&2, M.Agent>, [])
+    case Con{+m, t}:
+      do IO<List<&2, M.Agent>>:
+        r : Result<&1, &1, U32 & String, List<&2, M.Agent>> <- Herdr.list_agents(Herdr.machine_sock(Cfg.machines(cfg), m))
+        rest : List<&2, M.Agent> <- remotes(t, cfg, prev)
+        return List.append(&2, M.Agent, remote_of(r, m, prev), rest)
 
 def poll.post(+chan: Chan(Env), +s: Snap) -> IO(List<&2, M.Agent>):
   match s:
@@ -834,14 +893,16 @@ def poll.post(+chan: Chan(Env), +s: Snap) -> IO(List<&2, M.Agent>):
         post(chan, M.Polled{ok, agents})
         return agents
 
-def poller(fuel: Nat, +cfg: Cfg, +chan: Chan(Env), prev: List<&2, M.Agent>) -> IO(Unit):
+def poller(fuel: Nat, +cfg: Cfg, +chan: Chan(Env), +prev: List<&2, M.Agent>) -> IO(Unit):
   match fuel:
     case 0n:
       IO.pure(Unit, Unit{})
     case 1n+p:
       do IO<Unit>:
         r : Result<&1, &1, U32 & String, List<&2, M.Agent>> <- Herdr.list_agents(Cfg.sock(cfg))
-        s : Snap <- snap(r, Cfg.sock(cfg), prev)
+        ms : List<&2, String> <- read_machines(cfg)
+        remote : List<&2, M.Agent> <- remotes(ms, cfg, prev)
+        s : Snap <- snap(r, remote, cfg, prev)
         cur : List<&2, M.Agent> <- poll.post(chan, s)
         IO.sleep(700)
         poller(p, cfg, chan, cur)
@@ -867,14 +928,14 @@ def indexer(fuel: Nat, +cfg: Cfg, +chan: Chan(Env)) -> IO(Unit):
 def seen_of(a: M.Agent, r: Result<&1, &1, U32 & String, String>) -> R.Seen:
   R.Seen{a, text_or(r, "")}
 
-def read_seen(xs: List<&2, M.Agent>, +sock: String) -> IO(List<&2, R.Seen>):
+def read_seen(xs: List<&2, M.Agent>, +cfg: Cfg) -> IO(List<&2, R.Seen>):
   match xs:
     case Nil{}:
       IO.pure(List<&2, R.Seen>, [])
     case Con{+a, t}:
       do IO<List<&2, R.Seen>>:
-        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(sock, Core.Agent.pane(a), "recent_unwrapped", 40)
-        rest : List<&2, R.Seen> <- read_seen(t, sock)
+        r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(Cfg.at(cfg, Core.Agent.pane(a)), Herdr.bare(Core.Agent.pane(a)), "recent_unwrapped", 40)
+        rest : List<&2, R.Seen> <- read_seen(t, cfg)
         return seen_of(a, r) <> rest
 
 def take_agents(xs: List<&2, M.Agent>, n: Nat) -> List<&2, M.Agent>:
@@ -932,7 +993,7 @@ def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: S
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), cfg)
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
         +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
@@ -953,7 +1014,7 @@ def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, +memory: String, 
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), cfg)
         +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
         +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
@@ -971,7 +1032,7 @@ def explain_ctx(+cfg: Cfg, +text: String, +memory: String, ctx: M.Reply) -> IO(S
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), Cfg.sock(cfg))
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), cfg)
         all : List<&2, P.Past> <- read_pasts(cfg)
         return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, folders, 8n), P.rank(text, all, 5n), memory)) ++ "}"
     case M.RText{json}:
@@ -1252,7 +1313,7 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case EPane{}:
       do IO<String>:
-        r : Result<&1, &1, U32 & String, String> <- pane_read(String.eq(Http.Req.query(req, "format"), "ansi"), Cfg.sock(cfg), Http.Req.query(req, "id"), Js.u32_or(U32.read(Http.Req.query(req, "lines")), 120))
+        r : Result<&1, &1, U32 & String, String> <- pane_read(String.eq(Http.Req.query(req, "format"), "ansi"), Cfg.at(cfg, Http.Req.query(req, "id")), Herdr.bare(Http.Req.query(req, "id")), Js.u32_or(U32.read(Http.Req.query(req, "lines")), 120))
         ok(pane_json(r))
     case EFolders{}:
       do IO<String>:
@@ -1277,7 +1338,7 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
       jev_ping(cfg)
     case EFocus{}:
       do IO<String>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.focus(Cfg.sock(cfg), Js.text_at(body, "pane"))
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.focus(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")))
         ok(pane_json(ok_detail(r, "focused")))
     # A note from the app (a background session finished or needs you):
     # an inbox item that stays until you open or clear it.
@@ -1287,15 +1348,15 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case EKeys{}:
       do IO<String>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.sock(cfg), Js.text_at(body, "pane"), Js.text_at(body, "key"))
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.press(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")), Js.text_at(body, "key"))
         ok(pane_json(ok_detail(r, "pressed")))
     case EText{}:
       do IO<String>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.send_text(Cfg.sock(cfg), Js.text_at(body, "pane"), Js.text_at(body, "text"))
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.send_text(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")), Js.text_at(body, "text"))
         ok(pane_json(ok_detail(r, "typed")))
     case EClose{}:
       do IO<String>:
-        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.close_pane(Cfg.sock(cfg), Js.text_at(body, "pane"))
+        r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.close_pane(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")))
         ok(pane_json(ok_detail(r, "closed")))
     case ESessions{}:
       do IO<String>:
@@ -1330,13 +1391,13 @@ def dispatch.ep(+ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req) -> IO(Stri
 def dispatch(+cfg: Cfg, +chan: Chan(Env), +req: Http.Req) -> IO(String):
   dispatch.ep(ep_of(Http.Req.path(req)), cfg, chan, req)
 
-def sent(m: Socket & Result<&1, &1, (U32 & String) & String, Unit>) -> IO(Unit):
+def sent(m: Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>) -> IO(Unit):
   (s, r) = m
   Socket.close(s)
 
 def respond(s: Socket, resp: String) -> IO(Unit):
   do IO<Unit>:
-    m : Socket & Result<&1, &1, (U32 & String) & String, Unit> <- TCP.send(s, resp)
+    m : Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit> <- TCP.send(s, resp)
     sent(m)
 
 def conn.read(+cfg: Cfg, +chan: Chan(Env), m: Socket & Result<&1, &1, U32 & String, String>) -> IO(Unit):

@@ -322,7 +322,7 @@ final class CommandModel: ObservableObject {
     var sessionMatches: [AgentInfo] {
         let q = request.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return Recents.shared.sorted(agents.filter { a in
-            let hay = "\(a.title) \(a.kind) \(a.folder) \(a.place) \(a.name)".lowercased()
+            let hay = "\(a.title) \(a.kind) \(a.folder) \(a.place) \(a.name) \(a.machine)".lowercased()
             return q.allSatisfy { hay.contains($0) }
         })
     }
@@ -658,8 +658,8 @@ final class CommandModel: ObservableObject {
         // Sessions: Jev's order when it has one, else live order.
         var sessions = Recents.shared.sorted(agents).map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
-                      title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
-                      detail: (side ? "btw → " : "") + "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status),
+                      title: a.title.isEmpty ? a.label : a.title,
+                      detail: (side ? "btw → " : "") + a.label + " · " + StatusWord.of(a.status),
                       bp: bp(for: "s:" + a.pane), agent: a, path: a.cwd)
         }
         // Jev's weight first; equal weights keep the recent order (stable).
@@ -714,8 +714,8 @@ final class CommandModel: ObservableObject {
         if resumeOnly && request.isEmpty { return pasts }
         let live = sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
-                      title: a.title.isEmpty ? "\(a.kind) · \(a.folder)" : a.title,
-                      detail: "\(a.kind) · \(a.folder) · " + StatusWord.of(a.status), agent: a, path: a.cwd)
+                      title: a.title.isEmpty ? a.label : a.title,
+                      detail: a.label + " · " + StatusWord.of(a.status), agent: a, path: a.cwd)
         }
         let kind = Settings.shared.harness
         let folders = resumeOnly ? [] : folderMatches.prefix(5).map { f in
@@ -877,7 +877,7 @@ final class CommandModel: ObservableObject {
         case .session:
             guard let a = c.agent else { return }
             let side = isSide
-            let label = (side ? "btw → " : "") + "\(a.kind) · \(a.folder)"
+            let label = (side ? "btw → " : "") + a.label
             phase = .sending(label)
             let t = ticket, started = Date()
             Task {
@@ -1435,7 +1435,7 @@ struct CommandBar: View {
             switch model.phase {
             case .typing where model.armedClose != nil:
                 Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Color.red)
-                Text("⌘⌫ again to close \(model.selected?.agent.map { "\($0.kind) · \($0.folder)" } ?? "this session") — it ends the agent")
+                Text("⌘⌫ again to close \(model.selected?.agent.map { $0.label } ?? "this session") — it ends the agent")
                     .foregroundStyle(.primary).lineLimit(1)
             case .typing where model.mode == .search && !model.request.isEmpty && model.rows.isEmpty:
                 Image(systemName: "magnifyingglass").foregroundStyle(.tertiary)
@@ -1587,7 +1587,7 @@ private struct CandidateRow: View, Equatable {
     @ViewBuilder private var icon: some View {
         switch candidate.kind {
         case .session:
-            AgentGlyph(status: candidate.agent?.status ?? "idle", size: 11)
+            AgentGlyph(status: candidate.agent?.status ?? "idle", size: 11, machine: candidate.agent?.machine ?? "")
         case .folder:
             Image(systemName: "folder.fill").foregroundStyle(Color(red: 0.35, green: 0.62, blue: 0.95))
         case .newFolder:

@@ -3,19 +3,26 @@ import AppKit
 // "Show in herdr": focus the pane in herdr, then bring the terminal that shows
 // herdr to the front. If no herdr client is attached anywhere, open one (in
 // Ghostty when installed, else Terminal) — it attaches already on that pane.
+// A pane on another Mac opens herdr's own remote attach to that machine.
 
 @MainActor
 enum HerdrWindow {
     static func reveal(pane: String) {
         Task {
             await Client.local.focus(pane)
-            if let app = hostOfClient() {
+            if let m = MachinesModel.shared.row(Machines.machine(of: pane)) {
+                let session = m.session.isEmpty || m.session == "default" ? "" : " --session \(quoted(m.session))"
+                openClient("herdr --remote \(quoted(m.target))" + session)
+            } else if let app = hostOfClient() {
                 app.activate()
             } else {
-                openClient()
+                let session = Settings.shared.herdrSession
+                openClient("herdr" + (session.isEmpty ? "" : " --session \(session)"))
             }
         }
     }
+
+    private static func quoted(_ s: String) -> String { "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'" }
 
     /// The app (Ghostty, Terminal, …) whose process tree runs a herdr TUI client.
     private static func hostOfClient() -> NSRunningApplication? {
@@ -68,9 +75,7 @@ enum HerdrWindow {
         }
     }
 
-    private static func openClient() {
-        let session = Settings.shared.herdrSession
-        let herdr = "herdr" + (session.isEmpty ? "" : " --session \(session)")
+    private static func openClient(_ herdr: String) {
         let ghostty = ["/Applications/Ghostty.app", NSHomeDirectory() + "/Applications/Ghostty.app"]
             .first { FileManager.default.fileExists(atPath: $0) }
         if let ghostty {
