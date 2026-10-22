@@ -40,7 +40,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 | | |
 |---|---|
 | **Edge tab & rail** | While agents work, a small tab at the right screen edge shows a spinning ring per working agent, amber for one waiting on you, green for done. Hover it (or rest on an empty edge for half a second) for the rail: inbox, your agents, Ask, Settings, ⋯. A question waiting on you sits beside it — answer with 1, 2, 3. Click the dots for every agent (grouped only when a project has several, its sub-folders with it; counts per state past 8 agents), with one click to its terminal. Prefer the menu bar? Settings → Edge & Rail → *Menu bar*: no edge, and no Dock icon except while a terminal window is open (so ⌘Tab finds it); Reflex's icon counts questions (amber) and working agents (blue), a click opens the question or every agent under it, a right-click the menu. |
-| **⌥⌥ Ask bar** | Double-tap Option and type. A few words search your sessions, most recently used first (⏎ opens that terminal), then earlier sessions and your folders that match (⏎ on a folder starts a new session there and opens it). A sentence or question becomes a request: a Raycast-style list of where it could go — live sessions, folders to start one in, earlier conversations to resume — with Jev's pick on top and a weight per row (pick a row yourself before Jev answers and the list stays as it was). ⏎ sends (the terminal stays closed); ⌘⏎ sends and opens it. ⇧⏎ or ⌥⏎ starts a new line; in a request of several lines ↑↓ move through the text and choose a row from its first or last line, while Tab and ⌃N / ⌃P always choose. `/claude`, `/pi`, `/codex`… pick the agent for new sessions, `/new` starts in a new folder, `/btw` asks on the side, `/folder` picks any folder, `/resume` lists earlier sessions (once you type, an open session that matches comes first). Paste or drop images: Jev routes on your words, the agent gets the image. A request you haven't sent stays in the bar when you click away (to copy the next image) or press ⌥⌥; Esc clears it. |
+| **⌥⌥ Ask bar** | Double-tap Option and type. A few words search your sessions, most recently used first (⏎ opens that terminal), then earlier sessions and your folders that match (⏎ on a folder starts a new session there and opens it). A sentence or question becomes a request: a Raycast-style list of where it could go — live sessions, folders to start one in, earlier conversations to resume — with Jev's pick on top and a weight per row (pick a row yourself before Jev answers and the list stays as it was). ⏎ sends (the terminal stays closed); ⌘⏎ sends and opens it. ⇧⏎ or ⌥⏎ starts a new line; in a request of several lines ↑↓ move through the text and choose a row from its first or last line, while Tab and ⌃N / ⌃P always choose. `/claude`, `/pi`, `/codex`… pick the agent for new sessions, `/new` starts in a new folder, `/btw` asks on the side, `/folder` picks any folder, `/resume` lists earlier sessions (once you type, an open session that matches comes first). `@work` keeps everything on another Mac: the search, the request, Jev's candidates and any session it starts (typing `@` lists your Macs). Paste or drop images: Jev routes on your words, the agent gets the image. A request you haven't sent stays in the bar when you click away (to copy the next image) or press ⌥⌥; Esc clears it. |
 | **It remembers** | Where your recent requests went, so “also add tests for that” lands in the same session; and where you overrode Jev, so a similar request goes where you sent it. Kept on your Mac; Settings → Routing shows it and forgets it. |
 | **Unsure? It asks.** | When Jev isn't sure, nothing is sent on its own: its best guess is highlighted for you to confirm. Without Jev at all (no key, not installed) the bar still works — you choose. |
 | **Questions** | Every question an agent stops on — numbered options, Claude's `AskUserQuestion` (several questions, multi-select with a Next step, the review), arrow menus like the folder-trust prompt — becomes a card you can answer from the rail, the inbox or your phone. For Claude the rail's card reads the question from its session file: the whole question, each choice's description, which of several questions it is, and for a permission prompt what the command is for, with the command itself a click away. Choices with a preview say so; the preview stays in the terminal. |
@@ -49,7 +49,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 | **btw** | Start with `btw` to ask without interrupting: Claude Code gets its native `/btw`; pi (and Claude when it is blocked on a dialog) gets a headless, unsaved fork of its session. |
 | **Terminals** | A real terminal on any agent (SwiftTerm, attached through herdr): full colour, keys and resizing go straight to its TUI. ⌘⌫ clears the line, ⌘← / ⌘→ go to its start and end, ⇧⏎ starts a new line in Claude Code and ⌃⏎ steers it, as in Ghostty. ⌘-click opens a link, written out or OSC 8. One window per session. herdr gives a terminal to one attached client at a time: while another window or another Mac has it, the window shares it — shown live, and what you type goes in too (through herdr's API), while the other sets the size. **Take Over** makes this one the attached one; taken from, it goes back to sharing; the button in its header hands it over. Ghostty themes with light and dark slots, Geist Mono when installed. |
 | **Phone** | ⋯ on the rail → *Take Reflex with You*: a QR code that works once and expires in ten minutes. On the phone: your agents, their questions with big answer buttons, updates, and a live terminal you can type into (keys for esc, tab, arrows, ⏎, ^C, ctrl). Light, dark or system. |
-| **Other Macs** | Agents on your other Macs show up with this Mac's, in the rail, the inbox, the Ask bar and terminals, tagged with the machine (`work: ~/project`). Add a Mac in Settings → Machines (or the optional onboarding step): type its SSH host, **Test** says what's in the way — Remote Login off or limited to some users, no key yet, a host key never seen, asleep or off the tailnet, herdr missing — and **Add** saves it with `herdr machine add`, the same saved machines herdr's own sidebar uses; Reflex keeps an SSH tunnel to each enabled one through your own `~/.ssh/config`, keys and agent (Tailscale works: `ProxyCommand tailscale nc %h %p`) and reconnects when it drops. They wear the machine's name in lists and a badge on their dots, dimmed while its tunnel reconnects; Settings → Machines lists herdr's machines and how each is connected. You can send them requests, answer their questions and open their terminals. New sessions, resuming earlier ones and headless `/btw` forks still start on this Mac only. |
+| **Other Macs** | Agents on your other Macs show up with this Mac's, in the rail, the inbox, the Ask bar and terminals, tagged with the machine (`work: ~/project`). Add a Mac in Settings → Machines (or the optional onboarding step): type its SSH host, **Test** says what's in the way — Remote Login off or limited to some users, no key yet, a host key never seen, asleep or off the tailnet, herdr missing — and **Add** saves it with `herdr machine add`, the same saved machines herdr's own sidebar uses; Reflex keeps an SSH tunnel to each enabled one through your own `~/.ssh/config`, keys and agent (Tailscale works: `ProxyCommand tailscale nc %h %p`) and reconnects when it drops. They wear the machine's name in lists and a badge on their dots, dimmed while its tunnel reconnects; Settings → Machines lists herdr's machines and how each is connected. You can send them requests, answer their questions and open their terminals. Their folders and earlier Claude, pi and Codex sessions join the search and `/resume`, wearing the machine's name: Reflex reads them over the same SSH (its folder scan runs there under the same roots, relative to that Mac's home; session files are read at their start and end, only when they change; nothing is installed there). ⏎ on one starts or resumes it in that Mac's herdr. A request goes to this Mac's folders unless you start it with `@work`, which keeps it — and Jev's candidates — on that Mac. Headless `/btw` forks still run on this Mac only. |
 | **Keep awake** | While agents work (or always), the Mac doesn't idle-sleep; on battery below 20% (adjustable) it lets go. |
 
 ## Requirements
@@ -113,7 +113,9 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
 - `daemon/tests/sent.bend` — whether a sent prompt sits typed but unsent in
   the agent's input box, or never arrived (both are put right after sending).
 - `daemon/tests/machines.bend` — which herdr an agent on another Mac is
-  reached through, and its agents kept while the tunnel reconnects.
+  reached through, its agents kept while the tunnel reconnects, and places
+  there (`work:/Users/you/VCS/app`): their machine, path, how Jev reads them
+  and which a request scoped to one machine may start in.
 - `REFLEX_PROFILE=<folder> build/Reflex.app/Contents/MacOS/Reflex` — Reflex as
   a new user meets it: its own settings, support folder, Keychain entry and
   port. Add `REFLEX_PATH=/usr/bin:/bin` to see it with nothing installed.
@@ -141,13 +143,18 @@ curl -H 'authorization: Bearer dev' localhost:47823/api/state
 
 ### API
 
-`GET /api/state` · `POST /api/route {text, dry?, memory?}` · `POST /api/candidates {text, harness?, memory?}` ·
+`GET /api/state` · `POST /api/route {text, dry?, memory?}` · `POST /api/candidates {text, harness?, memory?, machine?}` ·
 `POST /api/explain {text}` · `POST /api/send {pane, text}` · `POST /api/side {pane, text}` ·
 `POST /api/spawn {cwd, kind?, text}` · `POST /api/resume {cwd, kind, session, mode, text}` ·
 `POST /api/answer {item, key}` · `POST /api/dismiss {item}` · `POST /api/note {pane, agent, title, body}` ·
 `GET /api/pane?id=&lines=&format=ansi` · `POST /api/keys {pane, key}` · `POST /api/text {pane, text}` ·
-`POST /api/focus {pane}` · `POST /api/close {pane}` · `GET /api/folders?q=` · `GET /api/sessions` ·
-`POST /api/reindex` · `POST /api/cancel {id}` · `GET /api/jev/ping` · `GET /api/health` · `POST /api/pair {code}`.
+`POST /api/focus {pane}` · `POST /api/close {pane}` · `GET /api/folders?q=&machine=` · `GET /api/sessions` ·
+`POST /api/reindex {machines?}` · `POST /api/cancel {id}` · `GET /api/jev/ping` · `GET /api/health` · `POST /api/pair {code}`.
+A folder or earlier session on another Mac has the path `<machine>:<path>`
+(`work:/Users/you/VCS/app`): `spawn` and `resume` start it in that Mac's herdr.
+`machine` scopes routing to one Mac (`""`, the default: every live session, and
+this Mac's folders and earlier sessions); `/api/folders` takes `.` for this Mac
+only, and every Mac's without it.
 Every call except health and pair needs the token.
 
 ## How routing works
@@ -210,7 +217,9 @@ runtime are assumptions. `--verdict` re-checks with Bend's Lean-proven kernel.
   when you allow it, with a warning: that traffic is unencrypted.
 - Everything stays on your Mac: routing memory (`memory.json`), the index of
   earlier sessions (`sessions.tsv`), pasted images (a temporary folder). No
-  telemetry.
+  telemetry. From your other Macs, Reflex reads their folders and the start
+  and end of their session files over your own SSH, into the same files here
+  (`machines/<machine>.folders`, `sessions.tsv`).
 - Routing sends Jev's provider your request with the short context Jev chooses
   from: your live sessions' titles and last few screen lines, candidate
   folders' names, descriptions and recent commit subjects, earlier

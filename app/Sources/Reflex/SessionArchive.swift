@@ -3,9 +3,11 @@ import Foundation
 
 // Earlier agent sessions that could be resumed: Claude's, pi's and Codex's
 // saved sessions (read from their own session files), and Claude's
-// background sessions (`claude agents --json --all`). Sessions already live in
-// herdr are left out. Written to sessions.tsv for reflexd, which offers the
-// relevant few to Jev, and shown in the Ask bar's search and the rail.
+// background sessions (`claude agents --json --all`) — this Mac's, and those
+// on the other Macs with a tunnel (RemoteIndex reads theirs over ssh; their
+// cwd is "<machine>:<path>", see Place). Sessions already live in herdr are
+// left out. Written to sessions.tsv for reflexd, which offers the relevant
+// few to Jev, and shown in the Ask bar's search and the rail.
 //
 // Each file is read only at its start and end, and again only when it
 // changes, so even thousands of sessions stay cheap.
@@ -20,7 +22,9 @@ struct PastSession: Identifiable, Hashable {
     var modified: Date
     var state: State
 
-    var folder: String { (cwd as NSString).lastPathComponent }
+    var folder: String { (Place.path(cwd) as NSString).lastPathComponent }
+    /// The Mac it was saved on, "" for this one.
+    var machine: String { Place.machine(cwd) }
     var ageHours: Int { max(0, Int(Date().timeIntervalSince(modified) / 3600)) }
 
     /// How ⏎ brings it back: attach a running background session, fork one
@@ -62,6 +66,17 @@ final class SessionArchive: ObservableObject {
         }
     }
 
+    /// This Mac's sessions, as last scanned, and each other Mac's.
+    private var here: [PastSession] = []
+    private var remote: [String: [PastSession]] = [:]
+
+    /// A machine's sessions, read again (or [] once it is gone).
+    func setRemote(_ machine: String, _ found: [PastSession]) {
+        guard remote[machine] != found else { return }
+        remote[machine] = found.isEmpty ? nil : found
+        publish()
+    }
+
     func refresh() {
         guard !scanning else { return }
         scanning = true
@@ -75,20 +90,22 @@ final class SessionArchive: ObservableObject {
             await MainActor.run {
                 self.cache = kept
                 self.background = states
-                self.publish(found)
+                self.here = found
+                self.publish()
                 self.scanning = false
             }
         }
     }
 
     /// Merge background states, drop sessions live in herdr, write the file.
-    private func publish(_ found: [PastSession]) {
+    private func publish() {
         let live = Set(Store.shared.state.agents.map(\.session).filter { !$0.isEmpty })
         var out: [PastSession] = []
-        for var s in found where !live.contains(s.id) {
+        for var s in here where !live.contains(s.id) {
             if let st = background[s.id] { s.state = st }
             out.append(s)
         }
+        for s in remote.values.joined() where !live.contains(s.id) { out.append(s) }
         out.sort { $0.modified > $1.modified }
         sessions = Array(out.prefix(400))
         let tsv = sessions.map { s in
@@ -103,11 +120,13 @@ final class SessionArchive: ObservableObject {
 
     // MARK: Matching (for the Ask bar)
 
-    /// Sessions whose title, last prompt, folder or agent contain every word.
-    func matching(_ query: String, limit: Int = 8) -> [PastSession] {
+    /// Sessions whose title, last prompt, folder, agent or Mac contain every
+    /// word; only one Mac's ("@work") when `machine` is set.
+    func matching(_ query: String, on machine: String? = nil, limit: Int = 8) -> [PastSession] {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return Array(sessions.lazy.filter { s in
-            let hay = "\(s.title) \(s.last) \(s.folder) \(s.agent)".lowercased()
+            if let machine, s.machine != machine { return false }
+            let hay = "\(s.title) \(s.last) \(s.folder) \(s.agent) \(s.machine)".lowercased()
             return words.allSatisfy { hay.contains($0) }
         }.prefix(limit))
     }
@@ -165,6 +184,12 @@ final class SessionArchive: ObservableObject {
             try? h.seek(toOffset: from)
             tail = (try? h.readToEnd()) ?? Data()
         }
+        return read(agent: agent, url: url, head: head, tail: tail, modified: modified)
+    }
+
+    /// A session file's start and end (`tail` empty when the start is all
+    /// of it): read the same here and from another Mac.
+    nonisolated static func read(agent: String, url: URL, head: Data, tail: Data, modified: Date) -> PastSession? {
         let headLines = lines(head, dropFirst: false)
         let tailLines = tail.isEmpty ? headLines : lines(tail, dropFirst: true)
         switch agent {

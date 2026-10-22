@@ -20,12 +20,39 @@ struct AgentInfo: Codable, Identifiable, Hashable {
     var label: String { "\(kind) · \(folder)" + (remote ? " on \(machine)" : "") }
     var place: String {
         guard !machine.isEmpty else { return cwd.abbreviatingHome }
-        // Its own home, not this Mac's: /Users/<anyone>/x reads ~/x there.
-        let parts = cwd.split(separator: "/", omittingEmptySubsequences: false)
-        let path = parts.count >= 3 && parts[1] == "Users" ? "~" + parts.dropFirst(3).map { "/" + $0 }.joined() : cwd
-        return "\(machine): \(path)"
+        return "\(machine): \(Place.tilde(cwd))"
     }
     var folder: String { (cwd as NSString).lastPathComponent }
+}
+
+/// A folder or an earlier session on another Mac has the path
+/// "<machine>:<path>" ("work:/Users/you/VCS/app"); one on this Mac has its
+/// plain absolute path. reflexd reads it the same way (daemon/Index.bend):
+/// a session started there starts in that Mac's herdr.
+enum Place {
+    /// The machine a path is on, "" for this Mac.
+    static func machine(_ p: String) -> String {
+        p.isEmpty || p.hasPrefix("/") ? "" : String(p.prefix { $0 != ":" })
+    }
+
+    /// The path on its own machine.
+    static func path(_ p: String) -> String {
+        let m = machine(p)
+        return m.isEmpty ? p : String(p.dropFirst(m.count + 1))
+    }
+
+    static func on(_ machine: String, _ path: String) -> String { machine.isEmpty ? path : machine + ":" + path }
+
+    /// Under its own Mac's home, not this one's: /Users/<anyone>/x reads ~/x.
+    static func tilde(_ path: String) -> String {
+        let parts = path.split(separator: "/", omittingEmptySubsequences: false)
+        return parts.count >= 3 && parts[1] == "Users" ? "~" + parts.dropFirst(3).map { "/" + $0 }.joined() : path
+    }
+
+    /// ~/VCS/app here; ~/VCS/app on another Mac too (its chip says which).
+    static func short(_ p: String) -> String {
+        machine(p).isEmpty ? p.abbreviatingHome : tilde(path(p))
+    }
 }
 
 struct ActionInfo: Codable, Hashable {

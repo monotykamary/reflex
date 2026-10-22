@@ -31,6 +31,8 @@ struct Candidate: Identifiable, Equatable {
     var command: SlashCommand?
     /// An earlier session (resume rows).
     var past: PastSession?
+    /// The Mac it's on, "" for this one.
+    var machine: String { agent?.machine ?? past?.machine ?? Place.machine(path ?? "") }
 }
 
 /// What a leading "/word" does.
@@ -40,6 +42,8 @@ enum SlashCommand: Equatable, Hashable {
     case btw
     case folder
     case resume
+    /// "@work": only that Mac's sessions, folders and earlier sessions.
+    case machine(String)
 
     var token: String {
         switch self {
@@ -48,6 +52,7 @@ enum SlashCommand: Equatable, Hashable {
         case .btw: return "/btw"
         case .folder: return "/folder"
         case .resume: return "/resume"
+        case .machine(let m): return "@" + m
         }
     }
 
@@ -59,6 +64,7 @@ enum SlashCommand: Equatable, Hashable {
         case .btw: return "Ask a side question, without interrupting"
         case .folder: return "Choose any folder to start in"
         case .resume: return "Bring back an earlier session — Claude, pi or Codex"
+        case .machine(let m): return "Only \(m)'s sessions, folders and earlier sessions; new sessions start there"
         }
     }
 
@@ -100,6 +106,8 @@ final class CommandModel: ObservableObject {
     @Published var resumeOnly = false
     @Published var sideForced = false
     @Published var newForced = false
+    /// "@work": the request, the search and new sessions stay on that Mac.
+    @Published var machine: String?
 
     // The list.
     @Published private(set) var jev: CandidatesResponse?
@@ -192,6 +200,7 @@ final class CommandModel: ObservableObject {
         resumeOnly = false
         sideForced = false
         newForced = false
+        machine = nil
         jev = nil
         jevText = ""
         thinking = false
@@ -210,7 +219,7 @@ final class CommandModel: ObservableObject {
     /// Words, images or a slash command in force: something to come back to.
     var hasDraft: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
-            || harness != nil || resumeOnly || sideForced || newForced
+            || harness != nil || resumeOnly || sideForced || newForced || machine != nil
     }
 
     /// When the bar last went away with its request unsent.
@@ -227,7 +236,7 @@ final class CommandModel: ObservableObject {
     /// What is in the bar, while it is a request still to send.
     private var draft: Draft? {
         guard hasDraft, phase == .typing || isFailed, mode == .ask || !attachments.isEmpty else { return nil }
-        return Draft(text: text, images: attachments.map(\.url.path), harness: harness)
+        return Draft(text: text, images: attachments.map(\.url.path), harness: harness, machine: machine)
     }
 
     /// Reflex quitting (an update, a restart): what is in the bar is the one
@@ -239,6 +248,7 @@ final class CommandModel: ObservableObject {
         guard let d = lost, text.isEmpty, attachments.isEmpty else { return false }
         lost = nil
         harness = d.harness ?? harness
+        machine = d.machine ?? machine
         attachments = d.images.compactMap { Attachments.file(URL(fileURLWithPath: $0)) }
         text = d.text
         Draft.write(draft)
@@ -279,6 +289,20 @@ final class CommandModel: ObservableObject {
     var commandQuery: String? {
         guard text.hasPrefix("/"), !text.contains(" ") else { return nil }
         return String(text.dropFirst()).lowercased()
+    }
+
+    /// While typing "@a…" (no space yet), the list is your other Macs.
+    var machineQuery: String? {
+        guard text.hasPrefix("@"), !text.contains(" ") else { return nil }
+        return String(text.dropFirst()).lowercased()
+    }
+
+    /// The machine "@word" names: its key, or the start of its name in herdr.
+    static func machineNamed(_ word: String) -> String? {
+        let w = word.lowercased()
+        let rows = MachinesModel.shared.rows
+        return (rows.first { $0.key == w || $0.label.lowercased() == w }
+            ?? rows.first { $0.key.hasPrefix(w) || $0.label.lowercased().hasPrefix(w) }).map(\.key)
     }
 
     enum Mode: Equatable { case search, ask }
@@ -364,6 +388,18 @@ final class CommandModel: ObservableObject {
     }
 
     private func textChanged() {
+        // A leading "@work " (typed or pasted) becomes the machine token.
+        if text.hasPrefix("@"), let space = text.firstIndex(where: \.isWhitespace) {
+            let word = String(text[text.index(after: text.startIndex)..<space])
+            if !word.isEmpty, let m = CommandModel.machineNamed(word) {
+                let rest = String(text[space...]).trimmingCharacters(in: .whitespaces)
+                machine = m
+                text = rest
+                focusTick += 1
+                schedule()
+                return
+            }
+        }
         // A completed "/word " becomes a token.
         if text.hasSuffix(" "), text.hasPrefix("/") {
             let word = "/" + String(text.dropFirst().dropLast()).lowercased()
@@ -392,14 +428,15 @@ final class CommandModel: ObservableObject {
         case .btw: sideForced = true
         case .folder: chooseFolder()
         case .resume: resumeOnly = true; SessionArchive.shared.refresh()
+        case .machine(let m): machine = m
         }
-        if text.hasPrefix("/") { text = "" }
+        if text.hasPrefix("/") || text.hasPrefix("@") { text = "" }
         focusTick += 1
         schedule()
     }
 
     /// What sits before the text: the slash commands in force and the images.
-    enum Token: Hashable { case harness, newFolder, side, resume, image(UUID) }
+    enum Token: Hashable { case machine, harness, newFolder, side, resume, image(UUID) }
 
     /// The × on a token: take that one off.
     func remove(_ t: Token) {
@@ -408,6 +445,7 @@ final class CommandModel: ObservableObject {
         case .newFolder: newForced = false
         case .side: sideForced = false
         case .resume: resumeOnly = false
+        case .machine: machine = nil
         case .image(let id): attachments.removeAll { $0.id == id }
         }
         schedule()
@@ -416,7 +454,7 @@ final class CommandModel: ObservableObject {
 
     /// Backspace on an empty field takes the last token off.
     func dropToken() -> Bool {
-        if !attachments.isEmpty { attachments.removeLast() } else if resumeOnly { resumeOnly = false } else if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else { return false }
+        if !attachments.isEmpty { attachments.removeLast() } else if resumeOnly { resumeOnly = false } else if newForced { newForced = false } else if sideForced { sideForced = false } else if harness != nil { harness = nil } else if machine != nil { machine = nil } else { return false }
         schedule()
         return true
     }
@@ -444,8 +482,9 @@ final class CommandModel: ObservableObject {
         generation += 1
         let gen = generation
         let words = request
+        let scope = folderScope
         Task { [weak self] in
-            let fs = await Client.local.folders(words)
+            let fs = await Client.local.folders(words, machine: scope)
             guard let self, self.generation == gen else { return }
             self.local = fs
             self.settle()
@@ -465,12 +504,16 @@ final class CommandModel: ObservableObject {
     }
 
     /// The words are worth a Jev call.
-    private var wantsJev: Bool { commandQuery == nil && mode == .ask && request.count >= 3 }
+    private var wantsJev: Bool { commandQuery == nil && machineQuery == nil && mode == .ask && request.count >= 3 }
+
+    /// Whose folders the list offers: "@work"'s; for a request, this Mac's
+    /// (new work starts here unless you name a Mac); a search finds every Mac's.
+    private var folderScope: String? { machine ?? (mode == .search ? nil : ".") }
 
     /// Jev's answer for the words as they are: remembered, asked now, or
     /// asked when the call in flight comes back.
     private func askJev() {
-        let gen = generation, words = request, h = harness
+        let gen = generation, words = request, h = harness, m = machine
         if let r = remembered(words, h) { return land(r, words) }
         if let asking {
             if asking != gen { queued = true }
@@ -481,7 +524,7 @@ final class CommandModel: ObservableObject {
         thinking = true
         let key = answerKey(words, h)
         Task { [weak self] in
-            let r = try? await Client.local.candidates(words, harness: h)
+            let r = try? await Client.local.candidates(words, harness: h, machine: m)
             guard let self else { return }
             self.asking = nil
             if let r, r.ok {
@@ -521,10 +564,10 @@ final class CommandModel: ObservableObject {
         return a.r
     }
 
-    /// Answers are for the words, the harness and the sessions that were live.
+    /// Answers are for the words, the harness, the machine and the sessions that were live.
     private func answerKey(_ words: String, _ h: String?) -> String {
         let panes = Store.shared.state.agents.map(\.pane).sorted().joined(separator: ",")
-        return [h ?? "", panes, words].joined(separator: "\u{1}")
+        return [h ?? "", machine ?? "", panes, words].joined(separator: "\u{1}")
     }
 
     /// Jev is sure enough to act on ⏎ without a look at the list.
@@ -553,7 +596,8 @@ final class CommandModel: ObservableObject {
 
     // MARK: Rows
 
-    private var agents: [AgentInfo] { Store.shared.state.agents }
+    /// The live sessions the bar offers: all of them, or "@work"'s.
+    private var agents: [AgentInfo] { Store.shared.state.agents.filter { machine == nil || $0.machine == machine } }
 
     private func leaf(_ path: String) -> String { (path as NSString).lastPathComponent }
 
@@ -582,7 +626,7 @@ final class CommandModel: ObservableObject {
     /// Jev's pick: what ⏎ sends to unless you choose otherwise.
     var pick: String? {
         guard mode == .ask else { return nil }
-        if newForced || (keywordHit && !request.isEmpty) { return "new" }
+        if machine == nil, newForced || (keywordHit && !request.isEmpty) { return "new" }
         guard !request.isEmpty, jevText == request, let r = jev else { return nil }
         // No Jev (not set up, or not answering): the local index's top folder,
         // when your words name it; otherwise you choose.
@@ -598,8 +642,10 @@ final class CommandModel: ObservableObject {
         let indexed = Store.shared.state.folders > 0
         // An earlier conversation is only brought back when Jev is sure (the
         // `go` above); unsure, the guess is a live session or a folder.
-        guard let top = r.ranked?.first(where: { $0.action.type != "resume" }) else { return indexed ? "new" : nil }
-        if top.bp < 2500 && indexed { return "new" }
+        // On another Mac ("@work") there is no new folder to fall back on.
+        let newOK = indexed && machine == nil
+        guard let top = r.ranked?.first(where: { $0.action.type != "resume" }) else { return newOK ? "new" : nil }
+        if top.bp < 2500 && newOK { return "new" }
         if let p = top.action.pane, top.action.type == "prompt" { return "s:" + p }
         if let c = top.action.cwd { return "f:" + c }
         return nil
@@ -625,7 +671,7 @@ final class CommandModel: ObservableObject {
         let s = Store.shared.state
         var h = Hasher()
         h.combine(text); h.combine(listText); h.combine(harness); h.combine(resumeOnly); h.combine(sideForced)
-        h.combine(newForced); h.combine(jevText); h.combine(jevStamp)
+        h.combine(newForced); h.combine(machine); h.combine(jevText); h.combine(jevStamp)
         h.combine(local.map(\.path)); h.combine(attachments.count); h.combine(s.folders > 0)
         h.combine(s.agents.map { $0.pane + $0.status + $0.title })
         h.combine(SessionArchive.shared.sessions.count); h.combine(Recents.shared.sorted(s.agents).map(\.pane))
@@ -651,6 +697,12 @@ final class CommandModel: ObservableObject {
                 Candidate(id: "c:" + $0.token, kind: .command, title: $0.token, detail: $0.help, command: $0)
             }
         }
+        if let q = machineQuery {
+            return MachinesModel.shared.rows.filter { $0.link != .off && (q.isEmpty || $0.key.hasPrefix(q) || $0.label.lowercased().hasPrefix(q)) }.map {
+                let c = SlashCommand.machine($0.key)
+                return Candidate(id: "c:" + c.token, kind: .command, title: c.token, detail: c.help, command: c)
+            }
+        }
         if mode == .search { return searchRows }
         let kind = harness ?? Settings.shared.harness
         let side = isSide
@@ -674,11 +726,11 @@ final class CommandModel: ObservableObject {
             var folders: [Candidate] = []
             for r in (jevText == request ? jev?.ranked ?? [] : []) where r.action.type == "spawn" {
                 guard let c = r.action.cwd, seen.insert(c).inserted else { continue }
-                folders.append(Candidate(id: "f:" + c, kind: .folder, title: leaf(c), detail: "new \(kind) · \(c.abbreviatingHome)", bp: r.bp, path: c))
+                folders.append(Candidate(id: "f:" + c, kind: .folder, title: leaf(c), detail: "new \(kind) · \(Place.short(c))", bp: r.bp, path: c))
             }
             for f in local where seen.insert(f.path).inserted {
                 folders.append(Candidate(id: "f:" + f.path, kind: .folder, title: f.name,
-                                         detail: "new \(kind) · \(f.short)" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path))
+                                         detail: "new \(kind) · \(Place.short(f.path))" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path))
             }
             // Folders before earlier sessions: new work is the common case,
             // and the folders must not fall below the fold.
@@ -691,11 +743,13 @@ final class CommandModel: ObservableObject {
                                    last: "", modified: Date(), state: .past)
                 out.append(resumeRow(past, bp: r.bp))
             }
-            if !request.isEmpty {
+            if !request.isEmpty, machine == nil {
                 out.append(Candidate(id: "new", kind: .newFolder, title: "New folder “\(suggestedName)”",
                                      detail: "new \(kind) · \((Settings.shared.newFolderParent as NSString).appendingPathComponent(suggestedName).abbreviatingHome)"))
             }
-            out.append(Candidate(id: "choose", kind: .chooseFolder, title: "Choose folder…", detail: "start in any folder; added to your projects if it's new"))
+            if machine == nil {
+                out.append(Candidate(id: "choose", kind: .chooseFolder, title: "Choose folder…", detail: "start in any folder; added to your projects if it's new"))
+            }
         }
         // Jev's pick first.
         if let p = pick, let i = out.firstIndex(where: { $0.id == p }) {
@@ -710,7 +764,7 @@ final class CommandModel: ObservableObject {
     /// until you type; then a live session that matches comes first too (it
     /// is open already, so ⏎ shows it rather than resuming a second copy).
     private var searchRows: [Candidate] {
-        let pasts = SessionArchive.shared.matching(request, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
+        let pasts = SessionArchive.shared.matching(request, on: machine, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
         if resumeOnly && request.isEmpty { return pasts }
         let live = sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
@@ -720,7 +774,7 @@ final class CommandModel: ObservableObject {
         let kind = Settings.shared.harness
         let folders = resumeOnly ? [] : folderMatches.prefix(5).map { f in
             Candidate(id: "f:" + f.path, kind: .folder, title: f.name,
-                      detail: "new \(kind) · \(f.short)" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path)
+                      detail: "new \(kind) · \(Place.short(f.path))" + (f.desc.isEmpty ? "" : " · \(f.desc)"), path: f.path)
         }
         return live + pasts + folders
     }
@@ -847,12 +901,12 @@ final class CommandModel: ObservableObject {
             guard let a = c.agent else { return c.title }
             return "the \(a.kind) session in \(Memory.short(a.cwd))" + (a.title.isEmpty ? "" : " (\"\(a.title)\")")
         case .folder:
-            return "a new \(kind) session in \(Memory.short(c.path ?? c.title))"
+            return "a new \(kind) session in \(Memory.short(Place.path(c.path ?? c.title)))" + (c.machine.isEmpty ? "" : " on \(c.machine)")
         case .newFolder:
             return "a new project folder"
         case .resume:
             guard let p = c.past else { return c.title }
-            return "the earlier \(p.agent) conversation \"\(p.title)\" in \(Memory.short(p.cwd))"
+            return "the earlier \(p.agent) conversation \"\(p.title)\" in \(Memory.short(Place.path(p.cwd)))" + (p.machine.isEmpty ? "" : " on \(p.machine)")
         default:
             return c.title
         }
@@ -927,7 +981,8 @@ final class CommandModel: ObservableObject {
     }
 
     private func spawn(in path: String, kind: String, text: String, isNew: Bool = false, open: Bool = false) {
-        let label = "\(kind) in \((path as NSString).lastPathComponent)"
+        let m = Place.machine(path)
+        let label = "\(kind) in \((path as NSString).lastPathComponent)" + (m.isEmpty ? "" : " on \(m)")
         phase = .sending((isNew ? "new folder · " : "") + label)
         let t = ticket, started = Date()
         Task {
@@ -1028,6 +1083,7 @@ struct Draft: Codable, Equatable {
     var text: String
     var images: [String]
     var harness: String?
+    var machine: String?
 
     /// "fix the login page…" + 2 images
     var summary: String {
@@ -1176,11 +1232,13 @@ struct CommandBar: View {
         if model.resumeOnly { return "Find an earlier session…" }
         if !model.attachments.isEmpty { return "Say what to do with \(model.attachments.count == 1 ? "it" : "them")…" }
         if let h = model.harness { return "Ask a new \(h) session, or your agents…" }
+        if let m = model.machine { return "Search or ask on \(m)…" }
         return "Search sessions, or ask your agents…"
     }
 
     private var tokens: some View {
         HStack(spacing: 6) {
+            if let m = model.machine { token("@" + m, Tone.remote, .machine) }
             if let h = model.harness { token("/" + h, Tone.route, .harness) }
             if model.newForced { token("/new", Tone.done, .newFolder) }
             if model.sideForced { token("/btw", Tone.blocked, .side) }
@@ -1398,7 +1456,7 @@ struct CommandBar: View {
     /// Section titles: Jev's pick, then each kind of row.
     private func header(before i: Int, rows: [Candidate]) -> String? {
         let c = rows[i]
-        if c.kind == .command { return i == 0 ? "Commands" : nil }
+        if c.kind == .command { return i == 0 ? (model.machineQuery != nil ? "Your other Macs" : "Commands") : nil }
         if i == 0 && c.id == model.pick { return model.unsure ? "Jev's best guess" : "Jev's pick" }
         func group(_ k: Candidate.Kind) -> String {
             switch k {
@@ -1552,7 +1610,11 @@ private struct CandidateRow: View, Equatable {
                     }
                     Text("⏎ to create it and start · esc to keep looking").font(.system(size: 11.5)).foregroundStyle(.secondary)
                 } else {
-                    Text(candidate.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                    HStack(spacing: 5) {
+                        Text(candidate.title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                        // Another Mac's session, folder or earlier session wears its name.
+                        if candidate.kind != .command { MachineChip(machine: candidate.machine) }
+                    }
                     Text(candidate.detail).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
                 }
             }
@@ -1595,7 +1657,11 @@ private struct CandidateRow: View, Equatable {
         case .chooseFolder:
             Image(systemName: "ellipsis.circle").foregroundStyle(.secondary)
         case .command:
-            Image(systemName: "slash.circle").foregroundStyle(Tone.route)
+            if case .machine = candidate.command {
+                Image(systemName: "desktopcomputer").foregroundStyle(Tone.remote)
+            } else {
+                Image(systemName: "slash.circle").foregroundStyle(Tone.route)
+            }
         case .ask:
             Image(systemName: "sparkle").foregroundStyle(Tone.route)
         case .resume:

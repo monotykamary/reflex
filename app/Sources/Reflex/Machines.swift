@@ -127,6 +127,23 @@ final class Machines: @unchecked Sendable {
     /// Ask herdr for its machines now.
     func refresh() { q.async { self.tick() } }
 
+    /// A machine with its tunnel up: its key (in pane ids and places) and
+    /// how ssh reaches it.
+    struct Reach: Hashable {
+        let key: String
+        let target: String
+    }
+
+    /// The machines whose tunnel is up now, and the environment ssh runs in
+    /// (your agent, your config): RemoteIndex reads their folders and
+    /// sessions the same way.
+    func reachable() -> (machines: [Reach], env: [String: String]) {
+        q.sync {
+            let up = tunnels.values.filter { $0.running && Date().timeIntervalSince($0.started) > 3 }
+            return (up.map { Reach(key: $0.key, target: $0.profile.target) }.sorted { $0.key < $1.key }, env)
+        }
+    }
+
     /// The tunnels' ssh processes, readable off `q`: quitting must not wait
     /// behind a slow probe of a machine that's away.
     private let lock = NSLock()

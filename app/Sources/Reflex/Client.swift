@@ -49,9 +49,12 @@ struct Client {
     }
 
     /// Jev's live ranking for the Ask bar's list. Dry: nothing is sent.
-    func candidates(_ text: String, harness: String?) async throws -> CandidatesResponse {
+    /// Jev's ranking; `machine` ("@work") keeps it to that Mac's sessions,
+    /// folders and earlier sessions.
+    func candidates(_ text: String, harness: String?, machine: String? = nil) async throws -> CandidatesResponse {
         var body: [String: Any] = ["text": text, "memory": await Memory.shared.context(for: text)]
         if let harness { body["harness"] = harness }
+        if let machine { body["machine"] = machine }
         return try await post("/api/candidates", body, as: CandidatesResponse.self)
     }
 
@@ -86,6 +89,8 @@ struct Client {
     /// Ends the session: herdr closes the pane and the agent in it.
     func close(_ pane: String) async { await post("/api/close", ["pane": pane]) }
     func reindex() async { await post("/api/reindex", [:]) }
+    /// Another Mac's folders changed (RemoteIndex): merged in, this Mac not scanned again.
+    func reindexMachines() async { await post("/api/reindex", ["machines": true]) }
 
     func pane(_ id: String, lines: Int = 160) async -> String {
         let q = id.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? id
@@ -93,9 +98,11 @@ struct Client {
         return r?.text ?? r?.error ?? ""
     }
 
-    func folders(_ q: String) async -> [FolderInfo] {
+    /// Folders for the words: every Mac's (nil), this Mac's ("."), or one machine's.
+    func folders(_ q: String, machine: String? = nil) async -> [FolderInfo] {
         let e = q.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? q
-        return (try? await get("/api/folders?q=\(e)", as: FoldersResponse.self))?.folders ?? []
+        let m = machine.map { "&machine=" + ($0.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? $0) } ?? ""
+        return (try? await get("/api/folders?q=\(e)\(m)", as: FoldersResponse.self))?.folders ?? []
     }
 }
 

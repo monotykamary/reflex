@@ -45,6 +45,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppDelegate.current = self
         Daemon.shared.start()
         Machines.shared.start()
+        RemoteIndex.shared.start()
         Store.shared.start()
         setupMainMenu()
         setupStatusItem()

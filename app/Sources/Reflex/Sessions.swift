@@ -95,14 +95,15 @@ enum Sessions {
     /// that answer. Watches as long as reflexd waits (about ten minutes).
     @MainActor static func watchStart(_ id: Int, cwd: String, open: Bool) {
         let before = Set(Store.shared.state.agents.map(\.pane))
-        let want = resolved(cwd)
+        // A folder on another Mac starts there: its agent is that Mac's.
+        let want = place(Place.machine(cwd), Place.path(cwd))
         Task {
             var shown = false
             for _ in 0..<1300 {
                 try? await Task.sleep(for: .milliseconds(500))
                 await Store.shared.refresh()
                 let s = Store.shared.state
-                if !shown, let a = s.agents.first(where: { !before.contains($0.pane) && resolved($0.cwd) == want }),
+                if !shown, let a = s.agents.first(where: { !before.contains($0.pane) && place($0.machine, $0.cwd) == want }),
                    open || a.status == "blocked" {
                     AppDelegate.current?.showPane(a.pane)
                     shown = true
@@ -119,6 +120,12 @@ enum Sessions {
     }
 
     /// One spelling per folder: symlinks resolved (/tmp is /private/tmp), no trailing slash.
+    /// Where an agent runs: this Mac's paths resolved (symlinks, /tmp), another
+    /// Mac's as it reports them.
+    private static func place(_ machine: String, _ path: String) -> String {
+        machine.isEmpty ? resolved(path) : Place.on(machine, path)
+    }
+
     private static func resolved(_ path: String) -> String {
         var p = (path as NSString).resolvingSymlinksInPath
         if p.hasPrefix("/tmp/") || p == "/tmp" { p = "/private" + p }

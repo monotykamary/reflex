@@ -115,3 +115,28 @@ def jsons(xs: List<&2, Past>) -> List<&2, String>:
       []
     case Con{p, t}:
       Past.json(p) <> jsons(t)
+
+# Machines
+# --------
+# A session on another Mac has its cwd there as "<machine>:<path>" (see
+# Index: Places on other Macs).
+
+def Past.cwd(p: Past) -> String:
+  match p:
+    case Past{agent, id, cwd, title, last, age, state}:
+      cwd
+
+def on.put(keep: Bool, p: Past, rest: List<&2, Past>) -> List<&2, Past>:
+  match keep:
+    case True{}:
+      p <> rest
+    case False{}:
+      rest
+
+# The sessions on machine m ("" for this Mac).
+def on(+m: String, xs: List<&2, Past>) -> List<&2, Past>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+p, t}:
+      on.put(String.eq(Ix.machine_of(Past.cwd(p)), m), p, on(m, t))

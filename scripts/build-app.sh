@@ -53,7 +53,7 @@ ditto "$(dirname "$bin")/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.fr
 rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$app/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
-cp scripts/reflex-scan.sh scripts/reflex-fork.sh "$app/Contents/Resources/scripts/"
+cp scripts/reflex-scan.sh scripts/reflex-fork.sh scripts/reflex-remote.sh "$app/Contents/Resources/scripts/"
 cp web/* "$app/Contents/Resources/web/"
 mkdir -p "$app/Contents/Resources/integrations/pi"
 cp integrations/pi/reflex-shells.ts "$app/Contents/Resources/integrations/pi/"

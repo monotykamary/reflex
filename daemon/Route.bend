@@ -2,6 +2,7 @@ import Base
 import ./Js.bend as Js
 import ./Model.bend as M
 import ./Past.bend as P
+import ./Index.bend as Ix
 import ./vendor/strict-json/json.bend as J
 
 # Route: turns a request plus what reflexd can see into one typed Jev call,
@@ -45,8 +46,44 @@ def Core_nonempty(+s: String) -> Bool:
   bool_not(String.is_empty(s))
 
 # /Users/x/VCS/a -> ~/VCS/a when `home` is /Users/x
-def short(+home: String, +path: String) -> String:
+def short.here(+home: String, +path: String) -> String:
   home_short.if(String.starts_with(path, home) && Core_nonempty(home), String.drop(path, String.length(home)), path)
+
+def slashes(xs: List<&2, String>) -> String:
+  match xs:
+    case Nil{}:
+      ""
+    case Con{h, t}:
+      "/" ++ h ++ slashes(t)
+
+def tilde.pick(home: Bool, rest: List<&2, String>, path: String) -> String:
+  match home:
+    case True{}:
+      "~" ++ slashes(rest)
+    case False{}:
+      path
+
+def tilde.of(parts: List<&2, String>, path: String) -> String:
+  match parts:
+    case Con{root, Con{+users, Con{+name, rest}}}:
+      tilde.pick(String.eq(users, "Users") && Core_nonempty(name), rest, path)
+    case other:
+      path
+
+# /Users/you/VCS/a -> ~/VCS/a: a path under its own Mac's home.
+def tilde(+path: String) -> String:
+  tilde.of(String.split(path, '/'), path)
+
+def short.pick(here: Bool, +home: String, +path: String) -> String:
+  match here:
+    case True{}:
+      short.here(home, path)
+    case False{}:
+      Ix.machine_of(path) ++ ":" ++ tilde(Ix.path_on(path))
+
+# A path as Jev reads it: ~/VCS/a here, work:~/VCS/a on another Mac.
+def short(+home: String, +path: String) -> String:
+  short.pick(String.is_empty(Ix.machine_of(path)), home, path)
 
 def clip.if(long: Bool, s: String, +n: Nat) -> String:
   match long:
@@ -109,7 +146,7 @@ def title_part(+title: String) -> String:
 def agent_line(+home: String, +i: Nat, s: Seen) -> String:
   match s:
     case Seen{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, recent}:
-      idx("a", i) ++ ": " ++ kind ++ " agent in " ++ short(home, cwd) ++ " (" ++ M.Status.show(status) ++ ")" ++ title_part(title) ++ "\n" ++ indent(String.lines(last_lines(recent, 6n)))
+      idx("a", i) ++ ": " ++ kind ++ " agent in " ++ short(home, Ix.place(Ix.pane_machine(pane), cwd)) ++ " (" ++ M.Status.show(status) ++ ")" ++ title_part(title) ++ "\n" ++ indent(String.lines(last_lines(recent, 6n)))
 
 def agents_text(xs: List<&2, Seen>, +home: String, +i: Nat) -> String:
   match xs:
@@ -209,7 +246,7 @@ def state_text(text: String, +home: String, seen: List<&2, Seen>, folders: List<
 def agent_choice(+home: String, +i: Nat, s: Seen) -> String:
   match s:
     case Seen{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, recent}:
-      Js.kv(idx("a", i), Js.str(kind ++ " in " ++ short(home, cwd) ++ title_part(title)))
+      Js.kv(idx("a", i), Js.str(kind ++ " in " ++ short(home, Ix.place(Ix.pane_machine(pane), cwd)) ++ title_part(title)))
 
 def agent_choices(xs: List<&2, Seen>, +home: String, +i: Nat) -> List<&2, String>:
   match xs:

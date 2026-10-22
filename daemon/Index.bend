@@ -337,3 +337,88 @@ def rank.words(+ws: List<&2, String>, fs: List<&2, M.Folder>, +k: Nat) -> List<&
 # lexical matches, then the most recently active folders.
 def rank(text: String, fs: List<&2, M.Folder>, +k: Nat) -> List<&2, M.Folder>:
   rank.words(words(text), fs, k)
+
+# Places on other Macs
+# --------------------
+# A folder or a session on another Mac (a herdr saved machine, see
+# Herdr: Machines) has the path "<machine>:<path>", "work:/Users/you/VCS/app";
+# one on this Mac has its plain absolute path. Machine keys hold neither ':'
+# nor '/'.
+
+def first_of(parts: List<&2, String>) -> String:
+  match parts:
+    case Nil{}:
+      ""
+    case Con{+m, t}:
+      m
+
+def machine_of.if(here: Bool, +path: String) -> String:
+  match here:
+    case True{}:
+      ""
+    case False{}:
+      first_of(String.split(path, ':'))
+
+# The machine a path is on ("" for this Mac).
+def machine_of(+path: String) -> String:
+  machine_of.if(String.starts_with(path, "/") || String.is_empty(path), path)
+
+def path_on.if(here: Bool, +m: String, +path: String) -> String:
+  match here:
+    case True{}:
+      path
+    case False{}:
+      String.drop(path, 1n+String.length(m))
+
+# The path on its own machine: "work:/Users/you/VCS/app" -> /Users/you/VCS/app.
+def path_on(+path: String) -> String:
+  path_on.if(String.is_empty(machine_of(path)), machine_of(path), path)
+
+# A path on machine m ("" for this Mac).
+def place.if(here: Bool, +m: String, +path: String) -> String:
+  match here:
+    case True{}:
+      path
+    case False{}:
+      m ++ ":" ++ path
+
+def place(+m: String, +path: String) -> String:
+  place.if(String.is_empty(m), m, path)
+
+# The machine of a pane id ("work/w1:p2"; "" for this Mac's "w1:p2").
+def pane_machine.go(+m: String, rest: List<&2, String>) -> String:
+  match rest:
+    case Nil{}:
+      ""
+    case Con{p, t}:
+      m
+
+def pane_machine.of(parts: List<&2, String>) -> String:
+  match parts:
+    case Nil{}:
+      ""
+    case Con{+m, t}:
+      pane_machine.go(m, t)
+
+def pane_machine(pane: String) -> String:
+  pane_machine.of(String.split(pane, '/'))
+
+def Folder.path(f: M.Folder) -> String:
+  match f:
+    case M.Folder{path, name, desc, recent, branch, age, uses}:
+      path
+
+def on.put(keep: Bool, f: M.Folder, rest: List<&2, M.Folder>) -> List<&2, M.Folder>:
+  match keep:
+    case True{}:
+      f <> rest
+    case False{}:
+      rest
+
+# The folders on machine m ("" for this Mac).
+def on(+m: String, fs: List<&2, M.Folder>) -> List<&2, M.Folder>:
+  match fs:
+    case Nil{}:
+      []
+    case Con{+f, t}:
+      on.put(String.eq(machine_of(Folder.path(f)), m), f, on(m, t))

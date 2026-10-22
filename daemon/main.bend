@@ -538,25 +538,28 @@ def PTry.ok(st: PTry) -> Bool:
 
 # Started with nothing to say (a folder chosen with the bar empty): the agent
 # is ready for you in its terminal; there is no prompt to deliver.
-def prompt_if(empty: Bool, +cfg: Cfg, +pane: String, +text: String) -> IO(PTry):
+def prompt_if(empty: Bool, +sock: String, +pane: String, +text: String) -> IO(PTry):
   match empty:
     case True{}:
       IO.pure(PTry, PTry{True{}, True{}, ""})
     case False{}:
-      prompt_retry(860n, Cfg.sock(cfg), pane, text, PTry{False{}, False{}, ""})
+      prompt_retry(860n, sock, pane, text, PTry{False{}, False{}, ""})
 
-def spawned(+cfg: Cfg, +cwd: String, +name: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
+# A session starts in the herdr of the Mac its folder is on: `sock` is that
+# herdr's socket, `m` the machine ("" for this Mac) and `pane` herdr's own id
+# there; the receipt names the pane as reflexd knows it ("work/w3:p1").
+def spawned(+cfg: Cfg, +sock: String, +m: String, +cwd: String, +name: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
   match r:
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
     case Done{v}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        +st : PTry <- prompt_if(String.is_empty(String.trim(text)), cfg, pane, text)
+        +st : PTry <- prompt_if(String.is_empty(String.trim(text)), sock, pane, text)
         record_use(PTry.ok(st), cfg, cwd)
-        confirm.start(PTry.ok(st) && Core.bool_not(String.is_empty(String.trim(text))), Cfg.sock(cfg), pane, text)
-        return spawn_result(name, pane, st)
+        confirm.start(PTry.ok(st) && Core.bool_not(String.is_empty(String.trim(text))), sock, pane, text)
+        return spawn_result(name, Herdr.pane_on(m, pane), st)
 
-def spawn_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +text: String, w: Result<&1, &1, U32 & String, String>) -> IO(Result<&1, &1, U32 & String, String>):
+def spawn_in(+cfg: Cfg, +sock: String, +m: String, +id: U32, +cwd: String, +kind: String, +text: String, w: Result<&1, &1, U32 & String, String>) -> IO(Result<&1, &1, U32 & String, String>):
   match w:
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
@@ -564,8 +567,8 @@ def spawn_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +text: String, w:
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, U32> <- IO.random_u32()
         +name : String <- IO.pure(String, agent_name(id, r))
-        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent(Cfg.sock(cfg), name, kind, pane)
-        spawned(cfg, cwd, name, pane, text, st)
+        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent(sock, name, kind, pane)
+        spawned(cfg, sock, m, cwd, name, pane, text, st)
 
 def resumed_result(+name: String, +pane: String, r: Result<&1, &1, U32 & String, J.JSON>) -> Result<&1, &1, U32 & String, String>:
   match r:
@@ -575,14 +578,14 @@ def resumed_result(+name: String, +pane: String, r: Result<&1, &1, U32 & String,
       Fail{e}
 
 # Started: prompt it when there is a request, else it is simply back.
-def resumed(empty: Bool, +cfg: Cfg, +cwd: String, +name: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
+def resumed(empty: Bool, +cfg: Cfg, +sock: String, +m: String, +cwd: String, +name: String, +pane: String, +text: String, r: Result<&1, &1, U32 & String, J.JSON>) -> IO(Result<&1, &1, U32 & String, String>):
   match empty:
     case True{}:
-      IO.pure(Result<&1, &1, U32 & String, String>, resumed_result(name, pane, r))
+      IO.pure(Result<&1, &1, U32 & String, String>, resumed_result(name, Herdr.pane_on(m, pane), r))
     case False{}:
-      spawned(cfg, cwd, name, pane, text, r)
+      spawned(cfg, sock, m, cwd, name, pane, text, r)
 
-def resume_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +args: List<&2, String>, +text: String, w: Result<&1, &1, U32 & String, String>) -> IO(Result<&1, &1, U32 & String, String>):
+def resume_in(+cfg: Cfg, +sock: String, +m: String, +id: U32, +cwd: String, +kind: String, +args: List<&2, String>, +text: String, w: Result<&1, &1, U32 & String, String>) -> IO(Result<&1, &1, U32 & String, String>):
   match w:
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, String>, Fail{e})
@@ -590,8 +593,19 @@ def resume_in(+cfg: Cfg, +id: U32, +cwd: String, +kind: String, +args: List<&2, 
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, U32> <- IO.random_u32()
         +name : String <- IO.pure(String, agent_name(id, r))
-        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent_args(Cfg.sock(cfg), name, kind, pane, args)
-        resumed(String.is_empty(text), cfg, cwd, name, pane, text, st)
+        st : Result<&1, &1, U32 & String, J.JSON> <- Herdr.start_agent_args(sock, name, kind, pane, args)
+        resumed(String.is_empty(text), cfg, sock, m, cwd, name, pane, text, st)
+
+# A new project folder may not exist yet; mkdir -p is a no-op otherwise. On
+# another Mac the folder comes from its own index: it is there.
+def mkdir_here(here: Bool, +path: String) -> IO(Unit):
+  match here:
+    case True{}:
+      do IO<Unit>:
+        m : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/bin/mkdir", ["-p", path], "", 4096, 5000)
+        return Unit{}
+    case False{}:
+      IO.pure(Unit, Unit{})
 
 # A headless fork runs where the session's files are: on this Mac. One on
 # another machine isn't forked (yet): its own terminal can take the question.
@@ -621,16 +635,20 @@ def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) 
         return ok_detail(r, "asked with /btw")
     case M.SideFork{+pane, kind, cwd, session, text}:
       side_fork(String.is_empty(Herdr.machine(pane)), cfg, chan, pane, label, kind, cwd, session, text)
+    # A folder on another Mac ("work:/Users/you/VCS/app") starts there.
     case M.Resume{+cwd, +kind, +session, +mode, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(Cfg.sock(cfg), cwd, Core.base_name(cwd))
-        resume_in(cfg, id, cwd, kind, R.resume_args(kind, mode, session), text, w)
+        +m : String = Ix.machine_of(cwd)
+        +sock : String = Herdr.at.of(Cfg.sock(cfg), Cfg.machines(cfg), m)
+        w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(sock, Ix.path_on(cwd), Core.base_name(cwd))
+        resume_in(cfg, sock, m, id, cwd, kind, R.resume_args(kind, mode, session), text, w)
     case M.Spawn{+cwd, +kind, +text}:
       do IO<Result<&1, &1, U32 & String, String>>:
-        # A new project folder may not exist yet; mkdir -p is a no-op otherwise.
-        m : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/bin/mkdir", ["-p", cwd], "", 4096, 5000)
-        w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(Cfg.sock(cfg), cwd, Core.base_name(cwd))
-        spawn_in(cfg, id, cwd, kind, text, w)
+        +m : String = Ix.machine_of(cwd)
+        +sock : String = Herdr.at.of(Cfg.sock(cfg), Cfg.machines(cfg), m)
+        mkdir_here(String.is_empty(m), cwd)
+        w : Result<&1, &1, U32 & String, String> <- Herdr.new_workspace(sock, Ix.path_on(cwd), Core.base_name(cwd))
+        spawn_in(cfg, sock, m, id, cwd, kind, text, w)
 
 def receipt(+id: U32, +label: String, r: Result<&1, &1, U32 & String, String>) -> M.Msg:
   match r:
@@ -907,10 +925,48 @@ def poller(fuel: Nat, +cfg: Cfg, +chan: Chan(Env), +prev: List<&2, M.Agent>) -> 
         IO.sleep(700)
         poller(p, cfg, chan, cur)
 
+# The index is this Mac's scan (kept in folders.tsv) and, for each machine
+# with a tunnel, the folders the app scanned there (machines/<m>.folders,
+# paths written "<m>:<path>"). A machine's folders changing re-reads them
+# without scanning this Mac again.
+def folders_cache(+cfg: Cfg) -> String:
+  Cfg.data(cfg) ++ "/folders.tsv"
+
+def machine_folders(ms: List<&2, String>, +cfg: Cfg) -> IO(String):
+  match ms:
+    case Nil{}:
+      IO.pure(String, "")
+    case Con{+m, t}:
+      do IO<String>:
+        r : Result<&1, &1, U32 & String, String> <- Fs.read(Cfg.machines(cfg) ++ "/" ++ m ++ ".folders", 8388608)
+        rest : String <- machine_folders(t, cfg)
+        return text_or(r, "") ++ "\n" ++ rest
+
+def merge(+cfg: Cfg, +chan: Chan(Env), here: String) -> IO(Unit):
+  do IO<Unit>:
+    ms : List<&2, String> <- read_machines(cfg)
+    there : String <- machine_folders(ms, cfg)
+    post(chan, M.Indexed{Ix.parse(here ++ "\n" ++ there)})
+
 def reindex(+cfg: Cfg, +chan: Chan(Env)) -> IO(Unit):
   do IO<Unit>:
     r : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.scan(cfg), [], "", 33554432, 180000)
-    post(chan, M.Indexed{Ix.parse(text_or(stdout_of(r), ""))})
+    +here : String = text_or(stdout_of(r), "")
+    w : Result<&1, &1, U32 & String, Unit> <- Fs.put(folders_cache(cfg), "w", here)
+    merge(cfg, chan, here)
+
+# Only the other Macs' folders changed: this Mac's from its last scan.
+def remerge(+cfg: Cfg, +chan: Chan(Env)) -> IO(Unit):
+  do IO<Unit>:
+    r : Result<&1, &1, U32 & String, String> <- Fs.read(folders_cache(cfg), 33554432)
+    merge(cfg, chan, text_or(r, ""))
+
+def reindex_pick(machines: Bool, +cfg: Cfg, +chan: Chan(Env)) -> IO(Unit):
+  match machines:
+    case True{}:
+      remerge(cfg, chan)
+    case False{}:
+      reindex(cfg, chan)
 
 def indexer(fuel: Nat, +cfg: Cfg, +chan: Chan(Env)) -> IO(Unit):
   match fuel:
@@ -937,6 +993,19 @@ def read_seen(xs: List<&2, M.Agent>, +cfg: Cfg) -> IO(List<&2, R.Seen>):
         r : Result<&1, &1, U32 & String, String> <- Herdr.read_pane(Cfg.at(cfg, Core.Agent.pane(a)), Herdr.bare(Core.Agent.pane(a)), "recent_unwrapped", 40)
         rest : List<&2, R.Seen> <- read_seen(t, cfg)
         return seen_of(a, r) <> rest
+
+# What a request may go to. No machine named: every live session, and this
+# Mac's folders and earlier sessions (new work starts here). "@work" in the
+# bar: only work's sessions, folders and earlier sessions.
+def scope_agents.if(all: Bool, +m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match all:
+    case True{}:
+      xs
+    case False{}:
+      Herdr.on(m, xs)
+
+def scope_agents(+m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  scope_agents.if(String.is_empty(m), m, xs)
 
 def take_agents(xs: List<&2, M.Agent>, n: Nat) -> List<&2, M.Agent>:
   match xs n:
@@ -989,14 +1058,14 @@ def retry(again: Bool, d: R.Decision, dry: Bool, +cfg: Cfg, +chan: Chan(Env), +t
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         act(dry, chan, text, R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts))
 
-def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +memory: String, ctx: M.Reply) -> IO(String):
+def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +memory: String, +machine: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), cfg)
-        +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(scope_agents(machine, agents), 12n), cfg)
+        +cands : List<&2, M.Folder> = Ix.rank(text, Ix.on(machine, folders), 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
-        +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
+        +pasts : List<&2, P.Past> = P.rank(text, P.on(machine, all), 5n)
         +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts, memory)
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         +d : R.Decision = R.decide_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts)
@@ -1004,20 +1073,20 @@ def route_ctx(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: S
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
-def route(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +memory: String) -> IO(String):
+def route(dry: Bool, +cfg: Cfg, +chan: Chan(Env), +text: String, +harness: String, +memory: String, +machine: String) -> IO(String):
   do IO<String>:
     ctx : M.Reply <- ask(chan, M.Context{})
-    route_ctx(dry, cfg, chan, text, harness, memory, ctx)
+    route_ctx(dry, cfg, chan, text, harness, memory, machine, ctx)
 
 # Jev's ranking of every candidate, live, for the Ask bar's list. Dry.
-def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, +memory: String, ctx: M.Reply) -> IO(String):
+def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, +memory: String, +machine: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), cfg)
-        +cands : List<&2, M.Folder> = Ix.rank(text, folders, 8n)
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(scope_agents(machine, agents), 12n), cfg)
+        +cands : List<&2, M.Folder> = Ix.rank(text, Ix.on(machine, folders), 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
-        +pasts : List<&2, P.Past> = P.rank(text, all, 5n)
+        +pasts : List<&2, P.Past> = P.rank(text, P.on(machine, all), 5n)
         +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts, memory)
         t0 : Nat <- IO.now()
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
@@ -1028,13 +1097,13 @@ def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, +memory: String, 
 
 # The JSON request for the candidates routing would show Jev (for a UI or a
 # debugging session), without calling Jev.
-def explain_ctx(+cfg: Cfg, +text: String, +memory: String, ctx: M.Reply) -> IO(String):
+def explain_ctx(+cfg: Cfg, +text: String, +memory: String, +machine: String, ctx: M.Reply) -> IO(String):
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(agents, 12n), cfg)
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(scope_agents(machine, agents), 12n), cfg)
         all : List<&2, P.Past> <- read_pasts(cfg)
-        return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, folders, 8n), P.rank(text, all, 5n), memory)) ++ "}"
+        return "{\"ok\":true,\"jev\":" ++ String.trim(R.request(text, Cfg.home(cfg), seen, Ix.rank(text, Ix.on(machine, folders), 8n), P.rank(text, P.on(machine, all), 5n), memory)) ++ "}"
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false}")
 
@@ -1082,10 +1151,24 @@ def folders_json(+home: String, fs: List<&2, M.Folder>) -> List<&2, String>:
     case Con{M.Folder{+path, name, desc, recent, branch, age, uses}, t}:
       Js.obj([Js.kv("path", Js.str(path)), Js.kv("short", Js.str(R.short(home, path))), Js.kv("name", Js.str(name)), Js.kv("desc", Js.str(desc)), Js.kv("branch", Js.str(branch)), Js.kv("ageHours", Js.num(age))]) <> folders_json(home, t)
 
-def folders_ctx(+home: String, +q: String, ctx: M.Reply) -> String:
+# The Ask bar's folders: every Mac's (no machine), this Mac's ("."), or one
+# machine's.
+def folder_scope.pick(all: Bool, here: Bool, +m: String, fs: List<&2, M.Folder>) -> List<&2, M.Folder>:
+  match all here:
+    case True{} _:
+      fs
+    case False{} True{}:
+      Ix.on("", fs)
+    case False{} False{}:
+      Ix.on(m, fs)
+
+def folder_scope(+m: String, fs: List<&2, M.Folder>) -> List<&2, M.Folder>:
+  folder_scope.pick(String.is_empty(m), String.eq(m, "."), m, fs)
+
+def folders_ctx(+home: String, +q: String, +machine: String, ctx: M.Reply) -> String:
   match ctx:
     case M.RContext{agents, folders}:
-      "{\"ok\":true,\"folders\":" ++ Js.arr(folders_json(home, Ix.rank(q, folders, 12n))) ++ "}"
+      "{\"ok\":true,\"folders\":" ++ Js.arr(folders_json(home, Ix.rank(q, folder_scope(machine, folders), 12n))) ++ "}"
     case M.RText{json}:
       "{\"ok\":false}"
 
@@ -1278,17 +1361,17 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case ERoute{}:
       do IO<String>:
-        r : String <- route(is_true(Js.text_at(body, "dry")), cfg, chan, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"))
+        r : String <- route(is_true(Js.text_at(body, "dry")), cfg, chan, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"), Js.text_at(body, "machine"))
         ok(r)
     case ECandidates{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})
-        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"), ctx)
+        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"), Js.text_at(body, "machine"), ctx)
         ok(r)
     case EExplain{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})
-        r : String <- explain_ctx(cfg, Js.text_at(body, "text"), Js.text_at(body, "memory"), ctx)
+        r : String <- explain_ctx(cfg, Js.text_at(body, "text"), Js.text_at(body, "memory"), Js.text_at(body, "machine"), ctx)
         ok(r)
     case ESend{}:
       do IO<String>:
@@ -1318,10 +1401,10 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
     case EFolders{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})
-        ok(folders_ctx(Cfg.home(cfg), Http.Req.query(req, "q"), ctx))
+        ok(folders_ctx(Cfg.home(cfg), Http.Req.query(req, "q"), Http.Req.query(req, "machine"), ctx))
     case EReindex{}:
       do IO<String>:
-        IO.spawn(Unit, reindex(cfg, chan))
+        IO.spawn(Unit, reindex_pick(is_true(Js.text_at(body, "machines")), cfg, chan))
         ok("{\"ok\":true}")
     case EHealth{}:
       ok("{\"ok\":true,\"service\":\"reflexd\"}")

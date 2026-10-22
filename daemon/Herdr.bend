@@ -104,6 +104,17 @@ def at.of(sock: String, dir: String, +m: String) -> String:
 def at(sock: String, dir: String, pane: String) -> String:
   at.of(sock, dir, machine(pane))
 
+def pane_on.if(here: Bool, +m: String, +pane: String) -> String:
+  match here:
+    case True{}:
+      pane
+    case False{}:
+      m ++ "/" ++ pane
+
+# A pane of machine m's herdr, as reflexd knows it ("work/w1:p2").
+def pane_on(+m: String, +pane: String) -> String:
+  pane_on.if(String.is_empty(m), m, pane)
+
 def tag(+m: String, a: M.Agent) -> M.Agent:
   match a:
     case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
