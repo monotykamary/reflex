@@ -1,0 +1,85 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    #rail-z { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; gap: 14px; zoom: 2.5; }
+    /* The rail's agent list: title, the machine's chip, then kind · folder · state. */
+    #rail-list { width: 330px; padding: 8px; border-radius: 16px; display: flex; flex-direction: column; --bgc: #18191e; clip-path: inset(0 0 126px 0 round 16px); }
+    .rail-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 9px; height: 42px; }
+    .rail-row .tx { min-width: 0; }
+    .rail-row .t { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
+    .rail-row .d { font-size: 11.5px; color: rgba(237,237,239,.55); }
+    .rail-row.new { opacity: 0; }
+    #rail-r1 { background: rgba(255,255,255,.1); }
+    #rail-tab { display: flex; flex-direction: column; gap: 11px; padding: 21px 7px 21px 8px; border-radius: 12px 0 0 12px;
+      background: #0f1013; border: 1px solid rgba(255,255,255,.1); border-right: 0; --bgc: #0f1013; }
+    .rail-tg.new { opacity: 0; }
+    .rail-line { left: 150px; right: auto; text-align: left; top: 470px; opacity: 0; }
+  </style>
+  <div data-hf-id="hf-3szf" id="root" data-composition-id="rail" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-ygft" class="ground"></div>
+    <div data-hf-id="hf-z7ic" id="rail-z">
+      <div data-hf-id="hf-rsu8" id="rail-list" class="surface">
+        <div data-hf-id="hf-9j2h" class="rail-row" id="rail-r1">
+          <div data-hf-id="hf-pqq7" class="gl" style="--s:9px"><svg data-hf-id="hf-pmy7" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-h8j7" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-jpn7" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-9s2p" class="badge"></div></div>
+          <div data-hf-id="hf-xias" class="tx"><div data-hf-id="hf-49v5" class="t">Ingest pipeline fix <span data-hf-id="hf-3kz1" class="chip"><svg data-hf-id="hf-ypo9" class="ic"><use data-hf-id="hf-gmbt" href="#i-desk"/></svg>studio</span></div><div data-hf-id="hf-u4bx" class="d">claude · pipeline · working</div></div>
+        </div>
+        <div data-hf-id="hf-gdqh" class="rail-row rail-old">
+          <div data-hf-id="hf-7ve7" class="gl" style="--s:9px"><svg data-hf-id="hf-8wwf" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-l977" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-11bn" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg></div>
+          <div data-hf-id="hf-onfg" class="tx"><div data-hf-id="hf-letb" class="t">Billing webhooks</div><div data-hf-id="hf-azzz" class="d">codex · billing · working</div></div>
+        </div>
+        <div data-hf-id="hf-rfjx" class="rail-row rail-old">
+          <div data-hf-id="hf-7h36" class="gl" style="--s:9px"><div data-hf-id="hf-w2y3" class="dot done"></div></div>
+          <div data-hf-id="hf-ngid" class="tx"><div data-hf-id="hf-nxsh" class="t">Dashboard charts</div><div data-hf-id="hf-8qc3" class="d">claude · dash · done, unread</div></div>
+        </div>
+        <div data-hf-id="hf-smh0" class="rail-row rail-old">
+          <div data-hf-id="hf-72s5" class="gl" style="--s:9px"><div data-hf-id="hf-f0ih" class="dot idle"></div></div>
+          <div data-hf-id="hf-nute" class="tx"><div data-hf-id="hf-b8go" class="t">Docs refresh</div><div data-hf-id="hf-noc2" class="d">pi · docs · idle</div></div>
+        </div>
+        <div data-hf-id="hf-ioof" class="rail-row new" id="rail-n1">
+          <div data-hf-id="hf-9uxc" class="gl" style="--s:9px"><svg data-hf-id="hf-8ile" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-kuw6" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-0n0m" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-46et" class="badge"></div></div>
+          <div data-hf-id="hf-pucj" class="tx"><div data-hf-id="hf-nnqd" class="t">Model eval sweep <span data-hf-id="hf-2qw1" class="chip"><svg data-hf-id="hf-r971" class="ic"><use data-hf-id="hf-pq7x" href="#i-desk"/></svg>studio</span></div><div data-hf-id="hf-suef" class="d">codex · evals · working</div></div>
+        </div>
+        <div data-hf-id="hf-a0sk" class="rail-row new" id="rail-n2">
+          <div data-hf-id="hf-9gmb" class="gl" style="--s:9px"><div data-hf-id="hf-b36w" class="dot wait"></div><div data-hf-id="hf-5dbw" class="badge"></div></div>
+          <div data-hf-id="hf-q8nk" class="tx"><div data-hf-id="hf-ov68" class="t">Release notes <span data-hf-id="hf-3xt4" class="chip"><svg data-hf-id="hf-sg44" class="ic"><use data-hf-id="hf-qx50" href="#i-desk"/></svg>studio</span></div><div data-hf-id="hf-hx82" class="d">pi · site · needs you</div></div>
+        </div>
+        <div data-hf-id="hf-asgd" class="rail-row new" id="rail-n3">
+          <div data-hf-id="hf-92ba" class="gl" style="--s:9px"><svg data-hf-id="hf-84ad" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-kgl5" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-08pl" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-4z0v" class="badge"></div></div>
+          <div data-hf-id="hf-p1qh" class="tx"><div data-hf-id="hf-p90d" class="t">Nightly backfill <span data-hf-id="hf-8bii" class="chip"><svg data-hf-id="hf-s1t3" class="ic"><use data-hf-id="hf-qitz" href="#i-desk"/></svg>mac-mini</span></div><div data-hf-id="hf-2kga" class="d">claude · warehouse · working</div></div>
+        </div>
+      </div>
+      <div data-hf-id="hf-qdcv" id="rail-tab">
+        <div data-hf-id="hf-3mee" class="gl rail-tg" style="--s:11px"><svg data-hf-id="hf-awfk" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-k2a4" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-zuek" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-a7x2" class="badge"></div></div>
+        <div data-hf-id="hf-kfqi" class="gl rail-tg" style="--s:11px"><svg data-hf-id="hf-ai4j" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-jnz3" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-zg3j" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg></div>
+        <div data-hf-id="hf-ku1j" class="gl rail-tg" style="--s:11px"><div data-hf-id="hf-wwcr" class="dot done"></div></div>
+        <div data-hf-id="hf-l8ck" class="gl rail-tg" style="--s:11px"><div data-hf-id="hf-o2lp" class="dot idle"></div></div>
+        <div data-hf-id="hf-vz0o" class="gl rail-tg new" id="rail-t1" style="--s:11px"><svg data-hf-id="hf-a3ti" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-j9o2" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-z1si" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-9tm1" class="badge"></div></div>
+        <div data-hf-id="hf-qsad" class="gl rail-tg new" id="rail-t2" style="--s:11px"><div data-hf-id="hf-jj6o" class="dot wait"></div><div data-hf-id="hf-b0j4" class="badge"></div></div>
+        <div data-hf-id="hf-j55u" class="gl rail-tg new" id="rail-t3" style="--s:11px"><svg data-hf-id="hf-9pih" class="ring rail-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-ivd1" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-ynhh" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-am83" class="badge"></div></div>
+      </div>
+    </div>
+    <div data-hf-id="hf-ljni" class="line say rail-line" id="rail-l1"><span data-hf-id="hf-7yfe" class="m"><span data-hf-id="hf-0ypg" class="w">Wherever</span></span> <span data-hf-id="hf-48ge" class="m"><span data-hf-id="hf-tg9q" class="w">they</span></span> <span data-hf-id="hf-4mrf" class="m"><span data-hf-id="hf-zsxl" class="w">run.</span></span></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const RF = window.RF;
+    document.querySelectorAll("#rail-z .rail-spin").forEach((el) => RF.spin(tl, el, 0, 4.8));
+
+    // The terminal lands as its row; this Mac's agents settle in under it.
+    tl.fromTo("#rail-z", { opacity: 0, x: 40 }, { opacity: 1, x: 0, duration: 0.6, ease: "expo.out" }, 0);
+    tl.fromTo("#rail-r1", { backgroundColor: "rgba(255,255,255,.16)" }, { backgroundColor: "rgba(255,255,255,0)", duration: 1.2, ease: "power2.inOut" }, 0.6);
+    RF.lineIn(tl, "#rail-l1", 0.5);
+
+    // studio's and mac-mini's land on the score's notes: 26.4, 27.3, 27.6.
+    [["#rail-n1", "#rail-t1", 2.4], ["#rail-n2", "#rail-t2", 3.3], ["#rail-n3", "#rail-t3", 3.6]].forEach(([row, dot, t]) => {
+      tl.fromTo(row, { opacity: 0, y: -10 }, { opacity: 1, y: 0, duration: 0.45, ease: "expo.out" }, t);
+      tl.to("#rail-list", { clipPath: `inset(0 0 ${126 - 42 * (["#rail-n1", "#rail-n2", "#rail-n3"].indexOf(row) + 1)}px 0 round 16px)`, duration: 0.4, ease: "expo.out" }, t);
+      tl.fromTo(dot, { opacity: 1, scale: 0.2 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2.2)", immediateRender: false }, t);
+    });
+
+    RF.lineOut(tl, "#rail-l1", 4.45);
+    tl.to("#rail-z", { opacity: 0, filter: "blur(8px)", duration: 0.25, ease: "power2.in" }, 4.5);
+
+    window.__timelines["rail"] = tl;
+  </script>
+</template>

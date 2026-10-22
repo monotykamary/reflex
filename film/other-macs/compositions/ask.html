@@ -1,0 +1,116 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    #ask-cam { position: absolute; inset: 0; }
+    #ask-z { position: absolute; right: 0; top: 0; bottom: 0; display: flex; align-items: center; gap: 20px; zoom: 2.2; }
+
+    /* The edge tab (EdgeStrip): glyphs 11 pt, 11 pt apart, rounded on the screen side. */
+    #ask-tab { display: flex; flex-direction: column; gap: 11px; padding: 21px 7px 21px 8px; border-radius: 12px 0 0 12px;
+      background: #0f1013; border: 1px solid rgba(255,255,255,.1); border-right: 0; --bgc: #0f1013; }
+
+    /* The question card (QuestionCard). */
+    #ask-card { width: 340px; padding: 16px; border-radius: 20px; display: flex; flex-direction: column; gap: 12px; opacity: 0; }
+    .ask-head { display: flex; align-items: center; gap: 10px; }
+    .ask-head b { font-size: 15px; font-weight: 600; flex: 1; }
+    .ask-head .ic { font-size: 13px; color: rgba(255,255,255,.55); }
+    .ask-who { display: flex; gap: 9px; align-items: center; }
+    .ask-tile { width: 26px; height: 26px; border-radius: 7px; background: rgba(255,255,255,.07); display: grid; place-items: center; }
+    .ask-who b { display: block; font-size: 13px; font-weight: 600; }
+    .ask-who > div > span { display: block; white-space: nowrap; font-size: 11.5px; color: rgba(237,237,239,.55); margin-top: 1px; }
+    #ask-studio { background: linear-gradient(rgba(41,179,199,.42), rgba(41,179,199,.42)) no-repeat 0 100% / 0% 45%; color: var(--ink); padding: 0 1px; }
+    .ask-q { font-size: 14px; font-weight: 600; line-height: 1.3; }
+    .ask-opts { display: flex; flex-direction: column; gap: 6px; }
+    .ask-opt { display: flex; gap: 9px; align-items: center; padding: 9px 10px; border-radius: 9px; font-size: 13px;
+      background: rgba(255,255,255,.06); border: .5px solid rgba(255,255,255,.1); }
+    .ask-opt i { width: 18px; height: 18px; border-radius: 4px; background: rgba(255,255,255,.08); display: grid; place-items: center;
+      font-style: normal; font-size: 10.5px; font-weight: 600; color: rgba(237,237,239,.55); flex: none; }
+    .ask-foot { display: flex; align-items: center; gap: 5px; font-size: 12px; color: rgba(237,237,239,.55); }
+    .ask-foot .ic { font-size: 12px; }
+
+    .ask-line { left: 150px; right: auto; text-align: left; top: 470px; opacity: 0; }
+    #ask-l1 { opacity: 1; }
+    #ask-k1 { left: 150px; top: 640px; opacity: 0; }
+    #ask-flood { position: absolute; inset: 0; border-radius: 50%; background: var(--remote); opacity: 0; }
+  </style>
+  <div data-hf-id="hf-ltkc" id="root" data-composition-id="ask" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-ygft" class="ground"></div>
+
+    <div data-hf-id="hf-48bm" id="ask-cam">
+      <div data-hf-id="hf-oaid" id="ask-z">
+        <div data-hf-id="hf-2nkp" id="ask-card" class="surface">
+          <div data-hf-id="hf-ykjm" class="ask-head"><b data-hf-id="hf-txqm">Ingest pipeline fix</b><svg data-hf-id="hf-ypo9" class="ic"><use data-hf-id="hf-4bey" href="#i-list"/></svg><svg data-hf-id="hf-r971" class="ic"><use data-hf-id="hf-r08i" href="#i-x"/></svg></div>
+          <div data-hf-id="hf-sk38" class="ask-who">
+            <div data-hf-id="hf-4228" class="ask-tile"><div data-hf-id="hf-nupl" class="gl" style="--s:14px"><div data-hf-id="hf-b36w" class="dot wait"></div></div></div>
+            <div data-hf-id="hf-yeow"><b data-hf-id="hf-86d8">claude · pipeline</b><span data-hf-id="hf-za76">Waiting for your answer · pipeline on <span data-hf-id="hf-btqa" id="ask-studio">studio</span></span></div>
+          </div>
+          <div data-hf-id="hf-s07t" class="ask-q">Run the ingest tests against staging?</div>
+          <div data-hf-id="hf-9dny" class="ask-opts">
+            <div data-hf-id="hf-zx7c" class="ask-opt" id="ask-o1"><i data-hf-id="hf-943b">1</i>Yes</div>
+            <div data-hf-id="hf-b1ee" class="ask-opt ask-rest"><i data-hf-id="hf-8psa">2</i>Yes, and don't ask again for npm test</div>
+            <div data-hf-id="hf-r51c" class="ask-opt ask-rest"><i data-hf-id="hf-8bh9">3</i>No, and tell Claude what to do differently</div>
+          </div>
+          <div data-hf-id="hf-7xkw" class="ask-foot"><svg data-hf-id="hf-sg44" class="ic"><use data-hf-id="hf-pymg" href="#i-term"/></svg>Open terminal</div>
+        </div>
+
+        <div data-hf-id="hf-464i" id="ask-tab">
+          <div data-hf-id="hf-rg4s" class="gl" style="--s:11px"><svg data-hf-id="hf-kr6k" class="ring ask-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-h8j7" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-jpn7" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg></div>
+          <div data-hf-id="hf-zdok" class="gl" style="--s:11px"><svg data-hf-id="hf-cuc4" class="ring ask-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-l977" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-11bn" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg></div>
+          <!-- the agent on studio: working, then waiting on you, then working again -->
+          <div data-hf-id="hf-y6rh" class="gl" style="--s:11px">
+            <svg data-hf-id="hf-wp60" id="ask-rring" class="ring ask-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-kuw6" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-0n0m" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg>
+            <div data-hf-id="hf-hoj2" id="ask-rwait" class="dot wait" style="opacity:0"></div>
+            <div data-hf-id="hf-hjzf" class="badge" style="z-index:5"><div data-hf-id="hf-52sv" id="ask-flood"></div></div>
+          </div>
+          <div data-hf-id="hf-yl2i" class="gl" style="--s:11px"><div data-hf-id="hf-w2y3" class="dot done"></div></div>
+          <div data-hf-id="hf-0kln" class="gl" style="--s:11px"><svg data-hf-id="hf-bnf1" class="ring ask-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-kgl5" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-08pl" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg></div>
+        </div>
+      </div>
+    </div>
+
+    <div data-hf-id="hf-usd4" class="line say ask-line" id="ask-l1"><span data-hf-id="hf-7yfe" class="m"><span data-hf-id="hf-civn" class="w">Your</span></span> <span data-hf-id="hf-48ge" class="m"><span data-hf-id="hf-vql5" class="w">agent</span></span> <span data-hf-id="hf-4mrf" class="m"><span data-hf-id="hf-h17x" class="w">needs</span></span> <span data-hf-id="hf-512g" class="m"><span data-hf-id="hf-3aiv" class="w">you.</span></span></div>
+    <div data-hf-id="hf-5nur" class="line say ask-line" id="ask-l2"><span data-hf-id="hf-28x9" class="m"><span data-hf-id="hf-i533" class="w">It's</span></span> <span data-hf-id="hf-2n8a" class="m"><span data-hf-id="hf-mx6p" class="w">on</span></span> <span data-hf-id="hf-31jb" class="m"><span data-hf-id="hf-kxir" class="w">your</span></span> <span data-hf-id="hf-3fuc" class="m"><span data-hf-id="hf-fyoq" class="w">other</span></span> <span data-hf-id="hf-70ll" class="m"><span data-hf-id="hf-hz9b" class="w">Mac.</span></span></div>
+    <div data-hf-id="hf-1pqq" class="line say ask-line" id="ask-l3"><span data-hf-id="hf-7ewm" class="m"><span data-hf-id="hf-8niq" class="w">Answer</span></span> <span data-hf-id="hf-ydwa" class="m"><span data-hf-id="hf-cqxh" class="w">it</span></span> <span data-hf-id="hf-xzl9" class="m"><span data-hf-id="hf-jgko" class="w">from</span></span> <span data-hf-id="hf-z6ic" class="m"><span data-hf-id="hf-tcs8" class="w">here.</span></span></div>
+    <div data-hf-id="hf-47ku" class="key" id="ask-k1">1</div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const RF = window.RF;
+    // The tab and the remote glyph sit at (1893, 540) on screen.
+    const O = "1893px 540px";
+
+    document.querySelectorAll("#ask-tab .ask-spin").forEach((el) => RF.spin(tl, el, 0, 9.6));
+
+    // Hook: close on the tab, the line already up (frame 0 is the thumbnail).
+    tl.fromTo("#ask-cam", { scale: 2.4, transformOrigin: O }, { scale: 2.4, duration: 0.01 }, 0);
+    // 1.2: studio's agent stops on a question.
+    tl.set("#ask-rring", { opacity: 0 }, 1.2);
+    tl.fromTo("#ask-rwait", { opacity: 1, scale: 0.2 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2.2)", immediateRender: false }, 1.2);
+    RF.lineOut(tl, "#ask-l1", 2.05);
+
+    // 2.4: pull back as the card slides out from behind the tab (clipped, never squeezed).
+    tl.to("#ask-cam", { scale: 1, duration: 0.6, ease: "power4.inOut" }, 2.1);
+    tl.fromTo("#ask-card", { opacity: 1, x: 60, clipPath: "inset(0px 0px 0px 100% round 20px)" }, { opacity: 1, x: 0, clipPath: "inset(0px 0px 0px 0% round 20px)", duration: 0.7, ease: "expo.out" }, 2.4);
+    RF.lineIn(tl, "#ask-l2", 2.45);
+    tl.to("#ask-studio", { backgroundSize: "100% 45%", duration: 0.45, ease: "power2.inOut" }, 3.0);
+
+    // 6.6: 1 on the beat.
+    RF.lineOut(tl, "#ask-l2", 6.1);
+    RF.press(tl, "#ask-k1", 6.6);
+    tl.to("#ask-o1", { backgroundColor: "rgba(255,255,255,.14)", duration: 0.1 }, 6.6);
+    tl.to(".ask-rest", { opacity: 0.5, duration: 0.15 }, 6.65);
+    tl.to("#ask-k1", { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in" }, 7.0);
+    // 7.2: answered; the card folds into the tab, and the agent works again.
+    tl.to("#ask-card", { x: 60, clipPath: "inset(0px 0px 0px 100% round 20px)", duration: 0.3, ease: "power3.in" }, 6.9);
+    tl.set("#ask-rwait", { opacity: 0 }, 7.2);
+    tl.fromTo("#ask-rring", { opacity: 1, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)", immediateRender: false }, 7.2);
+    RF.lineIn(tl, "#ask-l3", 7.25);
+
+    // Then in on the badge, which floods the frame and becomes Settings → Machines.
+    tl.to("#ask-cam", { scale: 3.2, duration: 0.8, ease: "power4.inOut" }, 7.9);
+    RF.lineOut(tl, "#ask-l3", 8.9);
+    tl.set("#ask-flood", { opacity: 1 }, 9.15);
+    tl.fromTo("#ask-flood", { scale: 1 }, { scale: 150, duration: 0.42, ease: "power3.in" }, 9.15);
+
+    window.__timelines["ask"] = tl;
+  </script>
+</template>

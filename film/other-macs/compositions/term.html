@@ -1,0 +1,109 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    #term-cam { position: absolute; inset: 0; }
+    /* The agent's terminal window (AgentPopout), where the bar's row landed. */
+    #term-win { position: absolute; left: 240px; top: 200px; width: 1440px; height: 780px; border-radius: 22px; background: #17181e; overflow: hidden;
+      border: 1px solid rgba(255,255,255,.09); box-shadow: 0 24px 60px rgba(0,0,0,.5); }
+    .term-hd { height: 30px; zoom: 2; display: flex; align-items: center; gap: 7px; padding-left: 14px; --bgc: #17181e; }
+    .term-hd i { width: 12px; height: 12px; border-radius: 50%; flex: none; }
+    .term-hd .lights { display: flex; gap: 8px; width: 64px; }
+    .term-hd b { font-size: 13px; font-weight: 600; }
+    .term-hd .st { font-size: 12px; opacity: .55; }
+    #term-shared { position: absolute; right: 16px; top: 44px; zoom: 2; display: flex; align-items: center; gap: 6px; padding: 5px 6px 5px 12px; border-radius: 99px;
+      background: rgba(40,41,48,.95); border: .5px solid rgba(255,255,255,.12); font-size: 12px; font-weight: 600; }
+    #term-shared .ic { font-size: 11px; }
+    #term-cur { position: absolute; left: 0; top: 0; width: 30px; height: 30px; opacity: 0; z-index: 3; }
+    #term-shared .btn { background: #3d7bf7; color: #fff; padding: 3px 9px; border-radius: 99px; font-weight: 500; font-size: 11.5px; }
+    .term-body { padding: 26px 40px; font: 24px/1.62 var(--mono); color: #c0caf5; }
+    .term-body > div { opacity: 0; white-space: pre; min-height: 1.62em; }
+    .t-dim { color: rgba(192,202,245,.45); }
+    .t-ok { color: #9ece6a; }
+    .t-dot { color: #e0af68; }
+    .t-me { color: rgba(192,202,245,.6); }
+    #term-input { position: absolute; left: 40px; right: 40px; bottom: 34px; height: 64px; border: 1.5px solid rgba(192,202,245,.28); border-radius: 10px;
+      font: 24px var(--mono); color: #c0caf5; background: #17181e; display: flex; align-items: center; padding: 0 20px; gap: 12px; }
+    .term-caret { display: inline-block; width: 12px; height: 26px; background: #c0caf5; vertical-align: -5px; }
+
+    #term-l1, #term-l2 { top: 70px; opacity: 0; }
+  </style>
+  <div data-hf-id="hf-s3up" id="root" data-composition-id="term" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-ygft" class="ground"></div>
+    <div data-hf-id="hf-6l1p" id="term-cam">
+      <div data-hf-id="hf-5sr6" id="term-win">
+        <div data-hf-id="hf-bdgc" class="term-hd" id="term-hd">
+          <div data-hf-id="hf-05r3" class="lights"><i data-hf-id="hf-soml" style="background:#ff5f57"></i><i data-hf-id="hf-l5hl" style="background:#febc2e"></i><i data-hf-id="hf-om0b" style="background:#28c840"></i></div>
+          <div data-hf-id="hf-26yl" class="gl" style="--s:10px"><svg data-hf-id="hf-retd" class="ring" id="term-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-h8j7" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-jpn7" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-9s2p" class="badge"></div></div>
+          <b data-hf-id="hf-86d8">claude · pipeline</b>
+          <span data-hf-id="hf-6vcg" class="chip" id="term-chip"><svg data-hf-id="hf-ypo9" class="ic"><use data-hf-id="hf-gmbt" href="#i-desk"/></svg>studio</span>
+          <span data-hf-id="hf-a1qr" class="st">working · Ingest pipeline fix</span>
+          <span style="flex:1"></span><svg class="ic" id="term-hand" style="font-size:11px;margin-right:12px;color:rgba(237,237,239,.6);opacity:0"><use href="#i-share"/></svg>
+        </div>
+        <div data-hf-id="hf-2266" id="term-shared"><svg data-hf-id="hf-r971" class="ic"><use data-hf-id="hf-98oz" href="#i-share"/></svg>Shared<span data-hf-id="hf-vi3a" class="btn">Take Over</span></div>
+        <div data-hf-id="hf-ty2f" class="term-body">
+          <div data-hf-id="hf-t4tn" class="t-me">&gt; rerun the ingest tests</div>
+          <div data-hf-id="hf-yeow"> </div>
+          <div data-hf-id="hf-ltr2"><span data-hf-id="hf-g0i9" class="t-dot">⏺</span> Bash(npm test -- ingest)</div>
+          <div data-hf-id="hf-yfkp" class="t-dim">  ⎿  PASS  ingest/parse.test.ts (0.41 s)</div>
+          <div data-hf-id="hf-92og" class="t-dim">     PASS  ingest/batch.test.ts (0.88 s)</div>
+          <div data-hf-id="hf-jjla" class="t-dim">     PASS  ingest/staging.test.ts (2.10 s)</div>
+          <div data-hf-id="hf-epvp">     <span data-hf-id="hf-cakm" class="t-ok">Tests: 38 passed</span>, 38 total</div>
+          <div data-hf-id="hf-y7yw"> </div>
+          <div data-hf-id="hf-a3sr"><span data-hf-id="hf-ltl1" class="t-dot">⏺</span> All 38 ingest tests pass with the fix, staging included.</div>
+          <div data-hf-id="hf-x11t"> </div>
+          <div data-hf-id="hf-xhq4" class="t-me">&gt; and commit it</div>
+          <div data-hf-id="hf-xfcu"> </div>
+          <div data-hf-id="hf-ijoj"><span data-hf-id="hf-n0i4" class="t-dot">⏺</span> Bash(git commit -am "Fix empty ingest batches")</div>
+        </div>
+        <svg id="term-cur" viewBox="0 0 24 24"><use href="#i-cursor"/></svg>
+        <div data-hf-id="hf-aass" id="term-input"><span data-hf-id="hf-2ogw" class="t-dim">&gt;</span><span data-hf-id="hf-murj" id="term-line"><span data-hf-id="hf-sfn7" id="term-typed"></span><span data-hf-id="hf-7dkz" class="term-caret" id="term-caret"></span></span><span data-hf-id="hf-n4uq" class="term-caret" id="term-caret2" style="opacity:0"></span></div>
+      </div>
+    </div>
+
+    <div data-hf-id="hf-7ait" class="line say" id="term-l1"><span data-hf-id="hf-7yfe" class="m"><span data-hf-id="hf-zj1u" class="w">Its</span></span> <span data-hf-id="hf-48ge" class="m"><span data-hf-id="hf-0qdg" class="w">terminal,</span></span> <span data-hf-id="hf-4mrf" class="m"><span data-hf-id="hf-ncde" class="w">live,</span></span> <span data-hf-id="hf-512g" class="m"><span data-hf-id="hf-jgko" class="w">from</span></span> <span data-hf-id="hf-28x9" class="m"><span data-hf-id="hf-tcs8" class="w">here.</span></span></div>
+    <div data-hf-id="hf-dg8m" class="line say" id="term-l2"><span data-hf-id="hf-2n8a" class="m"><span data-hf-id="hf-t4yt" class="w">Shared</span></span> <span data-hf-id="hf-31jb" class="m"><span data-hf-id="hf-vjqo" class="w">with</span></span> <span data-hf-id="hf-3fuc" class="m"><span data-hf-id="hf-9o0j" class="w">the</span></span> <span data-hf-id="hf-70ll" class="m"><span data-hf-id="hf-fyoq" class="w">other</span></span> <span data-hf-id="hf-7ewm" class="m"><span data-hf-id="hf-hz9b" class="w">Mac.</span></span></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const RF = window.RF;
+    const cam = (px, py, s, cx = 960, cy = 590) => ({ x: cx - px * s, y: cy - py * s, scale: s, transformOrigin: "0 0" });
+    const HOME = cam(960, 590, 1);
+    RF.spin(tl, "#term-spin", 0, 6.6);
+    tl.fromTo("#term-cam", HOME, { ...HOME, duration: 0.01 }, 0);
+
+    // The window has landed; its header and the agent's screen come up in it.
+    tl.fromTo(["#term-hd", "#term-shared", "#term-input"], { opacity: 0 }, { opacity: 1, duration: 0.25, ease: "power2.out" }, 0);
+    tl.set("#term-caret", { opacity: 1 }, 0);
+    const rows = gsap.utils.toArray("#term-win .term-body > div");
+    // The run, live: the prompt, the call, then each test as it passes.
+    [0.05, 0.1, 0.35, 0.95, 1.4, 1.95, 2.25, 2.3, 2.55].forEach((t, i) => tl.to(rows[i], { opacity: 1, duration: 0.08 }, t));
+    RF.lineIn(tl, "#term-l1", 0.2);
+    RF.lineOut(tl, "#term-l1", 2.45);
+
+    // 20.1 (2.7): in on the header: studio's agent, with the machine's name.
+    tl.to("#term-cam", { ...cam(640, 231, 1.9, 760, 470), duration: 0.6, ease: "power4.inOut" }, 2.5);
+    RF.lineIn(tl, "#term-l2", 2.85);
+    // Across to Shared: the other Mac still has it open; this one sees it and types too.
+    tl.to("#term-cam", { ...cam(1490, 320, 1.9, 1300, 470), duration: 0.6, ease: "power4.inOut" }, 3.4);
+    // Take Over: this window becomes the attached one, so Shared goes and the hand-over button comes.
+    tl.fromTo("#term-cur", { opacity: 0, x: 1290, y: 190 }, { opacity: 1, x: 1290, y: 190, duration: 0.15 }, 3.5);
+    tl.to("#term-cur", { x: 1344, y: 116, duration: 0.3, ease: "power3.inOut" }, 3.6);
+    tl.to("#term-shared .btn", { scale: 0.92, duration: 0.05, yoyo: true, repeat: 1 }, 3.92);
+    tl.to("#term-shared", { opacity: 0, scale: 0.9, duration: 0.2, ease: "power3.in" }, 4.0);
+    tl.to("#term-cur", { opacity: 0, duration: 0.2 }, 4.1);
+    tl.to("#term-hand", { opacity: 1, duration: 0.25, ease: "power2.out" }, 4.15);
+    tl.to("#term-cam", { ...HOME, duration: 0.6, ease: "power4.inOut" }, 4.35);
+    RF.lineOut(tl, "#term-l2", 4.9);
+
+    // Typing goes in.
+    RF.type(tl, "#term-typed", "and commit it", 4.3, 0.035);
+    tl.set("#term-line", { display: "none" }, 4.95);
+    tl.set("#term-caret2", { opacity: 1 }, 4.95);
+    [4.97, 5.02, 5.2].forEach((t, j) => tl.to(rows[10 + j], { opacity: 1, duration: 0.08 }, t));
+
+    // Away into its row of the agent list.
+    tl.to("#term-cam", { scale: 0.5, x: 960 * 0.5 + 300, y: 590 * 0.5 - 180, opacity: 0, filter: "blur(8px)", duration: 0.5, ease: "power3.in" }, 6.1);
+
+    window.__timelines["term"] = tl;
+  </script>
+</template>

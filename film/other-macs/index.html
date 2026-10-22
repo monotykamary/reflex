@@ -1,0 +1,147 @@
+<!doctype html>
+<!-- Update film, Reflex 0.1.39–0.1.43: agents on your other Macs. 40.8 s on the
+     launch film's clock (100 BPM; ../grid.js), over the second half of its
+     score, so film t = launch t − 16.8 and the picture lands on its hits.
+     See SPEC.md. The app's UI is rebuilt at its own sizes in pt and enlarged
+     with `zoom`, so text stays sharp. -->
+<html lang="en" data-resolution="landscape">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <style>
+      @font-face { font-family: "SF"; src: url("assets/fonts/SFNS.ttf"); font-weight: 1 1000; }
+      @font-face { font-family: "SF Mono"; src: url("assets/fonts/SFNSMono.ttf"); font-weight: 1 1000; }
+      @font-face { font-family: "Geist Mono"; src: url("assets/fonts/GeistMono.ttf"); font-weight: 100 900; }
+      :root {
+        --ground: #08090c;
+        --ink: #ededef; --ink2: rgba(237,237,239,.62); --ink3: rgba(237,237,239,.36);
+        --panel: #18191e; --line: rgba(255,255,255,.09);
+        /* The app's Tone (Design.swift). */
+        --working: #5c8cff; --blocked: #ffb021; --done: #40d187; --route: #9e7aff; --remote: #29b3c7;
+        --sans: "SF", system-ui, sans-serif;
+        --mono: "Geist Mono", ui-monospace, monospace;
+      }
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--ground); }
+      #root { width: 100%; height: 100%; font-family: var(--sans); color: var(--ink); -webkit-font-smoothing: antialiased; }
+      .ground { position: absolute; inset: 0; background: radial-gradient(1100px 760px at 50% 52%, #101218, var(--ground)); }
+
+      /* Lines: words rise from behind a mask (the launch film's entrance). */
+      .line { position: absolute; left: 0; right: 0; text-align: center; font-weight: 700; letter-spacing: -.035em; white-space: nowrap; }
+      .line .m { display: inline-block; overflow: hidden; vertical-align: top; padding: .3em .08em; margin: -.3em -.08em; }
+      .line .w { display: inline-block; }
+      .say { font-size: 64px; }
+      .big { font-size: 128px; letter-spacing: -.045em; line-height: 1.05; }
+
+      /* The app's surfaces, in pt (1 pt = 1 px before zoom). */
+      .surface { background: var(--panel); border: 1px solid var(--line); box-shadow: 0 24px 60px rgba(0,0,0,.5); }
+      .ic { width: 1em; height: 1em; fill: currentColor; flex: none; }
+
+      /* AgentGlyph: ring (working), dot (waiting, done), the remote badge on its shoulder. */
+      .gl { position: relative; width: var(--s); height: var(--s); flex: none; }
+      .gl svg.ring { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+      .gl .dot { position: absolute; left: 19%; top: 19%; width: 62%; height: 62%; border-radius: 50%; }
+      .gl .dot.wait { background: var(--blocked); }
+      .gl .dot.done { background: var(--done); }
+      .gl .dot.idle { left: 25%; top: 25%; width: 50%; height: 50%; background: rgba(255,255,255,.28); }
+      .gl .badge { position: absolute; width: calc(var(--s) * .42); height: calc(var(--s) * .42); right: calc(var(--s) * -.16); top: calc(var(--s) * -.16);
+        border-radius: 50%; background: var(--remote); box-shadow: 0 0 0 .8px var(--bgc, #18191e); }
+
+      /* MachineChip. */
+      .chip { display: inline-flex; align-items: center; gap: 3px; padding: 1.5px 5px; border-radius: 99px; font-size: 9.5px; font-weight: 600;
+        color: var(--remote); background: rgba(41,179,199,.13); white-space: nowrap; }
+      .chip .ic { font-size: 8px; }
+
+      /* A key on the keyboard, pressed on its beat. */
+      .key { position: absolute; min-width: 92px; height: 92px; padding: 0 26px; border-radius: 22px; display: grid; place-items: center;
+        font: 600 40px var(--sans); color: var(--ink); background: #222329; border: 1px solid rgba(255,255,255,.12); box-shadow: 0 5px 0 rgba(0,0,0,.6); }
+
+      .cursor { position: absolute; width: 58px; height: 58px; left: 0; top: 0; }
+    </style>
+    <script>
+      // Shared moves, so every scene speaks the same vocabulary (SPEC.md MOTION).
+      window.RF = {
+        // Words rise from behind their mask, 0.08 s apart.
+        lineIn(tl, sel, t) {
+          tl.fromTo(sel, { opacity: 1 }, { opacity: 1, duration: 0.01, immediateRender: false }, t);
+          tl.fromTo(sel + " .w", { yPercent: 110 }, { yPercent: 0, duration: 0.6, ease: "expo.out", stagger: 0.08 }, t);
+        },
+        // Out by a blur, word by word.
+        lineOut(tl, sel, t) {
+          tl.to(sel + " .w", { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in", stagger: 0.04 }, t);
+        },
+        // A key goes down on the beat and comes back.
+        press(tl, sel, t) {
+          tl.fromTo(sel, { opacity: 0, y: 14, scale: 0.9 }, { opacity: 1, y: 0, scale: 1, duration: 0.25, ease: "back.out(1.6)" }, t - 0.3);
+          tl.to(sel, { y: 5, boxShadow: "0 0 0 rgba(0,0,0,.6)", duration: 0.05, ease: "power2.in" }, t - 0.05);
+          tl.to(sel, { y: 0, boxShadow: "0 5px 0 rgba(0,0,0,.6)", duration: 0.12, ease: "power2.out" }, t + 0.03);
+        },
+        // Working rings turn once every 0.9 s, as in the app.
+        spin(tl, sel, from, to) {
+          tl.fromTo(sel, { rotation: 0 }, { rotation: ((to - from) / 0.9) * 360, duration: to - from, ease: "none", transformOrigin: "50% 50%" }, from);
+        },
+        // Type a string into an element, one character at a time.
+        type(tl, sel, text, t, per) {
+          const o = { n: 0 };
+          tl.fromTo(o, { n: 0 }, { n: text.length, duration: text.length * per, ease: "none",
+            onUpdate: () => { document.querySelector(sel).textContent = text.slice(0, Math.round(o.n)); } }, t);
+        },
+      };
+    </script>
+  </head>
+  <body>
+    <!-- Icons: drawn after the app's SF Symbols. -->
+    <svg data-hf-id="hf-8rgt" width="0" height="0" style="position:absolute">
+      <symbol data-hf-id="hf-b03m" id="i-desk" viewBox="0 0 24 24"><path data-hf-id="hf-jc21" d="M3.5 4h17A1.5 1.5 0 0 1 22 5.5v10a1.5 1.5 0 0 1-1.5 1.5h-6l.6 2.5H17v1.5H7V19.5h1.9l.6-2.5h-6A1.5 1.5 0 0 1 2 15.5v-10A1.5 1.5 0 0 1 3.5 4Zm.5 2v9h16V6Z"/></symbol>
+      <symbol data-hf-id="hf-cv5h" id="i-check" viewBox="0 0 24 24"><path data-hf-id="hf-wm3m" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm4.6 6.3-6 6.1-3.2-3.1-1.4 1.4 4.6 4.5 7.4-7.5Z"/></symbol>
+      <symbol data-hf-id="hf-082b" id="i-sparkle" viewBox="0 0 24 24"><path data-hf-id="hf-fe18" d="M12 1.5c.5 4.9 2.6 7.9 9.5 10.5-6.9 2.6-9 5.6-9.5 10.5-.5-4.9-2.6-7.9-9.5-10.5C9.4 9.4 11.5 6.4 12 1.5Z"/></symbol>
+      <symbol data-hf-id="hf-1lu0" id="i-share" viewBox="0 0 24 24"><path data-hf-id="hf-eav0" d="M7 3h12a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-1v-2h1V5H7v1H5V5a2 2 0 0 1 2-2ZM5 8h12a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-9a2 2 0 0 1 2-2Zm0 2v9h12v-9Z"/></symbol>
+      <symbol data-hf-id="hf-kir9" id="i-x" viewBox="0 0 24 24"><path data-hf-id="hf-zkc4" d="m6.4 5 5.6 5.6L17.6 5 19 6.4 13.4 12l5.6 5.6-1.4 1.4-5.6-5.6L6.4 19 5 17.6l5.6-5.6L5 6.4Z"/></symbol>
+      <symbol data-hf-id="hf-ylo5" id="i-list" viewBox="0 0 24 24"><path data-hf-id="hf-ov6w" d="M4 5.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm4 .5h13v2H8Zm-4 4.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm4 .5h13v2H8Zm-4 4.5a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Zm4 .5h13v2H8Z"/></symbol>
+      <symbol data-hf-id="hf-o108" id="i-sync" viewBox="0 0 24 24"><path data-hf-id="hf-3mqa" d="M12 4a8 8 0 0 1 7.4 5H22l-3.5 4.5L15 9h2.2A6 6 0 0 0 6.3 10H4.2A8 8 0 0 1 12 4Zm-6.5 6.5L9 15H6.8a6 6 0 0 0 10.9-1h2.1A8 8 0 0 1 4.6 15H2Z"/></symbol>
+      <symbol data-hf-id="hf-c9dv" id="i-term" viewBox="0 0 24 24"><path data-hf-id="hf-al9f" d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm1.3 4.4 3.6 3.1-3.6 3.1 1.3 1.5 5.4-4.6-5.4-4.6ZM12 15v2h6v-2Z"/></symbol>
+      <symbol data-hf-id="hf-fgkg" id="i-gear" viewBox="0 0 24 24"><path data-hf-id="hf-ngkh" d="M10.5 2h3l.5 2.6 1.8.8 2.2-1.5 2.1 2.1-1.5 2.2.8 1.8 2.6.5v3l-2.6.5-.8 1.8 1.5 2.2-2.1 2.1-2.2-1.5-1.8.8-.5 2.6h-3l-.5-2.6-1.8-.8-2.2 1.5-2.1-2.1 1.5-2.2-.8-1.8L2 13.5v-3l2.6-.5.8-1.8-1.5-2.2 2.1-2.1 2.2 1.5 1.8-.8ZM12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/></symbol>
+      <symbol data-hf-id="hf-qxlk" id="i-side" viewBox="0 0 24 24"><path data-hf-id="hf-5dvm" d="M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Zm0 2v12h11V6Zm13 0v12h3V6Z"/></symbol>
+      <symbol data-hf-id="hf-gphp" id="i-branch" viewBox="0 0 24 24"><path data-hf-id="hf-vxpj" d="M11 3h2v7.2l5.3-3.5-1.6-1.2H22v5.3l-1.3-1.7L13 14.2V21h-2v-6.8L3.3 9.1 2 10.8V5.5h5.3L5.7 6.7 11 10.2Z"/></symbol>
+      <symbol data-hf-id="hf-y235" id="i-folder" viewBox="0 0 24 24"><path data-hf-id="hf-ncc7" d="M3 5.5A1.5 1.5 0 0 1 4.5 4h5l2 2.5h8A1.5 1.5 0 0 1 21 8v10.5a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 18.5Z"/></symbol>
+      <symbol data-hf-id="hf-8g0p" id="i-phone" viewBox="0 0 24 24"><path data-hf-id="hf-20yu" d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2Zm0 3v14h8V5Z"/></symbol>
+      <symbol data-hf-id="hf-3qul" id="i-checklist" viewBox="0 0 24 24"><path data-hf-id="hf-rgbr" d="m3 5.3 1.3-1.2 1.2 1.3 2.7-2.7 1.3 1.3-4 4ZM11 5h10v2H11Zm-8 7.3 1.3-1.2 1.2 1.3 2.7-2.7 1.3 1.3-4 4ZM11 12h10v2H11Zm-8 6a2 2 0 1 1 4 0 2 2 0 0 1-4 0Zm8 0h10v2H11Z"/></symbol>
+      <symbol data-hf-id="hf-61ah" id="i-info" viewBox="0 0 24 24"><path data-hf-id="hf-e3cy" d="M12 2a10 10 0 1 1 0 20 10 10 0 0 1 0-20Zm-1 8v7h2v-7Zm1-4a1.3 1.3 0 1 0 0 2.6A1.3 1.3 0 0 0 12 6Z"/></symbol>
+      <symbol data-hf-id="hf-ampo" id="i-turn" viewBox="0 0 24 24"><path data-hf-id="hf-4clv" d="M5 4h2v8h9.2l-3.1-3.1 1.4-1.4L20 13l-5.5 5.5-1.4-1.4 3.1-3.1H5Z"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><path d="M10.5 3a7.5 7.5 0 0 1 5.96 12.05l4.75 4.74-1.42 1.42-4.74-4.75A7.5 7.5 0 1 1 10.5 3Zm0 2a5.5 5.5 0 1 0 0 11 5.5 5.5 0 0 0 0-11Z"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path d="m15.3 4.3 1.4 1.4L10.4 12l6.3 6.3-1.4 1.4L7.6 12Z"/></symbol>
+      <symbol id="i-fwd" viewBox="0 0 24 24"><path d="m8.7 4.3 7.7 7.7-7.7 7.7-1.4-1.4 6.3-6.3-6.3-6.3Z"/></symbol>
+      <symbol id="i-prompt" viewBox="0 0 24 24"><path d="m4 6.4 1.3-1.5 5.4 4.6-5.4 4.6L4 12.6l3.6-3.1ZM11 13h8v2h-8Z"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 1-8.5 12h2.1A7 7 0 1 0 6 8.4l2 2H2.5V4.9l2.1 2.1A9 9 0 0 1 12 3Zm-1 4h2v4.6l3.2 3.2-1.4 1.4-3.8-3.8Z"/></symbol>
+      <symbol data-hf-id="hf-6qmr" id="i-cursor" viewBox="0 0 24 24"><path data-hf-id="hf-ikaf" d="M5 2.5v17.2l4.3-4.1 2.8 6.4 3-1.3-2.8-6.3h6Z" fill="#000" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+    </svg>
+
+    <div data-hf-id="hf-nh7l" id="root" data-composition-id="main" data-start="0" data-duration="40.8" data-width="1920" data-height="1080">
+      <div data-hf-id="hf-871h" id="ask" data-composition-id="ask" data-composition-src="compositions/ask.html"
+        data-start="0" data-duration="9.6" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div data-hf-id="hf-3gic" id="machines" data-composition-id="machines" data-composition-src="compositions/machines.html"
+        data-start="9.6" data-duration="4.8" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div data-hf-id="hf-hfko" id="bar" data-composition-id="bar" data-composition-src="compositions/bar.html"
+        data-start="14.4" data-duration="3" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div data-hf-id="hf-q0jd" id="term" data-composition-id="term" data-composition-src="compositions/term.html"
+        data-start="17.4" data-duration="6.6" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div id="scope" data-composition-id="scope" data-composition-src="compositions/scope.html"
+        data-start="24" data-duration="4.8" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div data-hf-id="hf-qg93" id="rail" data-composition-id="rail" data-composition-src="compositions/rail.html"
+        data-start="28.8" data-duration="4.8" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div data-hf-id="hf-snx7" id="claim" data-composition-id="claim" data-composition-src="compositions/claim.html"
+        data-start="33.6" data-duration="2.4" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+      <div data-hf-id="hf-q5ke" id="end" data-composition-id="end" data-composition-src="compositions/end.html"
+        data-start="36" data-duration="4.8" data-track-index="1" data-track-kind="graphics" data-width="1920" data-height="1080"></div>
+
+      <!-- The launch film's score, bar 7 to its end, its break (bars 15–16)
+           played twice for the @studio scene (cut by README's command). -->
+      <audio data-hf-id="hf-40eq" id="score" class="clip" src="assets/score.wav" data-start="0" data-duration="40.8" data-track-index="2" data-volume="1"></audio>
+    </div>
+    <script>
+      window.__timelines = window.__timelines || {};
+      window.__timelines["main"] = gsap.timeline({ paused: true });
+    </script>
+  </body>
+</html>

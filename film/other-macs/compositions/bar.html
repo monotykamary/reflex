@@ -1,0 +1,103 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    /* The ⌥⌥ bar (CommandBar), 640 pt wide at 2x. */
+    #bar-bar { position: absolute; left: 160px; top: 100px; width: 640px; zoom: 2; border-radius: 13px; overflow: hidden; opacity: 0; }
+    .bar-field { height: 44px; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 17px; border-bottom: .5px solid rgba(255,255,255,.07); }
+    .bar-field .ic { font-size: 14px; color: rgba(237,237,239,.4); }
+    #bar-caret { display: inline-block; width: 1.5px; height: 19px; background: var(--working); margin-left: 1px; }
+    .bar-rows { position: relative; height: 176px; margin: 8px; }
+    .bar-row { position: absolute; left: 0; right: 0; top: 0; height: 40px; display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 9px; }
+    .bar-row .slot { width: 22px; height: 22px; display: grid; place-items: center; flex: none; }
+    .bar-row .tx { flex: 1; min-width: 0; }
+    .bar-row b { display: block; font-size: 13px; font-weight: 600; }
+    .bar-row span.d { display: block; font-size: 11.5px; color: rgba(237,237,239,.6); white-space: nowrap; }
+    .bar-jev { display: inline-flex; align-items: center; gap: 3px; font-size: 10.5px; font-weight: 600; color: var(--route); background: rgba(158,122,255,.14);
+      padding: 2px 7px; border-radius: 99px; opacity: 0; }
+    .bar-jev .ic { font-size: 9px; }
+    .bar-wt { width: 36px; text-align: right; font: 11px var(--mono); color: rgba(237,237,239,.36); }
+    .bar-sc { width: 24px; text-align: right; font-size: 10.5px; color: rgba(237,237,239,.36); }
+    #bar-sel { position: absolute; left: 0; right: 0; top: 0; height: 40px; border-radius: 9px; background: rgba(255,255,255,.12); }
+
+    #bar-l1 { top: 70px; opacity: 0; }
+    #bar-k1 { left: 818px; top: 860px; opacity: 0; }
+    #bar-k2 { left: 1010px; top: 860px; opacity: 0; }
+    #bar-k3 { left: 885px; top: 860px; opacity: 0; }
+    #bar-grow { position: absolute; left: 240px; top: 200px; width: 1440px; height: 780px; border-radius: 22px; background: #17181e; opacity: 0; }
+  </style>
+  <div data-hf-id="hf-5q5w" id="root" data-composition-id="bar" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-ygft" class="ground"></div>
+    <div data-hf-id="hf-ncu2" id="bar-bar" class="surface">
+      <div data-hf-id="hf-olp0" class="bar-field"><svg data-hf-id="hf-ypo9" class="ic"><use data-hf-id="hf-jxxw" href="#i-sparkle"/></svg><span data-hf-id="hf-uckh"><span data-hf-id="hf-xzpy" id="bar-typed"></span><span data-hf-id="hf-xuaf" id="bar-caret"></span></span></div>
+      <div data-hf-id="hf-lcrb" class="bar-rows">
+        <div data-hf-id="hf-a3qn" id="bar-sel"></div>
+        <div data-hf-id="hf-n3rp" class="bar-row" id="bar-r1">
+          <div data-hf-id="hf-fv78" class="slot"><div data-hf-id="hf-d00l" class="gl" style="--s:11px;--bgc:#1f2026"><svg data-hf-id="hf-seuk" class="ring bar-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-h8j7" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-jpn7" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg><div data-hf-id="hf-9s2p" class="badge"></div></div></div>
+          <div data-hf-id="hf-xias" class="tx"><b data-hf-id="hf-txqm">Ingest pipeline fix</b><span data-hf-id="hf-xyrh" class="d">claude · pipeline on studio · working</span></div>
+          <div data-hf-id="hf-kmq9" class="bar-jev" id="bar-jev"><svg data-hf-id="hf-r971" class="ic"><use data-hf-id="hf-nve4" href="#i-sparkle"/></svg>Jev</div>
+          <div data-hf-id="hf-2cf5" class="bar-wt bar-w" id="bar-w1">91%</div><div data-hf-id="hf-omjx" class="bar-sc bar-w" id="bar-sc1">⌘1</div>
+        </div>
+        <div data-hf-id="hf-r1vq" class="bar-row" id="bar-r2">
+          <div data-hf-id="hf-exn0" class="slot"><div data-hf-id="hf-rg4s" class="gl" style="--s:11px"><svg data-hf-id="hf-vfes" class="ring bar-spin" viewBox="0 0 22 22"><circle data-hf-id="hf-l977" cx="11" cy="11" r="9.4" fill="none" stroke="rgba(92,140,255,.25)" stroke-width="3.2"/><circle data-hf-id="hf-11bn" cx="11" cy="11" r="9.4" fill="none" stroke="#5c8cff" stroke-width="3.2" stroke-linecap="round" stroke-dasharray="42.5 59"/></svg></div></div>
+          <div data-hf-id="hf-onfg" class="tx"><b data-hf-id="hf-re0a">Billing webhooks</b><span data-hf-id="hf-04fm" class="d">codex · billing · working</span></div>
+          <div data-hf-id="hf-qkig" class="bar-wt bar-w" id="bar-w2">4%</div><div data-hf-id="hf-fkc2" class="bar-sc"></div>
+        </div>
+        <div data-hf-id="hf-uzzr" class="bar-row" id="bar-r3">
+          <div data-hf-id="hf-dqpx" class="slot"><div data-hf-id="hf-zdok" class="gl" style="--s:11px"><div data-hf-id="hf-w2y3" class="dot done"></div></div></div>
+          <div data-hf-id="hf-ngid" class="tx"><b data-hf-id="hf-gg0c">Dashboard charts</b><span data-hf-id="hf-j0oz" class="d">claude · dash · done</span></div>
+          <div data-hf-id="hf-1g6i" class="bar-wt bar-w" id="bar-w3">3%</div><div data-hf-id="hf-0bjq" class="bar-sc"></div>
+        </div>
+        <div data-hf-id="hf-302w" class="bar-row" id="bar-r4">
+          <div data-hf-id="hf-e50y" class="slot"><div data-hf-id="hf-y6rh" class="gl" style="--s:11px"><div data-hf-id="hf-f0ih" class="dot idle"></div></div></div>
+          <div data-hf-id="hf-nute" class="tx"><b data-hf-id="hf-74v1">Docs refresh</b><span data-hf-id="hf-f9ed" class="d">pi · docs · idle</span></div>
+          <div data-hf-id="hf-3py0" class="bar-wt bar-w" id="bar-w4">2%</div><div data-hf-id="hf-0pur" class="bar-sc"></div>
+        </div>
+      </div>
+    </div>
+
+    <div data-hf-id="hf-a32w" class="line say" id="bar-l1"><span data-hf-id="hf-7yfe" class="m"><span data-hf-id="hf-r8dy" class="w">Send</span></span> <span data-hf-id="hf-48ge" class="m"><span data-hf-id="hf-cqxh" class="w">it</span></span> <span data-hf-id="hf-4mrf" class="m"><span data-hf-id="hf-o3f5" class="w">work.</span></span></div>
+    <div data-hf-id="hf-o96a" class="key" id="bar-k1">⌥</div>
+    <div data-hf-id="hf-nanb" class="key" id="bar-k2">⌥</div>
+    <div data-hf-id="hf-uqyl" class="key" id="bar-k3">⌘ ⏎</div>
+    <div data-hf-id="hf-94y4" id="bar-grow"></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const RF = window.RF;
+    document.querySelectorAll("#bar-bar .bar-spin").forEach((el) => RF.spin(tl, el, 0, 3));
+    const H = 44; // a row and its gap, in pt
+
+    // ⌥ ⌥, and the bar drops in.
+    RF.press(tl, "#bar-k1", 0.3);
+    RF.press(tl, "#bar-k2", 0.6);
+    tl.to(["#bar-k1", "#bar-k2"], { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in" }, 0.85);
+    tl.fromTo("#bar-bar", { opacity: 0, y: -30, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "expo.out" }, 0.62);
+    RF.lineIn(tl, "#bar-l1", 0.7);
+
+    // Before Jev: most recently used first, the studio agent third, the first row selected.
+    tl.fromTo("#bar-r2", { y: 0 }, { y: 0, duration: 0.01 }, 0);
+    tl.fromTo("#bar-r3", { y: H }, { y: H, duration: 0.01 }, 0);
+    tl.fromTo("#bar-r1", { y: 2 * H }, { y: 2 * H, duration: 0.01 }, 0);
+    tl.fromTo("#bar-r4", { y: 3 * H }, { y: 3 * H, duration: 0.01 }, 0);
+    RF.type(tl, "#bar-typed", "rerun the ingest tests", 0.78, 0.019);
+
+    // 15.6 (1.2): Jev answers. Its pick goes on top, with a weight on every row.
+    tl.to("#bar-r1", { y: 0, duration: 0.45, ease: "power4.inOut" }, 1.05);
+    tl.to("#bar-r2", { y: H, duration: 0.45, ease: "power4.inOut" }, 1.05);
+    tl.to("#bar-r3", { y: 2 * H, duration: 0.45, ease: "power4.inOut" }, 1.05);
+    tl.fromTo("#bar-jev", { opacity: 0, scale: 0.6 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(1.6)" }, 1.2);
+    tl.fromTo(".bar-w", { opacity: 0 }, { opacity: 1, duration: 0.2 }, 1.2);
+
+    // 16.2 (1.8): ⌘⏎ sends it and opens its terminal.
+    RF.press(tl, "#bar-k3", 1.8);
+    RF.lineOut(tl, "#bar-l1", 2.0);
+    tl.to("#bar-k3", { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in" }, 2.05);
+
+    // 16.8 (2.4): the row becomes the terminal window.
+    tl.to("#bar-bar", { opacity: 0, filter: "blur(10px)", duration: 0.3, ease: "power2.in" }, 2.4);
+    tl.fromTo("#bar-grow", { opacity: 1, scaleX: 1244 / 1440, scaleY: 80 / 780, y: -244, backgroundColor: "#303137" },
+      { opacity: 1, scaleX: 1, scaleY: 1, y: 0, backgroundColor: "#17181e", duration: 0.6, ease: "power4.inOut", immediateRender: false }, 2.4);
+
+    window.__timelines["bar"] = tl;
+  </script>
+</template>

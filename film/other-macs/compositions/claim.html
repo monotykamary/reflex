@@ -1,0 +1,23 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    #claim-a { top: 330px; opacity: 0; }
+    #claim-b { top: 500px; opacity: 0; }
+    #claim-mac { color: var(--remote); }
+  </style>
+  <div data-hf-id="hf-dc55" id="root" data-composition-id="claim" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-ygft" class="ground"></div>
+    <div data-hf-id="hf-afkb" class="line big" id="claim-a">Every <span data-hf-id="hf-l5ln" id="claim-mac">Mac.</span></div>
+    <div data-hf-id="hf-d89j" class="line big" id="claim-b">One rail.</div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    // Each line lands on its hit, with no ease into it (28.8 and 30.0), then holds dead still.
+    tl.set("#claim-a", { opacity: 1 }, 0);
+    tl.fromTo("#claim-a", { scale: 1.06 }, { scale: 1, duration: 0.3, ease: "expo.out" }, 0);
+    tl.set("#claim-b", { opacity: 1 }, 1.2);
+    tl.fromTo("#claim-b", { scale: 1.06 }, { scale: 1, duration: 0.3, ease: "expo.out" }, 1.2);
+    tl.to(["#claim-a", "#claim-b"], { opacity: 0, filter: "blur(8px)", duration: 0.2, ease: "power2.in" }, 2.2);
+    window.__timelines["claim"] = tl;
+  </script>
+</template>

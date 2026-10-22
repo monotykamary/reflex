@@ -1,0 +1,25 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    #end-icon { position: absolute; left: 840px; top: 210px; width: 240px; height: 240px; opacity: 0; }
+    #end-farm { top: 486px; font-size: 96px; letter-spacing: -.04em; clip-path: inset(0 100% 0 0); }
+    #end-what { top: 640px; font-size: 34px; font-weight: 600; letter-spacing: -.01em; color: var(--ink2); opacity: 0; }
+    #end-free { top: 700px; font-size: 28px; font-weight: 500; letter-spacing: 0; color: rgba(237,237,239,.48); opacity: 0; }
+  </style>
+  <div data-hf-id="hf-gwfo" id="root" data-composition-id="end" data-width="1920" data-height="1080">
+    <div data-hf-id="hf-ygft" class="ground"></div>
+    <img data-hf-id="hf-rqen" id="end-icon" src="assets/icon.png" alt="Reflex" />
+    <div data-hf-id="hf-rnh8" class="line" id="end-farm">reflex.farm</div>
+    <div data-hf-id="hf-4b12" class="line" id="end-what">Reflex 0.1.43 · agents on your other Macs</div>
+    <div data-hf-id="hf-4lhq" class="line" id="end-free">Free and open source · for the Mac</div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    // The lazy bot drops in on the last chord; the name wipes in beside its landing.
+    tl.fromTo("#end-icon", { opacity: 0, y: -60, scale: 0.86 }, { opacity: 1, y: 0, scale: 1, duration: 0.8, ease: "expo.out" }, 0);
+    tl.to("#end-farm", { clipPath: "inset(0 0% 0 0)", duration: 0.55, ease: "power4.inOut" }, 0.35);
+    tl.fromTo("#end-what", { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 0.95);
+    tl.fromTo("#end-free", { opacity: 0, filter: "blur(6px)" }, { opacity: 1, filter: "blur(0px)", duration: 0.2, ease: "power4.out" }, 1.25);
+    window.__timelines["end"] = tl;
+  </script>
+</template>

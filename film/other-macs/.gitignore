@@ -1,0 +1,11 @@
+# Made, not written: see README for each.
+assets/
+renders/
+snapshots/
+# Studio's own caches.
+.hyperframes/
+.thumbnails/
+.waveform-cache/
+# HyperFrames' generic agent notes from `init`.
+AGENTS.md
+CLAUDE.md

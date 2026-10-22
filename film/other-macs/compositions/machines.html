@@ -1,0 +1,199 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    /* The window is seen through a view below the line, so a push-in never covers it. */
+    #mac-view { position: absolute; left: 0; right: 0; top: 160px; bottom: 0; overflow: hidden;
+      -webkit-mask-image: linear-gradient(transparent, #000 36px); mask-image: linear-gradient(transparent, #000 36px); }
+    #mac-cam { position: absolute; inset: 0; }
+
+    /* Settings, laid out in pt from the app's own window (macOS 26, dark). */
+    #mac-win { position: absolute; left: 328px; top: 12px; width: 820px; height: 690px; zoom: 1.3; border-radius: 22px; overflow: hidden;
+      background: #232427; box-shadow: 0 0 0 .5px rgba(255,255,255,.14), 0 24px 60px rgba(0,0,0,.55); font-size: 13px; }
+    #mac-win .a { position: absolute; }
+    .mac-side { left: 0; top: 0; bottom: 0; width: 230px; background: #1c1d20; box-shadow: inset -.5px 0 rgba(255,255,255,.06); }
+    .mac-lights { left: 19px; top: 19.5px; display: flex; gap: 9px; }
+    .mac-lights i { width: 14px; height: 14px; border-radius: 50%; }
+    .mac-search { left: 10px; top: 62px; width: 210px; height: 28px; border-radius: 99px; background: rgba(255,255,255,.09); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.1);
+      display: flex; align-items: center; gap: 6px; padding-left: 9px; color: rgba(237,237,239,.5); font-size: 13px; }
+    .mac-search .ic { font-size: 14px; }
+    .mac-me { left: 19px; top: 112px; display: flex; align-items: center; gap: 12px; }
+    .mac-me img { width: 34px; height: 34px; }
+    .mac-me b { display: block; font-size: 13px; font-weight: 700; }
+    .mac-me span { display: flex; align-items: center; gap: 5px; font-size: 11px; color: rgba(237,237,239,.55); margin-top: 1px; position: relative; }
+    .mac-me span i { width: 6px; height: 6px; border-radius: 50%; background: var(--done); }
+    .mac-item { left: 10px; width: 210px; height: 32px; border-radius: 10px; display: flex; align-items: center; gap: 6px; padding-left: 8px; font-size: 13.5px; }
+    .mac-item b { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: #fff; flex: none;
+      box-shadow: inset 0 0 0 .5px rgba(255,255,255,.18); }
+    .mac-item b .ic { font-size: 14px; }
+    .mac-item.sel { background: #3478f6; font-weight: 600; }
+
+    .mac-nav { left: 239px; top: 9px; width: 72px; height: 35px; border-radius: 99px; background: rgba(255,255,255,.08); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.1);
+      display: flex; align-items: center; justify-content: space-around; padding: 0 6px; }
+    .mac-nav .ic { font-size: 15px; color: rgba(237,237,239,.85); }
+    .mac-nav .ic.off { color: rgba(237,237,239,.35); }
+    .mac-title { left: 323px; top: 17px; font-size: 15px; font-weight: 700; }
+
+    .mac-card { left: 250px; width: 549px; border-radius: 16px; background: #2b2c2f; }
+    #mac-tile { left: 496.5px; top: 92px; width: 56px; height: 56px; border-radius: 14.6px; background: #3fb0c4; display: grid; place-items: center;
+      box-shadow: inset 0 0 0 .5px rgba(255,255,255,.12); }
+    .mac-hd-t { left: 250px; width: 549px; top: 152px; text-align: center; font-size: 23px; font-weight: 700; letter-spacing: -.01em; }
+    .mac-hd-p { left: 250px; width: 549px; top: 189px; text-align: center; font-size: 12.5px; color: rgba(237,237,239,.6); }
+    .mac-h3 { left: 260px; font-size: 13px; font-weight: 700; }
+    .mac-dim { color: rgba(237,237,239,.58); }
+    .mac-mono { font-family: "SF Mono", var(--mono); }
+
+    #mac-empty { left: 260px; top: 295px; }
+    #mac-empty b { display: block; font-size: 13px; font-weight: 600; }
+    #mac-empty span { font-size: 11.5px; }
+    #mac-row { left: 250px; top: 283.5px; width: 549px; height: 69px; opacity: 0; }
+    #mac-row .st { position: absolute; left: 10px; top: 9px; width: 16px; height: 16px; font-size: 16px; }
+    #mac-row .st .ic { position: absolute; inset: 0; }
+    #mac-row .nm { position: absolute; left: 33px; top: 9px; line-height: 1.32; }
+    #mac-row .nm b { display: block; font-size: 13px; font-weight: 500; }
+    #mac-row .nm .ssh { display: block; font-size: 11.5px; }
+    #mac-row .nm .s { position: relative; display: block; height: 16px; font-size: 12px; }
+    #mac-row .nm .s span { position: absolute; left: 0; white-space: nowrap; }
+    .mac-btn { height: 24px; padding: 0 12px; border-radius: 8px; background: rgba(255,255,255,.1); font-size: 13px; display: inline-flex; align-items: center; white-space: nowrap; }
+    #mac-recon { position: absolute; right: 9px; top: 6px; }
+    .mac-foot { left: 260px; top: 362px; width: 530px; font-size: 11.5px; line-height: 1.22; }
+    .mac-foot .dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: rgba(237,237,239,.6); vertical-align: -1px; }
+
+    .mac-step { left: 260px; display: flex; gap: 8px; }
+    .mac-step i { width: 18px; height: 18px; border-radius: 50%; background: rgba(41,179,199,.14); color: var(--remote);
+      font: 700 11px var(--sans); font-style: normal; display: grid; place-items: center; flex: none; }
+    .mac-step b { display: block; font-size: 13px; font-weight: 600; line-height: 18px; }
+    .mac-step span { font-size: 12px; }
+    .mac-div { left: 260px; width: 530px; top: 601px; height: .5px; background: rgba(255,255,255,.1); }
+    #mac-addrow { left: 260px; width: 530px; top: 611px; display: flex; gap: 9px; align-items: center; }
+    .mac-field { position: relative; flex: 1; height: 24px; border-radius: 7px; background: rgba(0,0,0,.28); box-shadow: inset 0 0 0 .5px rgba(255,255,255,.14);
+      font-size: 13px; padding: 0 8px; display: flex; align-items: center; overflow: hidden; white-space: nowrap; }
+    #mac-ph { color: rgba(237,237,239,.35); position: absolute; left: 8px; }
+    #mac-caret { display: inline-block; width: 1.5px; height: 15px; background: var(--ink); margin-left: 1px; opacity: 0; }
+    #mac-add { background: var(--remote); color: #fff; opacity: .4; }
+    .mac-res { left: 260px; top: 645px; height: 16px; font-size: 11.5px; }
+    .mac-res > div { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 5px; white-space: nowrap; opacity: 0; }
+    .mac-res .ic { font-size: 13px; color: var(--done); }
+    #mac-cur { position: absolute; left: 0; top: 0; width: 26px; height: 26px; opacity: 0; z-index: 3; }
+
+    #mac-l1 { top: 66px; opacity: 0; }
+    #mac-iris { position: absolute; inset: 0; background: var(--remote); z-index: 10; }
+  </style>
+  <div id="root" data-composition-id="machines" data-width="1920" data-height="1080">
+    <div class="ground"></div>
+    <div id="mac-view"><div id="mac-cam">
+      <div id="mac-win">
+        <div class="a mac-side"></div>
+        <div class="a mac-lights"><i style="background:#ff5f57"></i><i style="background:#febc2e"></i><i style="background:#28c840"></i></div>
+        <div class="a mac-search"><svg class="ic"><use href="#i-search"/></svg>Search settings</div>
+        <div class="a mac-me"><img src="assets/icon.png" alt="" /><div><b>Reflex</b>
+          <span><i></i><em id="mac-n4" style="font-style:normal">4 agents in herdr</em><em id="mac-n7" style="font-style:normal;position:absolute;left:11px;opacity:0">7 agents in herdr</em></span></div></div>
+        <div class="a mac-item" style="top:171.5px"><b style="background:#8e8e93"><svg class="ic"><use href="#i-gear"/></svg></b>General</div>
+        <div class="a mac-item" style="top:203.5px"><b style="background:#4b7bf5"><svg class="ic"><use href="#i-side"/></svg></b>Edge &amp; Rail</div>
+        <div class="a mac-item" style="top:235.5px"><b style="background:#1b1b1d"><svg class="ic"><use href="#i-prompt"/></svg></b>Terminal</div>
+        <div class="a mac-item" style="top:267.5px"><b style="background:#9d6ff4"><svg class="ic"><use href="#i-branch"/></svg></b>Routing</div>
+        <div class="a mac-item" style="top:299.5px"><b style="background:#3c8ef0"><svg class="ic"><use href="#i-folder"/></svg></b>Projects</div>
+        <div class="a mac-item sel" style="top:331.5px"><b style="background:#3fb0c4"><svg class="ic"><use href="#i-desk"/></svg></b>Machines</div>
+        <div class="a mac-item" style="top:363.5px"><b style="background:#47c770"><svg class="ic"><use href="#i-phone"/></svg></b>Phone</div>
+        <div class="a mac-item" style="top:408.5px"><b style="background:#f5b130"><svg class="ic"><use href="#i-checklist"/></svg></b>Setup</div>
+        <div class="a mac-item" style="top:440.5px"><b style="background:#8e8e93"><svg class="ic"><use href="#i-info"/></svg></b>About</div>
+
+        <div class="a mac-nav"><svg class="ic"><use href="#i-back"/></svg><svg class="ic off"><use href="#i-fwd"/></svg></div>
+        <div class="a mac-title">Machines</div>
+
+        <div class="a mac-card" style="top:72.5px;height:152.5px"></div>
+        <div class="a" id="mac-tile"><svg viewBox="0 0 24 24" style="width:36px;height:36px"><path d="M3.5 4h17A1.5 1.5 0 0 1 22 5.5v10a1.5 1.5 0 0 1-1.5 1.5h-6l.6 2.5H17v1.5H7V19.5h1.9l.6-2.5h-6A1.5 1.5 0 0 1 2 15.5v-10A1.5 1.5 0 0 1 3.5 4Z" fill="#fff"/><rect x="4" y="6" width="16" height="9" rx=".6" fill="#8fd3df"/></svg></div>
+        <div class="a mac-hd-t">Machines</div>
+        <div class="a mac-hd-p">Your other Macs, from herdr's saved machines: their agents show up here with this Mac's.</div>
+
+        <div class="a mac-h3" style="top:254px">From herdr</div>
+        <div class="a mac-card" style="top:283.5px;height:69px"></div>
+        <div class="a" id="mac-empty"><b>No machines yet</b><span class="mac-dim">Add one below, or in a terminal with <span class="mac-mono">herdr machine add &lt;ssh-host&gt;</span>.</span></div>
+        <div class="a" id="mac-row">
+          <div class="st"><svg class="ic" id="mac-sync" style="color:var(--working)"><use href="#i-sync"/></svg><svg class="ic" id="mac-ok" style="color:var(--done);opacity:0"><use href="#i-check"/></svg></div>
+          <div class="nm"><b>studio</b><span class="ssh mac-mono mac-dim">ssh studio</span>
+            <span class="s mac-dim"><span id="mac-s1">Connecting…</span><span id="mac-s2" style="opacity:0">Connected · 3 agents</span></span></div>
+          <div class="mac-btn" id="mac-recon">Reconnect</div>
+        </div>
+        <div class="a mac-foot mac-dim">Reflex keeps one SSH tunnel to each enabled machine, with your own ssh config, keys and agent, and reconnects when it drops. Their agents wear the machine's name (and a <i class="dot"></i> badge) in the rail, the inbox and the ⌥⌥ bar. <span class="mac-mono">herdr machine disable</span>, <span class="mac-mono">enable</span> and <span class="mac-mono">remove</span> change this list.</div>
+
+        <div class="a mac-h3" style="top:448px">Add a Mac</div>
+        <div class="a mac-card" style="top:476.5px;height:192px"></div>
+        <div class="a mac-step" style="top:485.5px"><i>1</i><div><b>On the other Mac, turn on Remote Login</b><span class="mac-dim">System Settings → General → Sharing → Remote Login, and under ⓘ allow your user.</span></div></div>
+        <div class="a mac-step" style="top:522.5px"><i>2</i><div><b>Let this Mac sign in with a key</b><span class="mac-dim"><span class="mac-mono">ssh-copy-id &lt;host&gt;</span> once; Test tells you if it's missing. Tailscale works.</span></div></div>
+        <div class="a mac-step" style="top:559.5px"><i>3</i><div><b>Add it</b><span class="mac-dim">Reflex runs <span class="mac-mono">herdr machine add</span>, and keeps a tunnel to it from then on.</span></div></div>
+        <div class="a mac-div"></div>
+        <div class="a" id="mac-addrow">
+          <div class="mac-field"><span id="mac-ph">ssh host — e.g. work-laptop or you@100.64.0.2</span><span id="mac-typed"></span><span id="mac-caret"></span></div>
+          <div class="mac-btn" id="mac-test"><span id="mac-t1">Test</span><span id="mac-t2" style="display:none">Testing…</span></div>
+          <div class="mac-btn" id="mac-add"><span id="mac-a1">Add</span><span id="mac-a2" style="display:none">Adding…</span></div>
+        </div>
+        <div class="a mac-res">
+          <div id="mac-r1"><svg class="ic"><use href="#i-check"/></svg>Signed in, and herdr is there. Add it.</div>
+          <div id="mac-r2"><svg class="ic"><use href="#i-check"/></svg>Added. Its agents show up here as soon as the tunnel is up.</div>
+        </div>
+        <svg id="mac-cur" viewBox="0 0 24 24"><use href="#i-cursor"/></svg>
+      </div>
+    </div></div>
+
+    <div class="line say" id="mac-l1"><span class="m"><span class="w">Add</span></span> <span class="m"><span class="w">a</span></span> <span class="m"><span class="w">Mac</span></span> <span class="m"><span class="w">once.</span></span></div>
+    <div id="mac-iris"></div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const RF = window.RF;
+    // Camera: put point (px, py) of the view at (cx, cy), scaled by s.
+    const cam = (px, py, s, cx = 960, cy = 460) => ({ x: cx - px * s, y: cy - py * s, scale: s, transformOrigin: "0 0" });
+    // Window pt → view px: x = (328 + pt) * 1.3, y = (12 + pt) * 1.3.
+    const at = (x, y) => [(328 + x) * 1.3, (12 + y) * 1.3];
+    const HOME = cam(960, 460, 1);
+    const ADD = cam(...at(525, 620), 1.55);
+    const HERDR = cam(...at(525, 330), 1.55);
+    const TILE = at(524.5, 120);           // the header tile, in view px
+    const IRIS = [TILE[0], TILE[1] + 160]; // and on screen
+
+    // 0: the teal flood closes onto the Machines tile.
+    tl.fromTo("#mac-cam", HOME, { ...HOME, duration: 0.01 }, 0);
+    tl.fromTo("#mac-iris", { clipPath: `circle(1400px at ${IRIS[0]}px ${IRIS[1]}px)` },
+      { clipPath: `circle(36px at ${IRIS[0]}px ${IRIS[1]}px)`, duration: 0.45, ease: "power3.out" }, 0);
+    tl.to("#mac-iris", { opacity: 0, duration: 0.12 }, 0.4);
+    RF.lineIn(tl, "#mac-l1", 0.3);
+
+    // To the Add a Mac row: type, Test, Add. Cursor positions are window pt.
+    tl.to("#mac-cam", { ...ADD, duration: 0.6, ease: "power4.inOut" }, 0.3);
+    tl.set("#mac-ph", { opacity: 0 }, 0.72);
+    tl.set("#mac-caret", { opacity: 1 }, 0.72);
+    RF.type(tl, "#mac-typed", "studio", 0.75, 0.035);
+    tl.fromTo("#mac-cur", { opacity: 0, x: 560, y: 660 }, { opacity: 1, x: 560, y: 660, duration: 0.15 }, 0.55);
+    tl.to("#mac-cur", { x: 683, y: 619, duration: 0.3, ease: "power3.inOut" }, 0.7);    // Test
+    tl.to("#mac-test", { scale: 0.94, duration: 0.05, yoyo: true, repeat: 1 }, 0.92);
+    tl.set("#mac-t1", { display: "none" }, 0.95); tl.set("#mac-t2", { display: "inline" }, 0.95);
+    // 10.8 (1.2): the result, on the score's note.
+    tl.set("#mac-t2", { display: "none" }, 1.2); tl.set("#mac-t1", { display: "inline" }, 1.2);
+    tl.fromTo("#mac-r1", { opacity: 0, x: -6 }, { opacity: 1, x: 0, duration: 0.3, ease: "expo.out" }, 1.2);
+    tl.to("#mac-add", { opacity: 1, duration: 0.15 }, 1.2);
+    tl.to("#mac-cur", { x: 742, y: 619, duration: 0.3, ease: "power3.inOut" }, 1.4);    // Add
+    // 11.4 (1.8): Add, on the key tick.
+    tl.to("#mac-add", { scale: 0.94, duration: 0.05, yoyo: true, repeat: 1 }, 1.75);
+    tl.set("#mac-a1", { display: "none" }, 1.8); tl.set("#mac-a2", { display: "inline" }, 1.8);
+    tl.to("#mac-cur", { opacity: 0, duration: 0.2 }, 2.0);
+
+    // Up to From herdr: studio lands on 12.0 (2.4), connects on 12.6 (3.0).
+    tl.to("#mac-cam", { ...HERDR, duration: 0.6, ease: "power4.inOut" }, 1.9);
+    tl.to("#mac-empty", { opacity: 0, duration: 0.15 }, 2.3);
+    tl.fromTo("#mac-row", { opacity: 0, y: 6 }, { opacity: 1, y: 0, duration: 0.5, ease: "expo.out" }, 2.4);
+    tl.set("#mac-a2", { display: "none" }, 2.4); tl.set("#mac-a1", { display: "inline" }, 2.4);
+    tl.set("#mac-r1", { opacity: 0 }, 2.4); tl.set("#mac-r2", { opacity: 1 }, 2.4);
+    RF.spin(tl, "#mac-sync", 2.4, 3.0);
+    tl.set("#mac-sync", { opacity: 0 }, 3.0);
+    tl.fromTo("#mac-ok", { opacity: 1, scale: 0.4 }, { opacity: 1, scale: 1, duration: 0.35, ease: "back.out(2)", immediateRender: false }, 3.0);
+    tl.set("#mac-s1", { opacity: 0 }, 3.0); tl.set("#mac-s2", { opacity: 1 }, 3.0);
+    tl.set("#mac-n4", { opacity: 0 }, 3.0); tl.set("#mac-n7", { opacity: 1 }, 3.0);
+
+    // Back out, and away as ⌥ ⌥ comes.
+    tl.to("#mac-cam", { ...HOME, duration: 0.6, ease: "power4.inOut" }, 3.5);
+    RF.lineOut(tl, "#mac-l1", 4.25);
+    tl.to("#mac-cam", { opacity: 0, filter: "blur(8px)", scale: 0.97, x: 960 * 0.03, y: 460 * 0.03, duration: 0.25, ease: "power2.in" }, 4.5);
+
+    window.__timelines["machines"] = tl;
+  </script>
+</template>

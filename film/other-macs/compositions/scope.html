@@ -1,0 +1,137 @@
+<template>
+  <style>
+    #root { position: absolute; inset: 0; overflow: hidden; }
+    /* The ⌥⌥ bar (CommandBar), searching on one Mac: "@studio". 2x. */
+    #sc-bar { position: absolute; left: 160px; top: 100px; width: 640px; zoom: 2; border-radius: 13px; overflow: hidden; opacity: 0;
+      clip-path: inset(0px 0px 180px 0px round 13px); }
+    .sc-field { height: 50px; display: flex; align-items: center; gap: 10px; padding: 0 14px; font-size: 19px; border-bottom: .5px solid rgba(255,255,255,.07); }
+    .sc-field > .ic { font-size: 15px; color: rgba(237,237,239,.45); }
+    #sc-token { display: inline-flex; align-items: center; height: 24px; padding: 0 9px; border-radius: 99px; font-size: 13px; font-weight: 600;
+      background: rgba(41,179,199,.18); box-shadow: inset 0 0 0 1px rgba(41,179,199,.4); display: none; }
+    .sc-text { position: relative; flex: 1; height: 26px; display: flex; align-items: center; }
+    #sc-ph { position: absolute; left: 0; color: rgba(237,237,239,.32); opacity: 0; white-space: nowrap; }
+    .sc-caret { display: inline-block; width: 1.5px; height: 21px; background: var(--working); margin-left: 1px; }
+    .sc-list { position: relative; height: 180px; margin: 0 6px; }
+    .sc-group { position: absolute; left: 0; right: 0; top: 0; }
+    .sc-h { font-size: 11px; font-weight: 600; color: rgba(237,237,239,.55); padding: 10px 12px 3px; }
+    .sc-row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 9px; height: 42px; }
+    .sc-row.sel { background: rgba(255,255,255,.12); }
+    .sc-row .slot { width: 22px; height: 22px; display: grid; place-items: center; flex: none; font-size: 17px; }
+    .sc-row .tx { flex: 1; min-width: 0; }
+    .sc-row .t { display: flex; align-items: center; gap: 5px; font-size: 13px; font-weight: 600; }
+    .sc-row .d { font-size: 11.5px; color: rgba(237,237,239,.6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sc-row .k { width: 24px; text-align: right; font-size: 10.5px; color: rgba(237,237,239,.36); }
+    #sc-done { position: absolute; right: 16px; top: 13px; width: 22px; height: 22px; opacity: 0; color: var(--done); font-size: 22px; }
+
+    #sc-l1, #sc-l2 { top: 70px; opacity: 0; }
+    #sc-k1 { left: 818px; top: 860px; opacity: 0; }
+    #sc-k2 { left: 1010px; top: 860px; opacity: 0; }
+    #sc-k3 { left: 914px; top: 860px; opacity: 0; }
+    #sc-k4 { left: 914px; top: 860px; opacity: 0; }
+  </style>
+  <div id="root" data-composition-id="scope" data-width="1920" data-height="1080">
+    <div class="ground"></div>
+    <div id="sc-bar" class="surface">
+      <div class="sc-field">
+        <svg class="ic"><use href="#i-search"/></svg>
+        <span id="sc-token">@studio</span>
+        <span class="sc-text"><span id="sc-ph">Search or ask on studio…</span><span id="sc-typed"></span><span class="sc-caret"></span></span>
+        <svg class="ic" id="sc-done"><use href="#i-check"/></svg>
+      </div>
+      <div class="sc-list">
+        <!-- typing "@": your other Macs -->
+        <div class="sc-group" id="sc-macs">
+          <div class="sc-h">Your other Macs</div>
+          <div class="sc-row sel">
+            <div class="slot" style="color:var(--remote)"><svg class="ic"><use href="#i-desk"/></svg></div>
+            <div class="tx"><div class="t">@studio</div><div class="d">Only studio's sessions, folders and earlier sessions; new sessions start there</div></div>
+            <div class="k">⌘1</div>
+          </div>
+          <div class="sc-row" id="sc-mini">
+            <div class="slot" style="color:var(--remote)"><svg class="ic"><use href="#i-desk"/></svg></div>
+            <div class="tx"><div class="t">@mac-mini</div><div class="d">Only mac-mini's sessions, folders and earlier sessions; new sessions start there</div></div>
+            <div class="k"></div>
+          </div>
+        </div>
+        <!-- "@studio ingest": studio's earlier sessions and folders -->
+        <div class="sc-group" id="sc-found" style="opacity:0">
+          <div class="sc-h">Resume</div>
+          <div class="sc-row sel">
+            <div class="slot" style="color:var(--working)"><svg class="ic"><use href="#i-clock"/></svg></div>
+            <div class="tx"><div class="t">Ingest schema migration <span class="chip"><svg class="ic"><use href="#i-desk"/></svg>studio</span></div><div class="d">claude · pipeline · 2 d ago</div></div>
+            <div class="k">⌘1</div>
+          </div>
+          <div class="sc-h">Start in a folder</div>
+          <div class="sc-row">
+            <div class="slot" style="color:#599ef2"><svg class="ic"><use href="#i-folder"/></svg></div>
+            <div class="tx"><div class="t">pipeline <span class="chip"><svg class="ic"><use href="#i-desk"/></svg>studio</span></div><div class="d">new claude · ~/VCS/pipeline · Nightly ingest from the warehouse into search</div></div>
+            <div class="k"></div>
+          </div>
+          <div class="sc-row">
+            <div class="slot" style="color:#599ef2"><svg class="ic"><use href="#i-folder"/></svg></div>
+            <div class="tx"><div class="t">ingest-worker <span class="chip"><svg class="ic"><use href="#i-desk"/></svg>studio</span></div><div class="d">new claude · ~/VCS/ingest-worker · Queue consumer for the ingest jobs</div></div>
+            <div class="k"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="line say" id="sc-l1"><span class="m"><span class="w">Name</span></span> <span class="m"><span class="w">a</span></span> <span class="m"><span class="w">Mac.</span></span></div>
+    <div class="line say" id="sc-l2"><span class="m"><span class="w">Search</span></span> <span class="m"><span class="w">and</span></span> <span class="m"><span class="w">resume</span></span> <span class="m"><span class="w">there.</span></span></div>
+    <div class="key" id="sc-k1">⌥</div>
+    <div class="key" id="sc-k2">⌥</div>
+    <div class="key" id="sc-k3">⏎</div>
+    <div class="key" id="sc-k4">⏎</div>
+  </div>
+  <script>
+    const tl = gsap.timeline({ paused: true });
+    const RF = window.RF;
+    // On the score's break (the drums step back): Jev's two unsure notes at
+    // 0.9 and 1.2, keys at 1.5 and 2.1, the landing note at 2.4, the fill
+    // into the payoff at the end.
+
+    // What the field holds at each moment: one function of time, so any frame
+    // renders on its own (several typing tweens on one field would not).
+    const typed = (t) => t < 0.85 ? "" : t < 1.2 ? "@" : t < 2.1 ? "@s" : t < 2.4 ? "" : "ingest".slice(0, Math.max(0, Math.min(6, Math.floor((t - 2.4) / 0.04) + 1)));
+    const clock = { t: 0 };
+    tl.fromTo(clock, { t: 0 }, { t: 4.8, duration: 4.8, ease: "none",
+      onUpdate: () => { document.querySelector("#sc-typed").textContent = typed(clock.t); } }, 0);
+
+    // ⌥ ⌥, the bar, and "@": your other Macs.
+    RF.press(tl, "#sc-k1", 0.3);
+    RF.press(tl, "#sc-k2", 0.55);
+    tl.to(["#sc-k1", "#sc-k2"], { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in" }, 0.8);
+    tl.fromTo("#sc-bar", { opacity: 0, y: -30, scale: 0.97 }, { opacity: 1, y: 0, scale: 1, duration: 0.55, ease: "expo.out" }, 0.55);
+    RF.lineIn(tl, "#sc-l1", 0.6);
+    tl.fromTo("#sc-macs", { opacity: 0 }, { opacity: 1, duration: 0.2, ease: "power2.out" }, 0.9);
+    tl.to("#sc-bar", { clipPath: "inset(0px 0px 66px 0px round 13px)", duration: 0.35, ease: "expo.out" }, 0.9);
+    // "@s": only studio.
+    tl.to("#sc-mini", { opacity: 0, filter: "blur(6px)", duration: 0.18, ease: "power2.in" }, 1.25);
+    tl.to("#sc-bar", { clipPath: "inset(0px 0px 108px 0px round 13px)", duration: 0.3, ease: "expo.out" }, 1.3);
+
+    // 2.1: ⏎, and @studio becomes the token.
+    RF.press(tl, "#sc-k3", 2.1);
+    tl.to("#sc-k3", { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in" }, 2.3);
+    tl.set("#sc-token", { display: "inline-flex" }, 2.1);
+    tl.fromTo("#sc-token", { scale: 0.7 }, { scale: 1, duration: 0.35, ease: "back.out(1.6)", immediateRender: false }, 2.1);
+    tl.to("#sc-macs", { opacity: 0, duration: 0.12 }, 2.1);
+    tl.to("#sc-bar", { clipPath: "inset(0px 0px 180px 0px round 13px)", duration: 0.25, ease: "power3.out" }, 2.12);
+    tl.set("#sc-ph", { opacity: 1 }, 2.15);
+    RF.lineOut(tl, "#sc-l1", 2.2);
+
+    // 2.4: studio's words; its earlier session and folders, each wearing its name.
+    tl.set("#sc-ph", { opacity: 0 }, 2.4);
+    tl.fromTo("#sc-found", { opacity: 0 }, { opacity: 1, duration: 0.22, ease: "power2.out", immediateRender: false }, 2.7);
+    tl.to("#sc-bar", { clipPath: "inset(0px 0px 0px 0px round 13px)", duration: 0.4, ease: "expo.out" }, 2.7);
+    RF.lineIn(tl, "#sc-l2", 2.55);
+
+    // 3.6: ⏎ resumes it in studio's herdr.
+    RF.press(tl, "#sc-k4", 3.6);
+    tl.to("#sc-k4", { opacity: 0, filter: "blur(6px)", duration: 0.2, ease: "power2.in" }, 3.8);
+    tl.to("#sc-done", { opacity: 1, duration: 0.2 }, 3.85);
+    RF.lineOut(tl, "#sc-l2", 4.35);
+    tl.to("#sc-bar", { opacity: 0, filter: "blur(10px)", duration: 0.3, ease: "power2.in" }, 4.4);
+
+    window.__timelines["scope"] = tl;
+  </script>
+</template>
