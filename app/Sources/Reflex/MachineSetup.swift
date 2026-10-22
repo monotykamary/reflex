@@ -147,6 +147,9 @@ struct AddMachineView: View {
             HStack(spacing: 8) {
                 TextField("", text: $setup.host, prompt: Text("ssh host — e.g. work-laptop or you@100.64.0.2"))
                     .textFieldStyle(.roundedBorder)
+                    // A Form right-aligns a field's text; this one reads as an input line.
+                    .multilineTextAlignment(.leading)
+                    .labelsHidden()
                     .onSubmit { ready ? setup.add() : setup.test() }
                     .onChange(of: setup.host) { if setup.phase != .testing && setup.phase != .adding { setup.phase = .idle } }
                 Button(setup.phase == .testing ? "Testing…" : "Test") { setup.test() }
