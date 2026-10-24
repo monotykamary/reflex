@@ -279,8 +279,11 @@ def reason.pick(ok: Bool, unauth: Bool, missing: Bool, bad: Bool) -> String:
 def reason(+code: U32) -> String:
   reason.pick(U32.is_eq(code, 200), U32.is_eq(code, 401), U32.is_eq(code, 404), U32.is_eq(code, 400))
 
+def response_with(+code: U32, ctype: String, cache: String, +body: String) -> String:
+  "HTTP/1.1 " ++ U32.show(code) ++ " " ++ reason(code) ++ "\r\nContent-Type: " ++ ctype ++ "\r\nContent-Length: " ++ U32.show(byte_len(body, 0)) ++ "\r\nCache-Control: " ++ cache ++ "\r\nConnection: close\r\n\r\n" ++ body
+
 def response(+code: U32, ctype: String, +body: String) -> String:
-  "HTTP/1.1 " ++ U32.show(code) ++ " " ++ reason(code) ++ "\r\nContent-Type: " ++ ctype ++ "\r\nContent-Length: " ++ U32.show(byte_len(body, 0)) ++ "\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n" ++ body
+  response_with(code, ctype, "no-store", body)
 
 def json(+code: U32, body: String) -> String:
   response(code, "application/json; charset=utf-8", body)

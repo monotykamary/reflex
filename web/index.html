@@ -160,6 +160,20 @@
   .term pre { margin: 0; font: var(--fs, 11px)/1.36 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; tab-size: 8; font-variant-ligatures: none; }
   .term.fit pre { white-space: pre; overflow-wrap: normal; line-height: 1.3; }
   .term.typing { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--blue) 55%, transparent); }
+  /* A terminal the phone sized: xterm.js fills it, and swipes go to herdr. */
+  .term { position: relative; }
+  .term .xt, .term .touch { display: none; position: absolute; inset: 8px 6px 8px 8px; }
+  .term .touch { inset: 0; z-index: 10; touch-action: none; }
+  .term.own { overflow: hidden; }
+  .term.own pre { display: none; }
+  .term.own .xt, .term.own .touch { display: block; }
+  .term .xterm .xterm-viewport { background: transparent !important; overflow: hidden; }
+  .held { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 14px; font-size: 13px; background: var(--chrome); border-bottom: 1px solid var(--edge); }
+  .held[hidden] { display: none; }
+  .held span { flex: 1; opacity: .75; }
+  .held button { font-weight: 600; padding: 7px 12px; border-radius: 99px; background: var(--ov2); }
+  .menu .size { display: flex; gap: 4px; }
+  .menu .size button { width: 34px; min-height: 30px; justify-content: center; padding: 0; background: var(--ov); border-radius: 8px; font-weight: 600; }
   .keys { display: flex; gap: 5px; padding: 8px 8px; overflow-x: auto; scrollbar-width: none; background: var(--chrome);
     border-top: 1px solid var(--edge); }
   .keys::-webkit-scrollbar { display: none; }
@@ -185,7 +199,7 @@
     transform-origin: top right; animation: pop .18s var(--out) both; }
   .menu[hidden] { display: none; }
   @keyframes pop { from { opacity: 0; transform: scale(.96); } }
-  .menu button, .menu label { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 42px; padding: 0 10px; border-radius: 9px; font-size: 14.5px; text-align: left; }
+  .menu button, .menu label, .menu .mrow { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; min-height: 42px; padding: 0 10px; border-radius: 9px; font-size: 14.5px; text-align: left; }
   .menu button:active { background: var(--ov); transform: none; }
   .menu select { appearance: none; -webkit-appearance: none; border: 0; background: var(--ov); color: inherit; font: inherit; font-size: 13px; padding: 5px 9px; border-radius: 8px; max-width: 140px; }
   .menu hr { border: 0; height: 1px; background: var(--edge); margin: 4px 6px; }
@@ -249,11 +263,14 @@
   </div>
   <div class="menu" id="menu" hidden>
     <label>Theme <select id="theme"></select></label>
+    <div class="mrow">Text size <span class="size"><button id="smaller" aria-label="Smaller">−</button><button id="larger" aria-label="Larger">+</button></span></div>
     <button id="fit">Fit whole width <span id="fitState"></span></button>
+    <button id="copy">Copy screen</button>
     <hr>
     <button id="focus">Show in herdr on the Mac</button>
   </div>
-  <div class="term" id="term"><pre id="screen"></pre></div>
+  <div class="held" id="held" hidden><span>Your Mac's window has this terminal, at its size.</span><button id="take">Fit to phone</button></div>
+  <div class="term" id="term"><pre id="screen"></pre><div class="xt" id="xt"></div><div class="touch" id="touch"></div></div>
   <div class="keys" id="keys"></div>
   <div class="sdock" id="sdock"></div>
   <textarea class="ghost" id="ghost" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Type into the terminal"></textarea>
@@ -485,6 +502,7 @@
     el.dataset.term = light(t[0]) ? "light" : "dark";
     setThemeColor();
     el.style.setProperty("--term-bg", t[0]); el.style.setProperty("--term-fg", t[1]);
+    if (xt) xt.term.options.theme = xtTheme();
   }
 
   const xterm = (n, pal) => {
@@ -562,6 +580,163 @@
     }).join("\n");
   }
 
+  // ---------- the phone's own size ----------
+  // The phone sizes the terminal to itself (herdr's terminal session control,
+  // through /api/term), so the agent lays out for it instead of wrapping.
+  // xterm.js draws it cell by cell: wide characters, box drawing and blocks
+  // drawn rather than borrowed from a font, symbols the font lacks scaled
+  // into their cells. Swipes scroll through herdr: wheel events for an agent
+  // in its own screen, herdr's scrollback for a shell. A terminal the Mac's
+  // window holds keeps the Mac's size until you take it.
+  const XT = ["xterm-6.0.0.js", "xterm-addon-webgl-0.19.0.js", "xterm-addon-unicode11-0.9.0.js", "xterm-addon-fit-0.11.0.js"];
+  let xtLoad = null, xt = null, own = false, held = false, frame = "", shown = "";
+  let fontSize = +store.get("reflex.fs", "12") || 12;
+  const loadXterm = () => xtLoad ||= new Promise((done, fail) => {
+    let left = XT.length + 1;
+    const loaded = () => { if (!--left) done(); }, failed = (src) => () => { xtLoad = null; fail(new Error(src)); };
+    const css = document.createElement("link"); css.rel = "stylesheet"; css.href = "xterm-6.0.0.css";
+    css.onload = loaded; css.onerror = failed(css.href); document.head.append(css);
+    for (const src of XT) {
+      const s = document.createElement("script"); s.src = src; s.onload = loaded; s.onerror = failed(src);
+      document.head.append(s);
+    }
+  });
+  const xtTheme = () => {
+    const [bg, fg, p] = termTheme(), c = p.split(" ");
+    const names = ["black", "red", "green", "yellow", "blue", "magenta", "cyan", "white"];
+    const t = { background: bg, foreground: fg, cursor: fg, selectionBackground: fg + "40" };
+    names.forEach((n, i) => { t[n] = c[i]; t["bright" + n[0].toUpperCase() + n.slice(1)] = c[i + 8]; });
+    return t;
+  };
+  function makeXt() {
+    const term = new Terminal({ fontFamily: 'ui-monospace, "SF Mono", Menlo, monospace', fontSize, lineHeight: 1.05, scrollback: 0,
+      disableStdin: true, cursorBlink: false, allowProposedApi: true, customGlyphs: true, rescaleOverlappingGlyphs: true, theme: xtTheme() });
+    const fit = new FitAddon.FitAddon();
+    term.loadAddon(fit);
+    term.loadAddon(new Unicode11Addon.Unicode11Addon());
+    term.unicode.activeVersion = "11";
+    term.open($("xt"));
+    try { const gl = new WebglAddon.WebglAddon(); gl.onContextLoss(() => gl.dispose()); term.loadAddon(gl); } catch (e) {}
+    // Typing goes through the ghost field; xterm's own never brings up a keyboard.
+    if (term.textarea) { term.textarea.readOnly = true; term.textarea.tabIndex = -1; term.textarea.setAttribute("inputmode", "none"); }
+    return { term, fit };
+  }
+  // The columns and rows that fit the phone now.
+  const dims = () => { const d = xt && xt.fit.proposeDimensions(); return d && d.cols > 0 && d.rows > 0 ? d : null; };
+  function setOwn(on, isHeld) {
+    own = on; held = !on && !!isHeld;
+    $("term").classList.toggle("own", own);
+    $("held").hidden = !held;
+    $("fit").hidden = own;
+    frame = "";
+    if (own) refit();   // the banner going changes the room
+  }
+  // Size the terminal to the phone (and scroll it): false once another client holds it.
+  async function control(extra = {}, take = false) {
+    const d = dims(); if (!open || !d) return false;
+    if (d.cols !== xt.term.cols || d.rows !== xt.term.rows) xt.term.resize(d.cols, d.rows);
+    let r;
+    try { r = await api("/api/term", { pane: open, cols: d.cols, rows: d.rows, take: take ? "1" : "", ...extra }); } catch (e) { return own; }
+    if (r.held) { setOwn(false, true); return false; }
+    if (r.ok && !own) setOwn(true);
+    return r.ok;
+  }
+  async function claim(take) {
+    const pane = open;
+    try { await loadXterm(); } catch (e) { return; }
+    if (pane !== open) return;
+    xt ||= makeXt();
+    xt.term.write("\x1b[H\x1b[2J");
+    if (take) $("held").hidden = true;
+    $("term").classList.add("own");   // measured where it will show
+    const ok = await control({}, take);
+    if (pane !== open) return;
+    if (!ok) $("term").classList.toggle("own", own);
+    tick(true);
+  }
+  $("take").onclick = () => claim(true);
+  // Draw herdr's screen as it is; a screen of another size means the terminal
+  // went back to another client (the Mac's window took it).
+  function paint(text) {
+    const rows = text.replace(/\r/g, "").split("\n"), t = xt.term;
+    const wide = rows.some((r) => [...r.replace(ESC, "")].length > t.cols);
+    if (rows.length > t.rows || wide) { setOwn(false, true); return false; }
+    const next = "\x1b[?25l\x1b[H\x1b[2J" + rows.map((r) => "\x1b[0m" + r).join("\r\n");
+    if (next !== frame) { t.write(next); frame = next; }
+    return true;
+  }
+  // Text size: the columns follow it.
+  let refitTimer = null;
+  function refit() {
+    clearTimeout(refitTimer);
+    refitTimer = setTimeout(() => {
+      if (!own || !xt) return;
+      const d = dims();
+      if (d && (d.cols !== xt.term.cols || d.rows !== xt.term.rows)) control().then(() => tick(true));
+    }, 180);
+  }
+  const resize = (by) => {
+    fontSize = Math.max(8, Math.min(20, fontSize + by)); store.set("reflex.fs", String(fontSize));
+    if (xt) { xt.term.options.fontSize = fontSize; refit(); }
+  };
+  $("smaller").onclick = () => resize(-1);
+  $("larger").onclick = () => resize(1);
+
+  // Swipes: a notch is about three rows of travel; a flick carries on a little.
+  let owed = 0, scrolling = false, touch = null, glide = null;
+  const notch = () => (xt ? 3 * ($("xt").clientHeight / xt.term.rows) : 48);
+  async function flushScroll() {
+    if (scrolling || !owed || !own) return;
+    scrolling = true;
+    const n = owed; owed = 0;
+    await control({ scroll: n > 0 ? "up" : "down", n: Math.abs(n) });
+    scrolling = false;
+    soon();
+    if (owed) flushScroll();
+  }
+  const move = (dy) => {
+    touch.acc += dy;
+    const step = notch();
+    while (Math.abs(touch.acc) >= step) { const s = Math.sign(touch.acc); owed += s; touch.acc -= s * step; }
+    flushScroll();
+  };
+  const tp = $("touch");
+  tp.addEventListener("touchstart", (e) => {
+    cancelAnimationFrame(glide);
+    const y = e.touches[0].clientY;
+    touch = { y, acc: 0, moved: 0, v: 0, t: e.timeStamp };
+  }, { passive: true });
+  tp.addEventListener("touchmove", (e) => {
+    if (!touch) return;
+    e.preventDefault();
+    const y = e.touches[0].clientY, dy = y - touch.y, dt = Math.max(1, e.timeStamp - touch.t);
+    touch.v = 0.7 * (dy / dt) + 0.3 * touch.v; touch.y = y; touch.t = e.timeStamp; touch.moved += Math.abs(dy);
+    move(dy);
+  }, { passive: false });
+  tp.addEventListener("touchend", () => {
+    if (!touch) return;
+    if (touch.moved < 8) { touch = null; if (live) ghost.focus({ preventScroll: true }); return; }
+    let v = touch.v, last = performance.now();
+    const step = (now) => {
+      v *= Math.pow(0.995, now - last); const dy = v * (now - last); last = now;
+      if (Math.abs(v) < 0.05 || !touch) { touch = null; return; }
+      move(dy); glide = requestAnimationFrame(step);
+    };
+    if (Math.abs(v) > 0.3) glide = requestAnimationFrame(step); else touch = null;
+  });
+
+  // Copy what is on screen (http on the tailnet has no async clipboard).
+  $("copy").onclick = () => {
+    $("menu").hidden = true;
+    const text = shown.replace(ESC, "").replace(/\r/g, "").replace(/[ \t]+$/gm, "").replace(/\n+$/, "");
+    const t = document.createElement("textarea"); t.value = text; t.setAttribute("readonly", ""); t.style.cssText = "position:fixed;opacity:0;top:0";
+    document.body.append(t); t.select(); t.setSelectionRange(0, text.length);
+    let ok = false; try { ok = document.execCommand("copy"); } catch (e) {}
+    t.remove();
+    if (!ok && navigator.clipboard) navigator.clipboard.writeText(text).then(() => toast("Copied"), () => toast("Couldn't copy", { bad: true }));
+    else toast(ok ? "Copied" : "Couldn't copy", { bad: !ok });
+  };
+
   let open = null, timer = null, live = false, ctrl = false, busy = false;
   const agentOf = (pane) => state?.agents.find((a) => a.pane === pane);
 
@@ -614,10 +789,13 @@
     const ids = (state?.inbox || []).filter((i) => i.pane === pane && i.kind !== "route").map((i) => i.id);
     if (ids.length) { state.inbox = state.inbox.filter((i) => !ids.includes(i.id)); renderHome(); ids.forEach((id) => api("/api/dismiss", { item: id }).catch(() => {})); }
     pinned = true;
+    setOwn(false); shown = "";
     tick();
+    claim(false);
   }
   function closeSession(fromPop) {
     open = null; setLive(false);
+    setOwn(false); owed = 0; touch = null; cancelAnimationFrame(glide);
     $("menu").hidden = true;
     $("session").classList.remove("on"); $("session").setAttribute("aria-hidden", "true");
     setThemeColor();
@@ -633,13 +811,17 @@
     if (!open || busy) return;
     busy = true;
     try {
-      const r = await api("/api/pane?format=ansi&id=" + encodeURIComponent(open) + "&lines=200");
+      const t = own && xt ? xt.term : null;
+      const r = await api("/api/pane?format=ansi&id=" + encodeURIComponent(open) + (t ? "&source=visible&lines=" + t.rows : "&lines=200"));
       const text = r.text || "";
-      const plain = text.replace(/\x1b\[[0-9;?:]*[A-Za-z@]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r/g, "");
-      cols = Math.min(240, Math.max(40, ...plain.split("\n").map((l) => l.replace(/\s+$/, "").length)));
-      fitFont();
-      $("screen").innerHTML = text ? ansiHtml(fit ? text : tidy(text), termTheme()) : `<span style="opacity:.5">${esc(r.error || "Nothing on screen yet.")}</span>`;
-      if (pinned) $("term").scrollTop = $("term").scrollHeight;
+      shown = text;
+      if (!(t && r.ok && text && paint(text))) {
+        const plain = text.replace(/\x1b\[[0-9;?:]*[A-Za-z@]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Za-z0-9]|\x1b[=>78]|\r/g, "");
+        cols = Math.min(240, Math.max(40, ...plain.split("\n").map((l) => l.replace(/\s+$/, "").length)));
+        fitFont();
+        $("screen").innerHTML = text ? ansiHtml(fit ? text : tidy(text), termTheme()) : `<span style="opacity:.5">${esc(r.error || "Nothing on screen yet.")}</span>`;
+        if (pinned) $("term").scrollTop = $("term").scrollHeight;
+      }
     } catch (e) {}
     busy = false;
     if (once !== true) { clearTimeout(timer); timer = setTimeout(tick, document.hidden ? 4000 : 600); }
@@ -713,11 +895,11 @@
 
   // The keyboard takes room: the session fits what is left of the screen.
   const vv = window.visualViewport;
-  const fitViewport = () => { document.documentElement.style.setProperty("--vvh", (vv ? vv.height : innerHeight) + "px"); if (open) { fitFont(); if (pinned) $("term").scrollTop = $("term").scrollHeight; } };
+  const fitViewport = () => { document.documentElement.style.setProperty("--vvh", (vv ? vv.height : innerHeight) + "px"); if (open) { fitFont(); refit(); if (pinned) $("term").scrollTop = $("term").scrollHeight; } };
   if (vv) { vv.addEventListener("resize", fitViewport); vv.addEventListener("scroll", () => window.scrollTo(0, 0)); }
   window.addEventListener("resize", fitViewport);
   fitViewport();
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(); if (open) tick(true); } });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(); if (open) { tick(true); claim(false); } } });
 
   applyAppearance();
   async function pair() {

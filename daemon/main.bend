@@ -1195,6 +1195,7 @@ type Ep is Data:
   ENote{}
   EKeys{}
   EText{}
+  ETerm{}
   EClose{}
   ESessions{}
   EResume{}
@@ -1226,6 +1227,7 @@ def rows() -> List<&2, Row>:
     Row{"/api/note", ENote{}},
     Row{"/api/keys", EKeys{}},
     Row{"/api/text", EText{}},
+    Row{"/api/term", ETerm{}},
     Row{"/api/close", EClose{}},
     Row{"/api/sessions", ESessions{}},
     Row{"/api/resume", EResume{}},
@@ -1317,10 +1319,19 @@ def safe_name(s: String) -> Bool:
     case SCon{c, t}:
       safe_char(c) && safe_name(t)
 
+# The phone's terminal (xterm.js) is vendored with its version in each file's
+# name, so the phone keeps it; the page itself is always fresh.
+def static_cache.pick(vendored: Bool) -> String:
+  match vendored:
+    case True{}:
+      "public, max-age=31536000, immutable"
+    case False{}:
+      "no-store"
+
 def static_read(+name: String, r: Result<&1, &1, U32 & String, String>) -> String:
   match r:
     case Done{body}:
-      Http.response(200, Http.content_type(name), body)
+      Http.response_with(200, Http.content_type(name), static_cache.pick(String.starts_with(name, "xterm-")), body)
     case Fail{e}:
       Http.response(404, "text/plain", "not found")
 
@@ -1336,10 +1347,12 @@ def serve_static.if(safe: Bool, +cfg: Cfg, +name: String) -> IO(String):
 def serve_static(+cfg: Cfg, +name: String) -> IO(String):
   serve_static.if(safe_name(name) && Core.bool_not(String.starts_with(name, ".")), cfg, name)
 
-def pane_read(ansi: Bool, sock: String, pane: String, lines: U32) -> IO(Result<&1, &1, U32 & String, String>):
+# The phone reads a terminal it sized as it shows (`visible`, scrolled where
+# herdr is); otherwise its recent rows.
+def pane_read(ansi: Bool, sock: String, pane: String, +source: String, lines: U32) -> IO(Result<&1, &1, U32 & String, String>):
   match ansi:
     case True{}:
-      Herdr.read_pane_ansi(sock, pane, "recent", lines)
+      Herdr.read_pane_ansi(sock, pane, Js.or_else.pick(Core.bool_not(String.eq(source, "visible")), source, "recent"), lines)
     case False{}:
       Herdr.read_pane(sock, pane, "recent_unwrapped", lines)
 
@@ -1352,6 +1365,45 @@ def pane_json(r: Result<&1, &1, U32 & String, String>) -> String:
 
 def is_true(+s: String) -> Bool:
   String.eq(s, "true") || String.eq(s, "1")
+
+# The phone's size, and its swipes: one short-lived `herdr terminal session
+# control` at the phone's columns and rows, carrying a scroll per notch (herdr
+# makes each a wheel event for an agent that takes the mouse, or moves its own
+# scrollback for a shell). A terminal another client holds (the Mac's window)
+# is left as it is unless `take`, and the reply says it is held.
+def scroll_cmds(n: Nat, +dir: String) -> String:
+  match n:
+    case 0n:
+      ""
+    case 1n+p:
+      "{\"type\":\"terminal.scroll\",\"lines\":3,\"direction\":\"" ++ dir ++ "\"}\n" ++ scroll_cmds(p, dir)
+
+def scroll_input.pick(none: Bool, +dir: String, n: U32) -> String:
+  match none:
+    case True{}:
+      ""
+    case False{}:
+      scroll_cmds(U32.to_nat(U32.min(n, 40)), dir)
+
+def scroll_input(+s: String, n: U32) -> String:
+  scroll_input.pick(Core.bool_not(String.eq(s, "up") || String.eq(s, "down")), s, n)
+
+def control_args.take(take: Bool, sock: String, pane: String, cols: String, rows: String) -> List<&1, String>:
+  match take:
+    case True{}:
+      ["-u", "HERDR_SESSION", "HERDR_SOCKET_PATH=" ++ sock, "herdr", "terminal", "session", "control", pane, "--cols", cols, "--rows", rows, "--takeover"]
+    case False{}:
+      ["-u", "HERDR_SESSION", "HERDR_SOCKET_PATH=" ++ sock, "herdr", "terminal", "session", "control", pane, "--cols", cols, "--rows", rows]
+
+def control_args(sock: String, pane: String, cols: U32, rows: U32, take: Bool) -> List<&1, String>:
+  control_args.take(take, sock, pane, U32.show(U32.max(20, U32.min(cols, 400))), U32.show(U32.max(5, U32.min(rows, 200))))
+
+def control_json(r: Result<&1, &1, U32 & String, U32 & (String & String)>) -> String:
+  match r:
+    case Fail{(c, m)}:
+      Js.obj([Js.kv("ok", "false"), Js.kv("error", Js.str(m))])
+    case Done{(+status, (+out, err))}:
+      Js.obj([Js.kv("ok", Js.bool(U32.is_eq(status, 0))), Js.kv("held", Js.bool(String.contains(out, "already has an attached client"))), Js.kv("error", Js.str(String.trim(err)))])
 
 def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON) -> IO(String):
   match ep:
@@ -1396,7 +1448,7 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
         ok(r)
     case EPane{}:
       do IO<String>:
-        r : Result<&1, &1, U32 & String, String> <- pane_read(String.eq(Http.Req.query(req, "format"), "ansi"), Cfg.at(cfg, Http.Req.query(req, "id")), Herdr.bare(Http.Req.query(req, "id")), Js.u32_or(U32.read(Http.Req.query(req, "lines")), 120))
+        r : Result<&1, &1, U32 & String, String> <- pane_read(String.eq(Http.Req.query(req, "format"), "ansi"), Cfg.at(cfg, Http.Req.query(req, "id")), Herdr.bare(Http.Req.query(req, "id")), Http.Req.query(req, "source"), Js.u32_or(U32.read(Http.Req.query(req, "lines")), 120))
         ok(pane_json(r))
     case EFolders{}:
       do IO<String>:
@@ -1437,6 +1489,10 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.send_text(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")), Js.text_at(body, "text"))
         ok(pane_json(ok_detail(r, "typed")))
+    case ETerm{}:
+      do IO<String>:
+        r : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run("/usr/bin/env", control_args(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")), Js.as_u32(Js.get(body, "cols"), 0), Js.as_u32(Js.get(body, "rows"), 0), is_true(Js.text_at(body, "take"))), scroll_input(Js.text_at(body, "scroll"), Js.as_u32(Js.get(body, "n"), 0)), 1048576, 8000)
+        ok(control_json(r))
     case EClose{}:
       do IO<String>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Herdr.close_pane(Cfg.at(cfg, Js.text_at(body, "pane")), Herdr.bare(Js.text_at(body, "pane")))
