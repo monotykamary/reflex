@@ -311,12 +311,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     }
 }
 
-/// Hosts the terminal one scroller-width wider than it shows, so SwiftTerm's
-/// legacy scroller (which it always reserves) is clipped off and every visible
-/// pixel is a column.
+/// Hosts the terminal at exactly the size it shows. SwiftTerm reserves a
+/// scroller's width — even an overlay scroller's, which draws nothing — until
+/// it is hidden, and hiding it hands that width back: the grid is then never
+/// wider than the window, so a line's last column can't fall off the edge.
 final class TerminalContainer: NSView {
     let term: LocalProcessTerminalView
-    static let scrollerWidth = NSScroller.scrollerWidth(for: .regular, scrollerStyle: .legacy)
 
     init(term: LocalProcessTerminalView) {
         self.term = term
@@ -330,8 +330,12 @@ final class TerminalContainer: NSView {
 
     override func layout() {
         super.layout()
-        term.frame = NSRect(x: 0, y: 0, width: bounds.width + TerminalContainer.scrollerWidth, height: bounds.height)
+        // Hidden first, then sized: the columns follow the width left over.
         for case let scroller as NSScroller in term.subviews { scroller.isHidden = true }
+        // setFrameSize recomputes them even when the size is unchanged, as it
+        // is when the first layout finds a size set with the scroller shown.
+        term.frame.origin = .zero
+        term.setFrameSize(bounds.size)
     }
 }
 
@@ -376,7 +380,7 @@ enum TerminalScroll {
         carry -= CGFloat(lines)
         let up = lines > 0
         let cols = max(t.cols, 1), rows = max(t.rows, 1)
-        let width = view.bounds.width - TerminalContainer.scrollerWidth
+        let width = view.bounds.width
         let col = min(cols - 1, max(0, Int(p.x / max(width, 1) * CGFloat(cols))))
         let row = min(rows - 1, max(0, Int((view.bounds.height - p.y) / max(view.bounds.height, 1) * CGFloat(rows))))
         for _ in 0..<min(abs(lines), 12) {
