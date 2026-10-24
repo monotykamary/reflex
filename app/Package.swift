@@ -8,7 +8,7 @@ let package = Package(
         .executable(name: "Reflex", targets: ["Reflex"]),
     ],
     dependencies: [
-        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.11.2"),
+        .package(url: "https://github.com/migueldeicaza/SwiftTerm", exact: "1.20.0"),
         .package(url: "https://github.com/sparkle-project/Sparkle", exact: "2.10.0"),
     ],
     targets: [

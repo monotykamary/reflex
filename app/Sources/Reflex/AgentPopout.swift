@@ -88,7 +88,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         ended = false
         elsewhere = false
         watching = false
-        view.keyFlags = [0]
+        view.resetKeys()
         TerminalSession.endOrphans(pane: pane)
         try? FileManager.default.removeItem(at: why)
         let script = """
@@ -125,7 +125,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         NSLog("Reflex: watch %@ (%@)", pane, reason)
         ended = false
         elsewhere = false
-        view.keyFlags = [0]
+        view.resetKeys()
         let script = """
         stty -echo -icanon 2>/dev/null
         printf '\\033[?25l'
@@ -436,17 +436,14 @@ enum TerminalSelect {
     }
 }
 
-/// A terminal that notices when its program asks for the kitty keyboard
-/// protocol (`CSI > flags u` pushes, `CSI < n u` pops, `CSI = flags ; mode u`
-/// sets). SwiftTerm doesn't speak it, so without this Shift-Return reaches
-/// Claude Code (which asks, through herdr) as a plain Return and sends.
+/// An agent's terminal: links under the pointer, and keys that can go through
+/// herdr instead of the process. SwiftTerm speaks the kitty keyboard protocol
+/// an agent asks for through herdr (Claude Code's Shift-Return newline,
+/// pi's Option-Up), and with it off sends modified keys as Ghostty does.
 final class AgentTerminalView: LocalProcessTerminalView {
-    /// The flags stack; its last entry is in force, 0 meaning legacy keys.
-    var keyFlags: [Int] = [0]
-    /// The escape sequence being read, which may span reads.
-    private var seq: [UInt8] = []
-
-    var kittyKeys: Bool { (keyFlags.last ?? 0) != 0 }
+    /// A new process starts with legacy keys: whatever a killed client pushed
+    /// (`CSI > flags u`) was never popped, so pop it all.
+    func resetKeys() { feed(text: "\u{1b}[<99u") }
 
     // MARK: Links
 
@@ -541,47 +538,11 @@ final class AgentTerminalView: LocalProcessTerminalView {
         guard let scheme = URL(string: url)?.scheme?.lowercased() else { return false }
         return ["http", "https", "file", "mailto"].contains(scheme)
     }
-
-    override func dataReceived(slice: ArraySlice<UInt8>) {
-        for b in slice { scan(b) }
-        super.dataReceived(slice: slice)
-    }
-
-    private func scan(_ b: UInt8) {
-        if b == 0x1b { seq = [b]; return }
-        guard !seq.isEmpty else { return }
-        seq.append(b)
-        switch seq.count {
-        case 2: if b != UInt8(ascii: "[") { seq = [] }
-        case 3: if !"<=>".utf8.contains(b) { seq = [] }
-        default:
-            if b == UInt8(ascii: "u") { apply(seq[2], seq[3..<seq.count - 1]); seq = [] }
-            else if !(b == UInt8(ascii: ";") || (0x30...0x39).contains(b)) || seq.count > 24 { seq = [] }
-        }
-    }
-
-    private func apply(_ kind: UInt8, _ params: ArraySlice<UInt8>) {
-        let p = String(decoding: params, as: UTF8.self).split(separator: ";", omittingEmptySubsequences: false).map { Int($0) }
-        let first = p.first.flatMap { $0 }
-        switch kind {
-        case UInt8(ascii: ">"): keyFlags.append(first ?? 0)
-        case UInt8(ascii: "<"): keyFlags.removeLast(min(max(first ?? 1, 1), keyFlags.count - 1))
-        default:
-            let f = first ?? 0, top = keyFlags.count - 1
-            switch p.count > 1 ? p[1] ?? 1 : 1 {
-            case 2: keyFlags[top] |= f
-            case 3: keyFlags[top] &= ~f
-            default: keyFlags[top] = f
-            }
-        }
-    }
 }
 
 /// The Mac's line keys, as Ghostty sends them: ⌘⌫ clears the line (^U),
 /// ⌘← and ⌘→ go to its start and end (^A, ^E). SwiftTerm drops ⌘⌫ and moves
-/// by a word for the other two. And once the program has asked for the kitty
-/// keyboard protocol, Shift-Return as `CSI 13;2u` (Claude Code's newline) and
-/// Control-Return as `CSI 13;5u` (its steer: send now, while it works).
+/// by a word for the other two.
 @MainActor
 enum TerminalKeys {
     private static var monitor: Any?
@@ -589,16 +550,9 @@ enum TerminalKeys {
     static func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in
-            let mods = e.modifierFlags.intersection([.command, .option, .control, .shift])
-            guard mods == .command || mods == .shift || mods == .control,
+            guard e.modifierFlags.intersection([.command, .option, .control, .shift]) == .command,
                   let view = TerminalScroll.views.values.first(where: { $0.window === e.window && $0.window != nil }),
                   let first = e.window?.firstResponder as? NSView, first.isDescendant(of: view) else { return e }
-            if mods != .command {
-                guard e.keyCode == 36 || e.keyCode == 76, !view.hasMarkedText(),
-                      (view as? AgentTerminalView)?.kittyKeys == true else { return e }
-                view.send(txt: mods == .shift ? "\u{1b}[13;2u" : "\u{1b}[13;5u")
-                return nil
-            }
             switch e.keyCode {
             case 51: view.send(txt: "\u{15}")
             case 123: view.send(txt: "\u{01}")
