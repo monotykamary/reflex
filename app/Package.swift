@@ -23,5 +23,11 @@ let package = Package(
             // Sparkle.framework is embedded in Contents/Frameworks.
             linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
         ),
+        .testTarget(
+            name: "TerminalLinkTests",
+            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
+            path: "Tests/TerminalLinkTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

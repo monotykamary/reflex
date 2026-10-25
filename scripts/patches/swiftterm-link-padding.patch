@@ -1,0 +1,59 @@
+diff --git a/Sources/SwiftTerm/Terminal.swift b/Sources/SwiftTerm/Terminal.swift
+index 4851e04e..4675cba4 100644
+--- a/Sources/SwiftTerm/Terminal.swift
++++ b/Sources/SwiftTerm/Terminal.swift
+@@ -7444,7 +7444,8 @@ open class Terminal {
+         let pathChars = #"[\w\-.~:\/?#@!$&*+;=%]"#
+         let noTrailingPunctuation = #"(?<![,.])"#
+         let noTrailingColon = #"(?<!:)"#
+-        let trailingSpacesAtEOL = #"(?: +(?= *$))?"#
++        // TUI output may pad the row with spaces. Keep those outside both the
++        // returned path and its hover range; interior path spaces still match.
+         let dottedPathLookahead = #"(?=[\w\-.~:\/?#@!$&*+;=%]*\.)"#
+         let nonDottedPathLookahead = #"(?![\w\-.~:\/?#@!$&*+;=%]*\.)"#
+         let dottedPathSpaceSegments = #"(?:(?<!:) (?!\w+:\/\/)[\w\-.~:\/?#@!$&*+;=%]*[\/.])*"#
+@@ -7480,13 +7481,11 @@ open class Terminal {
+             pathChars + "+" +
+             dottedPathSpaceSegments +
+             noTrailingColon +
+-            trailingSpacesAtEOL +
+             "|" +
+             nonDottedPathLookahead +
+             pathChars + "+" +
+             anyPathSpaceSegments +
+             noTrailingColon +
+-            trailingSpacesAtEOL +
+             ")"
+
+         // Ghostty uses (?<!\$\d*) here, which is unsupported by ICU.
+@@ -7497,8 +7496,7 @@ open class Terminal {
+             bareRelativePathPrefix +
+             pathChars + "+" +
+             dottedPathSpaceSegments +
+-            noTrailingColon +
+-            trailingSpacesAtEOL
++            noTrailingColon
+
+         let regex = schemeURLBranch + "|" + rootedOrRelativePathBranch + "|" + bareRelativePathBranch
+         return try? NSRegularExpression(pattern: regex, options: [])
+diff --git a/Tests/SwiftTermTests/GhosttyImplicitLinkDetectionTests.swift b/Tests/SwiftTermTests/GhosttyImplicitLinkDetectionTests.swift
+index 67b1cf93..76b071d0 100644
+--- a/Tests/SwiftTermTests/GhosttyImplicitLinkDetectionTests.swift
++++ b/Tests/SwiftTermTests/GhosttyImplicitLinkDetectionTests.swift
+@@ -76,7 +76,7 @@ final class GhosttyImplicitLinkDetectionTests: TerminalDelegate {
+             ("IPv6 address https://[2001:db8::1]:8080/path", "https://[2001:db8::1]:8080/path"),
+             ("IPv6 address https://[2001:db8::1]:8080(foo)", "https://[2001:db8::1]:8080"),
+             ("../example.py", "../example.py"),
+-            ("../example.py ", "../example.py "),
++            ("../example.py ", "../example.py"),
+             ("first time ../example.py contributor ", "../example.py"),
+             ("src/config/url.zig", "src/config/url.zig"),
+             ("app/folder/file.rb:1", "app/folder/file.rb:1"),
+@@ -90,6 +90,6 @@ final class GhosttyImplicitLinkDetectionTests: TerminalDelegate {
+             ("  - shared/src/foo/SomeItem.m:12, shared/src/", "shared/src/foo/SomeItem.m:12"),
+             ("foo.local/share", "foo.local/share"),
+             ("2024/report.txt", "2024/report.txt"),
+-            ("./spaces-end.   ", "./spaces-end.   "),
++            ("./spaces-end.   ", "./spaces-end."),
+             ("./space middle", "./space middle")
+         ]

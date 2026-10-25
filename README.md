@@ -108,6 +108,14 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
 
 ### Testing
 
+- `scripts/test-terminal-links.sh` — macOS regression tests for padded and
+  wrapped file paths, URLs, OSC 8 links, and native ⌘-hover underlines. The build
+  and test scripts apply `scripts/patches/swiftterm-link-padding.patch` to the
+  pinned SwiftTerm 1.20.0 checkout: its implicit path matcher otherwise includes
+  Pi's end-of-row spaces in the link. Use `scripts/prepare-swiftterm.sh` before
+  invoking `swift build` or `swift test` directly; preparation is idempotent
+  and stops if the patch no longer matches the dependency.
+
 - `bend daemon/PROOF.bend --check-only` — every law (`ALL PROOFS CHECK`).
 - `daemon/tests/asks.bend` — the answers read off captured Claude Code screens
   (numbered, multi-select, review, arrow menu, idle).

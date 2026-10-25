@@ -27,6 +27,7 @@ fi
 [ "$mode" = --daemon ] && exit 0
 
 echo "Reflex.app: building"
+scripts/prepare-swiftterm.sh
 swift build -c release --package-path app
 bin=$(swift build -c release --package-path app --show-bin-path)/Reflex
 
