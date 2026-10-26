@@ -291,14 +291,17 @@ def close_pane(sock: String, pane: String) -> IO(Result<&1, &1, U32 & String, J.
 def status_of(r: Result<&1, &1, U32 & String, J.JSON>) -> String:
   match r:
     case Done{v}:
-      Js.as_text(Js.path(["pane", "agent_status"], Some{v}))
+      Js.as_text(Js.path(["agent", "agent_status"], Some{v}))
     case Fail{e}:
       ""
 
 # The agent status Herdr has for a pane ("idle", "working", "blocked", …).
+# Poll agent.get, not pane.get: it also advances a named agent's pending
+# launch to interactive readiness. Merely reading its pane can leave a
+# background pi idle but agent.prompt rejected until a terminal attaches.
 def pane_status(sock: String, pane: String) -> IO(String):
   do IO<String>:
-    r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "pane.get", Js.obj([Js.kv("pane_id", Js.str(pane))]), 3000)
+    r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "agent.get", Js.obj([Js.kv("target", Js.str(pane))]), 3000)
     return status_of(r)
 
 # Literal text into a pane, no Enter (the phone's keyboard, typed live).

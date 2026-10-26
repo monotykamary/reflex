@@ -121,6 +121,10 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   (numbered, multi-select, review, arrow menu, idle).
 - `daemon/tests/sent.bend` — whether a sent prompt sits typed but unsent in
   the agent's input box, or never arrived (both are put right after sending).
+- `python3 scripts/test-agent-status.py` — the real Bend status adapter against
+  a disposable socket (needs Bend and a C compiler, not herdr or a live agent).
+  Checks `agent.get {target}` and its response shape: unlike `pane.get`, this
+  advances background launches to readiness without opening a terminal.
 - `daemon/tests/machines.bend` — which herdr an agent on another Mac is
   reached through, its agents kept while the tunnel reconnects, and places
   there (`work:/Users/you/VCS/app`): their machine, path, how Jev reads them
