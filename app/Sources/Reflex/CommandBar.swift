@@ -919,10 +919,23 @@ final class CommandModel: ObservableObject {
         send(to: c, open: true)
     }
 
-    func send(to c: Candidate, open: Bool = false) {
+    func send(to c: Candidate, open: Bool = false, prompt: String? = nil) {
         // Exactly what is in the field, even if the list is a beat behind.
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        let full = Attachments.prompt(words, attachments)
+        // An agent on another Mac reads its images there: copied first, then sent.
+        if prompt == nil, !attachments.isEmpty, !c.machine.isEmpty, [.session, .folder, .resume].contains(c.kind) {
+            let m = c.machine, images = attachments, t = ticket
+            phase = .sending("Copying \(images.count == 1 ? "the image" : "\(images.count) images") to \(m)")
+            Task {
+                do {
+                    let paths = try await Attachments.copy(images.map(\.url), to: m)
+                    guard t == ticket else { return }
+                    send(to: c, open: open, prompt: Attachments.prompt(words, paths: paths))
+                } catch { fail((error as? Attachments.NotCopied)?.why ?? error.localizedDescription, ticket: t) }
+            }
+            return
+        }
+        let full = prompt ?? Attachments.prompt(words, attachments)
         let kind = harness ?? Settings.shared.harness
         if mode == .ask, ![.command, .chooseFolder, .ask].contains(c.kind), c.kind != .newFolder || naming {
             remember(words, sentTo: c, kind: kind)

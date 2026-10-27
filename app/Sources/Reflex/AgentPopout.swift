@@ -46,6 +46,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
+        view.machine = Machines.machine(of: pane)
         view.onInput = { [weak self] data in
             guard let self, self.watching else { return false }
             self.type(data)
@@ -464,6 +465,42 @@ final class AgentTerminalView: LocalProcessTerminalView {
     override func send(source: TerminalView, data: ArraySlice<UInt8>) {
         if let onInput, onInput(data) { return }
         super.send(source: source, data: data)
+    }
+
+    // MARK: Images
+
+    /// The Mac its agent runs on ("" for this one; see Machines).
+    var machine = ""
+
+    /// ⌘V with an image (a screenshot, a file copied in Finder) pastes its
+    /// path, as a drop into Ghostty does, and the agent reads it: Claude Code
+    /// makes it an [Image]. One on another Mac gets a copy there first.
+    /// Text pastes as always.
+    override func paste(_ sender: Any) {
+        let images = Attachments.read(.general)
+        guard !images.isEmpty else { return super.paste(sender) }
+        let machine = machine
+        Task { @MainActor in
+            var paths = images.map(\.url.path)
+            if !machine.isEmpty {
+                do { paths = try await Attachments.copy(images.map(\.url), to: machine) } catch {
+                    NSLog("Reflex: pasting an image to %@: %@", machine, (error as? Attachments.NotCopied)?.why ?? "\(error)")
+                    NSSound.beep()
+                    return
+                }
+            }
+            let text = paths.map(Self.escaped).joined(separator: " ")
+            if terminal.bracketedPasteMode { send(txt: "\u{1b}[200~") }
+            send(txt: text)
+            if terminal.bracketedPasteMode { send(txt: "\u{1b}[201~") }
+        }
+    }
+
+    /// A path as a shell (and a terminal drop) writes it: backslashes before
+    /// anything but plain characters.
+    private static func escaped(_ path: String) -> String {
+        let plain = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "/._-+,@"))
+        return path.unicodeScalars.map { plain.contains($0) ? String($0) : "\\" + String($0) }.joined()
     }
     private(set) var hovered: String?
     private var hoverArea: NSTrackingArea?

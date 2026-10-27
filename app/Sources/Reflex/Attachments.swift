@@ -71,7 +71,61 @@ enum Attachments {
 
     /// The prompt as the agent gets it: your words, then each image's path.
     static func prompt(_ text: String, _ images: [Attachment]) -> String {
-        guard !images.isEmpty else { return text }
-        return text + " " + images.map { "[image: \($0.url.path)]" }.joined(separator: " ")
+        prompt(text, paths: images.map(\.url.path))
+    }
+
+    static func prompt(_ text: String, paths: [String]) -> String {
+        guard !paths.isEmpty else { return text }
+        return text + " " + paths.map { "[image: \($0)]" }.joined(separator: " ")
+    }
+
+    // MARK: Other Macs
+
+    struct NotCopied: Error { let why: String }
+
+    /// An agent on another Mac can't read this Mac's files, so its images go
+    /// there first: over your ssh (as RemoteIndex reads that Mac), into its
+    /// own temporary folder. Their paths there, in order.
+    static func copy(_ files: [URL], to machine: String) async throws -> [String] {
+        try await Task.detached {
+            let (up, env) = Machines.shared.reachable()
+            guard let m = up.first(where: { $0.key == machine }) else {
+                throw NotCopied(why: "\(machine) isn't connected, so the image can't get there.")
+            }
+            return try files.map { try upload($0, to: m.target, env: env) }
+        }.value
+    }
+
+    private static func upload(_ file: URL, to target: String, env: [String: String]) throws -> String {
+        guard let input = FileHandle(forReadingAtPath: file.path) else {
+            throw NotCopied(why: "Couldn't read \(file.lastPathComponent).")
+        }
+        defer { try? input.close() }
+        let ext = file.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        let name = "image-\(UUID().uuidString.prefix(8)).\(ext.isEmpty ? "png" : ext)"
+        // Its per-user temporary folder: an ssh session may not set TMPDIR.
+        let cmd = #"d="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)}"; d="${d:-/tmp/}"; d="${d%/}/Reflex"; "#
+            + #"mkdir -p "$d" && cat > "$d/\#(name)" && printf '%s' "$d/\#(name)""#
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
+        p.arguments = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15",
+                       "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=2", target, cmd]
+        p.environment = env
+        let out = Pipe()
+        p.standardInput = input
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { throw NotCopied(why: "ssh didn't start.") }
+        let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
+        DispatchQueue.global().asyncAfter(deadline: .now() + 60, execute: killer)
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        killer.cancel()
+        let path = String(decoding: data, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard p.terminationStatus == 0, path.hasPrefix("/") else {
+            NSLog("Reflex: copying an image to %@ failed (%d)", target, p.terminationStatus)
+            throw NotCopied(why: "Couldn't copy the image there over ssh.")
+        }
+        return path
     }
 }
