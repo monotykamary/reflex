@@ -93,6 +93,22 @@ def pasts_of(xs: List<&2, Scored>, k: Nat) -> List<&2, Past>:
 def rank(text: String, xs: List<&2, Past>, +k: Nat) -> List<&2, Past>:
   pasts_of(List.sort(~Scored, ~scored_le, scored_all(Ix.tokens(text), xs)), k)
 
+def harness.put(keep: Bool, p: Past, rest: List<&2, Past>) -> List<&2, Past>:
+  match keep:
+    case True{}:
+      p <> rest
+    case False{}:
+      rest
+
+def harness(+kind: String, xs: List<&2, Past>) -> List<&2, Past>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+p, t}:
+      match p:
+        case Past{+agent, id, cwd, title, last, age, state}:
+          harness.put(String.is_empty(kind) || String.eq(kind, agent), Past{agent, id, cwd, title, last, age, state}, harness(kind, t))
+
 # JSON
 # ----
 

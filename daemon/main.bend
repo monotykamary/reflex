@@ -1007,6 +1007,25 @@ def scope_agents.if(all: Bool, +m: String, xs: List<&2, M.Agent>) -> List<&2, M.
 def scope_agents(+m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
   scope_agents.if(String.is_empty(m), m, xs)
 
+def agent_kind(a: M.Agent) -> String:
+  match a:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+      kind
+
+def harness_agents.put(keep: Bool, a: M.Agent, rest: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match keep:
+    case True{}:
+      a <> rest
+    case False{}:
+      rest
+
+def harness_agents(+kind: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+a, t}:
+      harness_agents.put(String.is_empty(kind) || String.eq(kind, agent_kind(a)), a, harness_agents(kind, t))
+
 def take_agents(xs: List<&2, M.Agent>, n: Nat) -> List<&2, M.Agent>:
   match xs n:
     case Nil{} _:
@@ -1083,15 +1102,15 @@ def candidates_ctx(+cfg: Cfg, +text: String, +harness: String, +memory: String, 
   match ctx:
     case M.RContext{agents, folders}:
       do IO<String>:
-        +seen : List<&2, R.Seen> <- read_seen(take_agents(scope_agents(machine, agents), 12n), cfg)
+        +seen : List<&2, R.Seen> <- read_seen(take_agents(harness_agents(harness, scope_agents(machine, agents)), 12n), cfg)
         +cands : List<&2, M.Folder> = Ix.rank(text, Ix.on(machine, folders), 8n)
         all : List<&2, P.Past> <- read_pasts(cfg)
-        +pasts : List<&2, P.Past> = P.rank(text, P.on(machine, all), 5n)
+        +pasts : List<&2, P.Past> = P.rank(text, P.harness(harness, P.on(machine, all)), 5n)
         +line : String = R.request(text, Cfg.home(cfg), seen, cands, pasts, memory)
         t0 : Nat <- IO.now()
         out : Result<&1, &1, U32 & String, U32 & (String & String)> <- Process.run(Cfg.jev(cfg), jev_args(), line, 4194304, 65000)
         t1 : Nat <- IO.now()
-        return R.candidates_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), harness, Cfg.threshold(cfg), seen, cands, pasts, U32.from_nat(Nat.sub(t1, t0)))
+        return R.candidates_output(text_or(stdout_of(out), ""), text, Cfg.home(cfg), Js.or_else(harness, Cfg.harness(cfg)), Cfg.threshold(cfg), seen, cands, pasts, U32.from_nat(Nat.sub(t1, t0)))
     case M.RText{json}:
       IO.pure(String, "{\"ok\":false,\"error\":\"no context\"}")
 
@@ -1418,7 +1437,7 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
     case ECandidates{}:
       do IO<String>:
         ctx : M.Reply <- ask(chan, M.Context{})
-        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.or_else(Js.text_at(body, "harness"), Cfg.harness(cfg)), Js.text_at(body, "memory"), Js.text_at(body, "machine"), ctx)
+        r : String <- candidates_ctx(cfg, Js.text_at(body, "text"), Js.text_at(body, "harness"), Js.text_at(body, "memory"), Js.text_at(body, "machine"), ctx)
         ok(r)
     case EExplain{}:
       do IO<String>:

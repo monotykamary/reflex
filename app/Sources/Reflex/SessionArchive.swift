@@ -56,6 +56,7 @@ final class SessionArchive: ObservableObject {
     private var background: [String: PastSession.State] = [:]
     private var timer: Timer?
     private var scanning = false
+    private var indexedSessionFolders: Set<String> = []
 
     static var file: URL { Settings.supportDir.appendingPathComponent("sessions.tsv") }
 
@@ -111,7 +112,14 @@ final class SessionArchive: ObservableObject {
         let tsv = sessions.map { s in
             [s.agent, s.id, s.cwd, s.title, s.last, String(s.ageHours), s.state.rawValue].map(SessionArchive.clean).joined(separator: "\t")
         }.joined(separator: "\n") + "\n"
-        try? tsv.write(to: SessionArchive.file, atomically: true, encoding: .utf8)
+        do {
+            try tsv.write(to: SessionArchive.file, atomically: true, encoding: .utf8)
+            let folders = Set(sessions.lazy.filter { $0.machine.isEmpty && $0.cwd.hasPrefix("/") }.map(\.cwd))
+            if folders != indexedSessionFolders {
+                indexedSessionFolders = folders
+                Task { await Client.local.reindex() }
+            }
+        } catch { }
     }
 
     nonisolated static func clean(_ s: String) -> String {
@@ -122,10 +130,11 @@ final class SessionArchive: ObservableObject {
 
     /// Sessions whose title, last prompt, folder, agent or Mac contain every
     /// word; only one Mac's ("@work") when `machine` is set.
-    func matching(_ query: String, on machine: String? = nil, limit: Int = 8) -> [PastSession] {
+    func matching(_ query: String, on machine: String? = nil, harness: String? = nil, limit: Int = 8) -> [PastSession] {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return Array(sessions.lazy.filter { s in
             if let machine, s.machine != machine { return false }
+            if let harness, s.agent != harness { return false }
             let hay = "\(s.title) \(s.last) \(s.folder) \(s.agent) \(s.machine)".lowercased()
             return words.allSatisfy { hay.contains($0) }
         }.prefix(limit))

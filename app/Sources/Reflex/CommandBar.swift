@@ -423,7 +423,7 @@ final class CommandModel: ObservableObject {
 
     func apply(_ c: SlashCommand) {
         switch c {
-        case .harness(let h): harness = h == Settings.shared.harness ? nil : h
+        case .harness(let h): harness = h
         case .newFolder: newForced = true
         case .btw: sideForced = true
         case .folder: chooseFolder()
@@ -480,6 +480,11 @@ final class CommandModel: ObservableObject {
         // Typing is not Jev reading: the indicator waits for a call for these words.
         thinking = false
         generation += 1
+        // A ranking belongs to its harness and machine as well as its text.
+        // Do not show or act on an old scope while its replacement is pending.
+        jev = nil
+        jevText = ""
+        jevStamp += 1
         let gen = generation
         let words = request
         let scope = folderScope
@@ -597,7 +602,7 @@ final class CommandModel: ObservableObject {
     // MARK: Rows
 
     /// The live sessions the bar offers: all of them, or "@work"'s.
-    private var agents: [AgentInfo] { Store.shared.state.agents.filter { machine == nil || $0.machine == machine } }
+    private var agents: [AgentInfo] { Store.shared.state.agents.filter { (machine == nil || $0.machine == machine) && (harness == nil || $0.kind == harness) } }
 
     private func leaf(_ path: String) -> String { (path as NSString).lastPathComponent }
 
@@ -764,7 +769,7 @@ final class CommandModel: ObservableObject {
     /// until you type; then a live session that matches comes first too (it
     /// is open already, so ⏎ shows it rather than resuming a second copy).
     private var searchRows: [Candidate] {
-        let pasts = SessionArchive.shared.matching(request, on: machine, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
+        let pasts = SessionArchive.shared.matching(request, on: machine, harness: harness, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
         if resumeOnly && request.isEmpty { return pasts }
         let live = sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,

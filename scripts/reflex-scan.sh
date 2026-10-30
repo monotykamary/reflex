@@ -19,7 +19,8 @@
 # REFLEX_FOLDERS (colon-separated) adds folders that are not repositories, and
 # REFLEX_FOLDERS_FILE names a file of more, one per line (folders added from
 # the Ask bar). REFLEX_USAGE names a file of past spawn paths, one per line,
-# counted into `uses`. Reads only; never fetches, never writes.
+# counted into `uses`. Existing local session folders in REFLEX_DATA/sessions.tsv
+# are also candidates, including non-git folders. Reads only; never writes.
 set -u
 
 roots=${REFLEX_ROOTS:-$HOME/VCS}
@@ -58,7 +59,8 @@ scan_one() {
   d=${1%/.git}
   d=${d%/}
   name=$(basename "$d")
-  ct=$(git -C "$d" log -1 --format=%ct 2>/dev/null || true)
+  ct=""
+  if [ -e "$d/.git" ]; then ct=$(git -C "$d" log -1 --format=%ct 2>/dev/null || true); fi
   if [ -n "$ct" ]; then
     age=$(( (now - ct) / 3600 ))
   else
@@ -76,7 +78,8 @@ scan_one() {
     uses=${uses:-0}
   fi
   desc=$(describe "$d")
-  recent=$(git -C "$d" log -3 --format='%s;' 2>/dev/null | clean 240)
+  recent=""
+  if [ -e "$d/.git" ]; then recent=$(git -C "$d" log -3 --format='%s;' 2>/dev/null | clean 240); fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$d" "$name" "$age" "$branch" "$uses" "$desc" "$recent"
 }
 
@@ -145,6 +148,11 @@ awk -v roots="$roots" -v home="$HOME" '
 
 {
   cat "$repos"
+  if [ -n "${REFLEX_DATA:-}" ] && [ -f "$REFLEX_DATA/sessions.tsv" ]; then
+    cut -f3 "$REFLEX_DATA/sessions.tsv" | while IFS= read -r f; do
+      case "$f" in /*) [ -d "$f" ] && printf '%s\n' "$f" ;; esac
+    done
+  fi
   IFS=:
   for f in ${REFLEX_FOLDERS:-}; do
     [ -d "$f" ] && printf '%s\n' "$f"
