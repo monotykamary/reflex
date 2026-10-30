@@ -1,15 +1,15 @@
 # Reflex
 
 One place to see, answer and talk to every coding agent you run in
-[herdr](https://herdr.dev) — routed by a **System 1** model instead of a chat
-agent.
+[herdr-core](https://herdr.dev/core/) (or [herdr](https://herdr.dev)) — routed
+by a **System 1** model instead of a chat agent.
 
 Reflex is a Mac menu-bar app in the spirit of [One](https://getone.one), with
 two deliberate differences:
 
 - **Terminal-native, subscription-native.** Your agents (Claude Code, Codex, pi,
-  Grok, …) keep running in their own TUIs inside herdr, on the plans you
-  already pay for. Reflex never wraps them in an SDK, ACP or a chat API.
+  Grok, …) keep running in their own TUIs inside herdr-core's terminals, on
+  the plans you already pay for. Reflex never wraps them in an SDK, ACP or a chat API.
 - **System 1 routing.** No LLM sits at the helm rewriting your words. A request
   goes to [Jev](https://typesafe.ai/blog/introducing-system-one-models-and-jev)
   (via [jev-fabric](https://github.com/fabric-runtime/jev-fabric)) as typed
@@ -30,7 +30,9 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
                  reflexd (Bend, native)
      actor ── Core.step(State, Msg) → (State, dispatches)   ← pure, proven
        │ ticker · poller · indexer · http · exec
-       ├── herdr socket (agents, screens, prompts, keys, workspaces)
+       ├── herdr-core socket (terminals, status, prompts, keys, machines)
+       ├── herdr socket (agents still running there, while you move over)
+       ├── the app's link.sock (herdr-core screens for the phone)
        ├── jev-fabric serve (one typed Jev call per request)
        └── reflex-scan.sh / reflex-fork.sh (folder facts, /btw forks)
 ```
@@ -47,19 +49,30 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 | **Inbox** | Questions first, then updates: what each session said last (read from Claude's and pi's own session files, otherwise its screen, cleaned of terminal noise). Opening a session clears its notifications. |
 | **Resume** | Earlier Claude, pi and Codex sessions (from their own session files) and Claude background sessions (`claude agents`) come back into herdr: ⏎ resumes or attaches, ⌘⏎ forks. Jev may offer one when a request clearly continues it — only when sure, and never over a live session (both proved). A background session nobody is watching notifies you when it finishes. |
 | **btw** | Start with `btw` to ask without interrupting: Claude Code gets its native `/btw`; pi (and Claude when it is blocked on a dialog) gets a headless, unsaved fork of its session. |
-| **Terminals** | A real terminal on any agent (SwiftTerm, attached through herdr): full colour, keys and resizing go straight to its TUI. ⌘⌫ clears the line, ⌘← / ⌘→ go to its start and end, ⇧⏎ starts a new line in Claude Code and ⌃⏎ steers it, and ⌥ with an arrow, Home, End or ⌦ reaches the agent (pi's ⌥↑ brings back a queued message), as in Ghostty. ⌘-click opens a link, written out or OSC 8. ⌘V with an image (a screenshot, a file copied in Finder) pastes its path, which the agent reads as an image. One window per session. herdr gives a terminal to one attached client at a time: while another window or another Mac has it, the window shares it — shown live, and what you type goes in too (through herdr's API), while the other sets the size. **Take Over** makes this one the attached one; taken from, it goes back to sharing; the button in its header hands it over. Ghostty themes with light and dark slots, Geist Mono when installed. |
+| **Terminals** | A real terminal on any agent (SwiftTerm, attached through herdr): full colour, keys and resizing go straight to its TUI. ⌘⌫ clears the line, ⌘← / ⌘→ go to its start and end, ⇧⏎ starts a new line in Claude Code and ⌃⏎ steers it, and ⌥ with an arrow, Home, End or ⌦ reaches the agent (pi's ⌥↑ brings back a queued message), as in Ghostty. ⌘-click opens a link, written out or OSC 8. ⌘V with an image (a screenshot, a file copied in Finder) pastes its path, which the agent reads as an image. One window per session. herdr gives a terminal to one attached client at a time: while another window or another Mac has it, the window shares it — shown live, and what you type goes in too (through herdr's API), while the other sets the size. **Take Over** makes this one the attached one; taken from, it goes back to sharing; the button in its header hands it over. A herdr-core agent's terminal is the core's stream straight into the window, with no client process in between: any number of windows, Macs and the phone see it and type into it at once, and the one you last typed in, resized or focused sets its size (no Take Over needed); if the core restarts for an update, the window reattaches by itself. Ghostty themes with light and dark slots, Geist Mono when installed. |
 | **Phone** | ⋯ on the rail → *Take Reflex with You*: a QR code that works once and expires in ten minutes. On the phone: your agents, their questions with big answer buttons, updates, and a live terminal you can type into (keys for esc, tab, arrows, ⏎, ^C, ctrl). The terminal takes the phone's size, so the agent lays out for it instead of wrapping, and is drawn cell by cell (box drawing, wide characters and symbols line up); swipe to scroll Claude's or pi's own screen, or a shell's scrollback. While your Mac's window has the terminal it keeps the Mac's size, and **Fit to phone** takes it. Light, dark or system. |
-| **Other Macs** | Agents on your other Macs show up with this Mac's, in the rail, the inbox, the Ask bar and terminals, tagged with the machine (`work: ~/project`). Add a Mac in Settings → Machines (or the optional onboarding step): type its SSH host, **Test** says what's in the way — Remote Login off or limited to some users, no key yet, a host key never seen, asleep or off the tailnet, herdr missing — and **Add** saves it with `herdr machine add`, the same saved machines herdr's own sidebar uses; Reflex keeps an SSH tunnel to each enabled one through your own `~/.ssh/config`, keys and agent (Tailscale works: `ProxyCommand tailscale nc %h %p`) and reconnects when it drops. They wear the machine's name in lists and a badge on their dots, dimmed while its tunnel reconnects; Settings → Machines lists herdr's machines and how each is connected. You can send them requests, answer their questions and open their terminals. Images in a request, or pasted into one of their terminals, are copied to that Mac first (over the same SSH, into its temporary folder), since its agent can only read its own files. Their folders and earlier Claude, pi and Codex sessions join the search and `/resume`, wearing the machine's name: Reflex reads them over the same SSH (its folder scan runs there under the same roots, relative to that Mac's home; session files are read at their start and end, only when they change; nothing is installed there). ⏎ on one starts or resumes it in that Mac's herdr. A request goes to this Mac's folders unless you start it with `@work`, which keeps it — and Jev's candidates — on that Mac. Headless `/btw` forks still run on this Mac only. |
+| **Other Macs** | Agents on your other Macs show up with this Mac's, in the rail, the inbox, the Ask bar and terminals, tagged with the machine (`work: ~/project`). Add a Mac in Settings → Machines (or the optional onboarding step): type its SSH host, **Test** says what's in the way — Remote Login off or limited to some users, no key yet, a host key never seen, asleep or off the tailnet, herdr missing — and **Add** saves it with `herdr machine add`, the same saved machines herdr's own sidebar uses; Reflex keeps an SSH tunnel to each enabled one through your own `~/.ssh/config`, keys and agent (Tailscale works: `ProxyCommand tailscale nc %h %p`) and reconnects when it drops. They wear the machine's name in lists and a badge on their dots, dimmed while its tunnel reconnects; Settings → Machines lists herdr's machines and how each is connected. You can send them requests, answer their questions and open their terminals. Images in a request, or pasted into one of their terminals, are copied to that Mac first (over the same SSH, into its temporary folder), since its agent can only read its own files. Their folders and earlier Claude, pi and Codex sessions join the search and `/resume`, wearing the machine's name: Reflex reads them over the same SSH (its folder scan runs there under the same roots, relative to that Mac's home; session files are read at their start and end, only when they change; nothing is installed there). ⏎ on one starts or resumes it in that Mac's herdr. A request goes to this Mac's folders unless you start it with `@work`, which keeps it — and Jev's candidates — on that Mac. Headless `/btw` forks still run on this Mac only. Machines herdr-core added (`hc machine add`, or Settings → Machines while new sessions start in herdr-core) need no tunnel of Reflex's: the core dials them over your ssh, their terminals join its list (`work/t7`), and Reflex reads their folders and sessions and puts images there through the core. |
 | **Keep awake** | While agents work (or always), the Mac doesn't idle-sleep; on battery below 20% (adjustable) it lets go. |
 
 ## Requirements
 
 - An Apple Silicon Mac on **macOS 26** or later.
-- [herdr](https://herdr.dev) 0.9+, with its agent integrations
-  (`herdr integration install claude && herdr integration install pi`).
-  Reflex does not ship herdr or jev-fabric: its setup has an Install button
-  for each, which runs that tool's own installer (it verifies its download
-  and puts one binary in `~/.local/bin`).
+- [herdr-core](https://herdr.dev/core/) 0.1.14+ (`hc`): new sessions start
+  there by default. Agents report their own status to it (OSC 7501, the
+  Program Status Protocol): Claude Code and pi do; Codex doesn't yet, so it
+  shows without a status (working, done, its questions) until it does — the
+  core never guesses from the screen. Reflex starts Claude and pi with a
+  session id it chose (`--session-id`), so their question cards and earlier
+  sessions line up from the first moment; a Claude you start yourself is
+  matched through `~/.claude/sessions/<pid>.json` once it has a session.
+- [herdr](https://herdr.dev) 0.9+ is optional: agents running there stay
+  listed, and you can still answer, open and close them, while you move over
+  (Settings → Projects → *New sessions start in* picks herdr again). It needs
+  its agent integrations (`herdr integration install claude && herdr
+  integration install pi`). Reflex does not ship herdr-core, herdr or
+  jev-fabric: its setup has an Install button for each, which runs that
+  tool's own installer (it verifies its download and puts one binary in
+  `~/.local/bin`).
 - At least one agent: [Claude Code](https://claude.com/claude-code), Codex, pi, …
 - For routing: jev-fabric and a System One provider key (TypeSafe's Jev by
   default; Reflex can reuse the key pi already has). Settings → Routing also
@@ -68,11 +81,13 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
   jev-fabric version you have and offers **Update** when a newer release is
   out or the provider needs one. Without them everything else works and you
   pick where requests go.
-- Updates: once at launch and then daily, Reflex checks for newer herdr and
-  jev-fabric releases (herdr's `latest.json`, GitHub's latest jev-fabric) next
-  to its own. One that's out shows like a Reflex update: a dot on the menu bar
-  icon, a row in the menu bar panel, a button on the rail, and **Update** in
-  Settings → Setup. herdr updates with `herdr update`, but its running server
+- Updates: once at launch and then daily, Reflex checks for newer herdr-core,
+  herdr and jev-fabric releases (their `latest.json`, GitHub's latest
+  jev-fabric) next to its own. One that's out shows like a Reflex update: a
+  dot on the menu bar icon, a row in the menu bar panel, a button on the rail,
+  and **Update** in Settings → Setup. herdr-core updates with `hc update`,
+  which restarts the core in place: its terminals, and your agents, keep
+  running. herdr updates with `herdr update`, but its running server
   keeps the old version until it restarts, and restarting stops every agent
   (herdr resumes the ones it can). So Reflex offers **Restart herdr…** and asks
   first; it never restarts herdr by itself.
@@ -125,6 +140,21 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   a disposable socket (needs Bend and a C compiler, not herdr or a live agent).
   Checks `agent.get {target}` and its response shape: unlike `pane.get`, this
   advances background launches to readiness without opening a terminal.
+- `python3 scripts/test-core.py` — the herdr-core adapter (`daemon/Hc.bend`,
+  `daemon/Term.bend`) against a real, disposable core (its own `HC_SESSION`
+  and state, never yours) with fake agents that report OSC 7501: which
+  terminals are agents and what they are, status words, sessions from labels
+  and from Claude's session file, a prompt refused while starting or blocked,
+  keys, reads, a start and a close, and which backend each pane id goes to.
+- `python3 scripts/test-core-daemon.py` — the real reflexd on a disposable
+  core with no herdr anywhere: its API lists the core's agents, a prompt is
+  answered, pi starts with the session id Reflex chose (no request: nothing
+  reaches a model), and closing it ends it.
+- `scripts/test-corelink.sh` — the app's stream client (`CoreLink.swift`) on a
+  disposable core: framed calls, the first paint, typing, resizing, flow
+  control past the first 256 KiB, a reattach; then the phone's viewer
+  (`PhoneLink.swift`) asked as reflexd asks it. Needs the app built once.
+  These three take `REFLEX_TEST_HC=/path/to/herdr-core` when `hc` isn't on PATH.
 - `daemon/tests/machines.bend` — which herdr an agent on another Mac is
   reached through, its agents kept while the tunnel reconnects, and places
   there (`work:/Users/you/VCS/app`): their machine, path, how Jev reads them
@@ -146,7 +176,9 @@ curl -H 'authorization: Bearer dev' localhost:47823/api/state
 |---|---|---|
 | `REFLEX_PORT` / `REFLEX_BIND` | `47823` / `127.0.0.1` | the app picks the bind for the phone remote |
 | `REFLEX_TOKEN` | generated (printed once) | bearer token for every `/api/*` call |
-| `REFLEX_HERDR_SOCKET` / `HERDR_SESSION` | default herdr session | |
+| `REFLEX_CORE_SOCKET` / `HC_SESSION` | `~/.local/state/herdr-core/default/default.sock` | herdr-core (the app works it out as the core does: `HC_SOCKET`, its config, `XDG_RUNTIME_DIR`) |
+| `REFLEX_BACKEND` | `core` | where new sessions start: `core` or `herdr` |
+| `REFLEX_HERDR_SOCKET` / `HERDR_SESSION` | default herdr session | herdr, for agents still running there |
 | `REFLEX_HARNESS` | `claude` | agent for new sessions |
 | `REFLEX_THRESHOLD` | `6000` | how sure Jev must be to act alone (basis points; the app fixes it at 60%) |
 | `REFLEX_ROOTS` / `REFLEX_SCAN_DEPTH` | `~/VCS` / `6` | where the folder index looks for git repos, and how deep |
@@ -164,7 +196,8 @@ curl -H 'authorization: Bearer dev' localhost:47823/api/state
 `POST /api/focus {pane}` · `POST /api/close {pane}` · `GET /api/folders?q=&machine=` · `GET /api/sessions` ·
 `POST /api/reindex {machines?}` · `POST /api/cancel {id}` · `GET /api/jev/ping` · `GET /api/health` · `POST /api/pair {code}`.
 A folder or earlier session on another Mac has the path `<machine>:<path>`
-(`work:/Users/you/VCS/app`): `spawn` and `resume` start it in that Mac's herdr.
+(`work:/Users/you/VCS/app`): `spawn` and `resume` start it on that Mac, through
+herdr-core when the core has added it (else that Mac's herdr).
 `machine` scopes routing to one Mac (`""`, the default: every live session, and
 this Mac's folders and earlier sessions); `/api/folders` takes `.` for this Mac
 only, and every Mac's without it.

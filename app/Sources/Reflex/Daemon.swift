@@ -102,6 +102,14 @@ final class Daemon: ObservableObject {
         env["REFLEX_SCAN"] = r.appendingPathComponent("scripts/reflex-scan.sh").path
         env["REFLEX_FORK"] = r.appendingPathComponent("scripts/reflex-fork.sh").path
         if !s.herdrSession.isEmpty { env["HERDR_SESSION"] = s.herdrSession }
+        // herdr-core: its socket worked out here as the core does (HC_SOCKET,
+        // its config, the runtime dir), and where new sessions start.
+        HerdrCore.prime()
+        env["HC_SESSION"] = HerdrCore.session
+        env["HC_TERMINAL_ID"] = nil
+        env["REFLEX_CORE_SOCKET"] = HerdrCore.socketPath(env)
+        env["REFLEX_BACKEND"] = s.backend
+        env["REFLEX_LINK_SOCKET"] = AppLink.path
         env["JEV_PROVIDER"] = s.jevProvider
         if !s.jevCredentialCommand.isEmpty {
             env["JEV_CREDENTIAL_COMMAND"] = s.jevCredentialCommand

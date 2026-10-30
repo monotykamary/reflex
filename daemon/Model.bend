@@ -5,7 +5,9 @@ import ./Js.bend as Js
 # the events that change it and the actions it may perform. Core.step is the
 # only function that changes a State.
 
-# An agent's lifecycle state, as Herdr reports it ("done" is Finished here).
+# An agent's lifecycle state, as herdr reports it, or as the agent reports
+# itself to herdr-core (OSC 7501) — "done" is Finished here, and an agent
+# that never said is Unknown.
 type Status is Data:
   Idle{}
   Working{}
@@ -13,7 +15,8 @@ type Status is Data:
   Finished{}
   Unknown{}
 
-# A coding agent living in a Herdr pane.
+# A coding agent living in a herdr-core terminal ("t7", "box/t7") or a herdr
+# pane ("w1:p2", "work/w1:p2"); see Term.
 type Agent is Data:
   Agent{
     pane: String,

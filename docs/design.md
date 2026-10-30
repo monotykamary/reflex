@@ -15,7 +15,7 @@ it and adjacent glass shapes merge like liquid.
 | **Peek** | When an agent starts waiting, a bubble buds out of the tube beside its bead (the container merges the two shapes) with the question and keycaps. | Glass + thin material for text |
 | **⌥⌥ bar** | A glass field and a glass tray beneath it. Agent chips (⇥) pin a target; the tray turns into the destination, the undo countdown, the choices or the error. | Glass |
 | **Inbox** | Grows out of the rail (anchored trailing). Header is glass; cards are solid material. | Glass chrome, solid content |
-| **Terminal** | A raw terminal (SwiftTerm running `herdr agent attach`) themed with any Ghostty theme — Tokyo Night by default — with a header in the theme's own colors. | Theme background |
+| **Terminal** | A raw terminal (SwiftTerm fed by herdr-core's stream, or running `herdr agent attach` for a herdr pane) themed with any Ghostty theme — Tokyo Night by default — with a header in the theme's own colors. | Theme background |
 
 **Glass is for controls, never for content.** Dense text (terminal output,
 question bodies) sits on solid materials so it reads on any wallpaper; glass

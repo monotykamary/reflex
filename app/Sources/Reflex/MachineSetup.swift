@@ -4,8 +4,10 @@ import SwiftUI
 // Adding another Mac (Settings → Machines, and onboarding): type how ssh
 // reaches it, Test says what stands in the way in words you can act on
 // (Remote Login off, or limited to some users; no key; a host key never
-// seen; asleep or off the tailnet; herdr missing), and Add saves it with
-// `herdr machine add`, the same saved machines herdr's own sidebar uses.
+// seen; asleep or off the tailnet; herdr-core missing), and Add saves it
+// with `hc machine add`: the core dials it, and its terminals join this
+// Mac's list. While new sessions start in herdr, herdr's own machines
+// (`herdr machine add`) instead, the same its sidebar uses.
 
 @MainActor
 final class MachineSetup: ObservableObject {
@@ -28,6 +30,9 @@ final class MachineSetup: ObservableObject {
     @Published var phase = Phase.idle
 
     private var target: String { host.trimmingCharacters(in: .whitespacesAndNewlines) }
+    /// herdr-core, or herdr while new sessions start there.
+    private var core: Bool { Settings.shared.usesCore && CoreServer.installed }
+    private var tool: String { core ? "herdr-core" : "herdr" }
     var canTest: Bool { !target.isEmpty && phase != .testing && phase != .adding }
 
     func test() {
@@ -35,11 +40,13 @@ final class MachineSetup: ObservableObject {
         guard !target.isEmpty else { return }
         phase = .testing
         let env = Daemon.shared.childEnvironment()
+        let core = core
         Task.detached {
             // -v: whether it got as far as signing in tells "Remote Login
             // allows only some users" from "nothing answers SSH there".
+            let look = core ? "{ command -v herdr-core || command -v hc; } >/dev/null" : "command -v herdr >/dev/null"
             let r = Self.run(env, "/usr/bin/ssh", ["-v", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target,
-                                              "PATH=\"$HOME/.local/bin:$PATH\"; command -v herdr >/dev/null && echo herdr-yes || echo herdr-no"])
+                                              "PATH=\"$HOME/.local/bin:$PATH\"; \(look) && echo herdr-yes || echo herdr-no"])
             let verdict = Self.verdict(r)
             await MainActor.run { if self.target == target { self.phase = .tested(verdict) } }
         }
@@ -49,18 +56,22 @@ final class MachineSetup: ObservableObject {
         let target = target
         guard !target.isEmpty else { return }
         phase = .adding
-        let env = Daemon.shared.childEnvironment()
+        let env = core ? HerdrCore.environment() : Daemon.shared.childEnvironment()
+        let core = core
+        let hc = HerdrCore.binary(env) ?? "hc"
         Task.detached {
-            let r = Self.run(env, "/bin/sh", ["-c", "herdr machine add \"$1\"", "herdr-add", target])
+            let r = core ? Self.run(env, hc, ["machine", "add", target, "--json"])
+                : Self.run(env, "/bin/sh", ["-c", "herdr machine add \"$1\"", "herdr-add", target])
             await MainActor.run {
                 if r.status == 0 {
                     self.phase = .added
                     self.host = ""
                     Machines.shared.refresh()
+                    Task { _ = await CoreMachines.list(fresh: 0) }
                 } else {
                     let why = (r.err + "\n" + r.out).split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
                         .filter { !$0.isEmpty }.suffix(2).joined(separator: " ")
-                    self.phase = .addFailed(why.isEmpty ? "herdr couldn't add it." : why)
+                    self.phase = .addFailed(why.isEmpty ? "\(core ? "herdr-core" : "herdr") couldn't add it." : why)
                 }
             }
         }
@@ -72,7 +83,7 @@ final class MachineSetup: ObservableObject {
         switch phase {
         case .tested(.noKey): return "ssh-copy-id \(t)"
         case .tested(.hostKey): return "ssh \(t)"
-        case .tested(.ready(herdr: false)), .addFailed: return "herdr machine add \(t)"
+        case .tested(.ready(herdr: false)), .addFailed: return core ? "hc machine add \(t)" : "herdr machine add \(t)"
         default: return nil
         }
     }
@@ -81,12 +92,12 @@ final class MachineSetup: ObservableObject {
     var advice: (ok: Bool, text: String)? {
         switch phase {
         case .idle, .testing, .adding: return nil
-        case .added: return (true, "Added. Its agents show up here as soon as the tunnel is up.")
-        case .addFailed(let why): return (false, "herdr didn't add it: \(why) Run the command in Terminal: herdr asks there before it installs or restarts anything.")
+        case .added: return (true, core ? "Added. Its agents show up here as soon as herdr-core reaches it." : "Added. Its agents show up here as soon as the tunnel is up.")
+        case .addFailed(let why): return (false, "\(tool) didn't add it: \(why) Run the command in Terminal: \(tool) asks there before it installs or restarts anything.")
         case .tested(let v):
             switch v {
-            case .ready(herdr: true): return (true, "Signed in, and herdr is there. Add it.")
-            case .ready(herdr: false): return (false, "Signed in, but herdr isn't installed on it. Run the command in Terminal: herdr offers to install itself there.")
+            case .ready(herdr: true): return (true, "Signed in, and \(tool) is there. Add it.")
+            case .ready(herdr: false): return (false, "Signed in, but \(tool) isn't installed on it. Run the command in Terminal: \(tool) offers to install itself there.")
             case .loginOff: return (false, "Nothing answers SSH on it: Remote Login is off (or a port is wrong). On that Mac: System Settings → General → Sharing → Remote Login.")
             case .refused: return (false, "That Mac let you sign in, then closed the connection: Remote Login allows only some users. On it: Sharing → Remote Login → ⓘ → Allow access for, add your user. A managed work Mac may need IT for this.")
             case .noKey: return (false, "That Mac doesn't know this one's SSH key yet. Run the command in Terminal once, with that Mac's password, then Test again.")

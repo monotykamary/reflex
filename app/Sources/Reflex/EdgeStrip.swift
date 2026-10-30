@@ -1092,7 +1092,7 @@ private struct OpenInAction: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .frame(width: 22, height: 22)
-        .help(t.kind == .herdr ? "Show in herdr (hold for more)" : "Open \(agent.folder) in \(t.name) (hold for more)")
+        .help(t.kind == .herdr ? (HerdrCore.isCore(agent.pane) ? "Open its terminal (hold for more)" : "Show in herdr (hold for more)") : "Open \(agent.folder) in \(t.name) (hold for more)")
         .id(settings.openIn)
     }
 }

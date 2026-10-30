@@ -345,7 +345,7 @@
     const qs = s.inbox.filter(asks), ups = s.inbox.filter((i) => !asks(i));
     const working = s.agents.filter((a) => a.status === "working").length;
     let h = `<header class="top"><h1>Reflex</h1>${offline ? `<span class="chip bad">Offline</span>`
-      : !s.herdr ? `<span class="chip bad">herdr isn't running</span>`
+      : !s.herdr ? `<span class="chip bad">Your agents' terminals aren't answering</span>`
       : `<span class="chip">${glyph(working ? "working" : s.agents.length ? "done" : "idle")}${working ? `${working} working` : `${s.agents.length} agent${s.agents.length === 1 ? "" : "s"}`}</span>`}${prefsButton}</header>`;
 
     // Questions first: they wait on you.
@@ -582,7 +582,8 @@
 
   // ---------- the phone's own size ----------
   // The phone sizes the terminal to itself (herdr's terminal session control,
-  // through /api/term), so the agent lays out for it instead of wrapping.
+  // or the Mac app's viewer of a herdr-core terminal, through /api/term), so
+  // the agent lays out for it instead of wrapping.
   // xterm.js draws it cell by cell: wide characters, box drawing and blocks
   // drawn rather than borrowed from a font, symbols the font lacks scaled
   // into their cells. Swipes scroll through herdr: wheel events for an agent
@@ -779,6 +780,8 @@
   async function openSession(pane) {
     if (!pane) return;
     open = pane; live = false; ctrl = false;
+    // herdr-core draws nothing on the Mac: only a herdr pane can be shown there.
+    $("focus").hidden = !pane.includes(":");
     $("sdock").dataset.mode = "";
     renderSessionChrome();
     $("screen").innerHTML = "";

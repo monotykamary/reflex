@@ -17,6 +17,12 @@ struct ReflexMain {
         for key in ProcessInfo.processInfo.environment.keys where key.hasPrefix("HERDR_") && key != "HERDR_SESSION" {
             unsetenv(key)
         }
+        // Likewise a herdr-core terminal's: agents Reflex starts through the
+        // core would become that terminal's children and end with it.
+        unsetenv("HC_TERMINAL_ID")
+        // A pipe whose reader went away (herdr-core's `hc connect` during an
+        // update) is an error to handle, never a reason for Reflex to die.
+        signal(SIGPIPE, SIG_IGN)
         let app = NSApplication.shared
         let delegate = AppDelegate()
         app.delegate = delegate
@@ -45,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         AppDelegate.current = self
         Daemon.shared.start()
         Machines.shared.start()
+        // reflexd asks the app for herdr-core screens the phone shows.
+        AppLink.shared.start()
         RemoteIndex.shared.start()
         Store.shared.start()
         setupMainMenu()
@@ -126,6 +134,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         for t in terminals.values { t.detach() }
         command.saveForRestart()
         Machines.shared.stop()
+        AppLink.shared.stop()
         Daemon.shared.stop()
     }
 

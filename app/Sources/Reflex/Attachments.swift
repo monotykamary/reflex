@@ -87,7 +87,13 @@ enum Attachments {
     /// there first: over your ssh (as RemoteIndex reads that Mac), into its
     /// own temporary folder. Their paths there, in order.
     static func copy(_ files: [URL], to machine: String) async throws -> [String] {
-        try await Task.detached {
+        // A machine herdr-core added: through the core, no ssh of ours.
+        if await CoreMachines.has(machine) {
+            var paths: [String] = []
+            for f in files { paths.append(try await coreUpload(f, on: machine)) }
+            return paths
+        }
+        return try await Task.detached {
             let (up, env) = Machines.shared.reachable()
             guard let m = up.first(where: { $0.key == machine }) else {
                 throw NotCopied(why: "\(machine) isn't connected, so the image can't get there.")
@@ -96,16 +102,57 @@ enum Attachments {
         }.value
     }
 
+    /// Images pasted into a herdr-core terminal on another Mac: the core puts
+    /// each beside the terminal, on its machine (removed with the terminal).
+    static func put(_ files: [URL], beside pane: String) async throws -> [String] {
+        var paths: [String] = []
+        for f in files {
+            guard let data = try? Data(contentsOf: f) else { throw NotCopied(why: "Couldn't read \(f.lastPathComponent).") }
+            do {
+                let r = try await HerdrCore.call("terminal.put", ["terminal": pane, "name": f.lastPathComponent,
+                                                                  "data": data.base64EncodedString()], timeout: 60)
+                guard let path = r["path"] as? String else { throw NotCopied(why: "herdr-core didn't say where it put the image.") }
+                paths.append(path)
+            } catch let e as HerdrCore.Failure {
+                throw NotCopied(why: "Couldn't put the image there: \(e.message)")
+            }
+        }
+        return paths
+    }
+
+    /// The same temporary folder as over ssh, written there by the core.
+    private static func coreUpload(_ file: URL, on machine: String) async throws -> String {
+        guard let data = try? Data(contentsOf: file) else { throw NotCopied(why: "Couldn't read \(file.lastPathComponent).") }
+        let name = uploadName(file)
+        do {
+            let r = try await HerdrCore.call("machine.exec", ["on": machine, "line": uploadCommand(name),
+                                                               "input": data.base64EncodedString(), "timeout": 60], timeout: 70)
+            let out = (r["stdout"] as? String).flatMap { Data(base64Encoded: $0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+            let path = out.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard (r["code"] as? Int) == 0, path.hasPrefix("/") else { throw NotCopied(why: "Couldn't copy the image to \(machine).") }
+            return path
+        } catch let e as HerdrCore.Failure {
+            throw NotCopied(why: "Couldn't copy the image to \(machine): \(e.message)")
+        }
+    }
+
+    private static func uploadName(_ file: URL) -> String {
+        let ext = file.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
+        return "image-\(UUID().uuidString.prefix(8)).\(ext.isEmpty ? "png" : ext)"
+    }
+
+    /// Its per-user temporary folder: an ssh session may not set TMPDIR.
+    private static func uploadCommand(_ name: String) -> String {
+        #"d="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)}"; d="${d:-/tmp/}"; d="${d%/}/Reflex"; "#
+            + #"mkdir -p "$d" && cat > "$d/\#(name)" && printf '%s' "$d/\#(name)""#
+    }
+
     private static func upload(_ file: URL, to target: String, env: [String: String]) throws -> String {
         guard let input = FileHandle(forReadingAtPath: file.path) else {
             throw NotCopied(why: "Couldn't read \(file.lastPathComponent).")
         }
         defer { try? input.close() }
-        let ext = file.pathExtension.lowercased().filter { $0.isASCII && ($0.isLetter || $0.isNumber) }
-        let name = "image-\(UUID().uuidString.prefix(8)).\(ext.isEmpty ? "png" : ext)"
-        // Its per-user temporary folder: an ssh session may not set TMPDIR.
-        let cmd = #"d="${TMPDIR:-$(getconf DARWIN_USER_TEMP_DIR 2>/dev/null)}"; d="${d:-/tmp/}"; d="${d%/}/Reflex"; "#
-            + #"mkdir -p "$d" && cat > "$d/\#(name)" && printf '%s' "$d/\#(name)""#
+        let cmd = uploadCommand(uploadName(file))
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/ssh")
         p.arguments = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15",

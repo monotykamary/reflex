@@ -19,6 +19,11 @@ final class Onboarding: ObservableObject {
     @Published var step: Step = .welcome
     @Published var forward = true
     @Published var herdrInstalled = false
+    /// herdr-core: installed, its version, the newest release once asked.
+    @Published var coreInstalled = false
+    @Published var coreVersion: String? { didSet { recount() } }
+    @Published var coreLatest: String? { didSet { recount() } }
+    private var coreSeen = ""
     /// The agents you have whose herdr integration isn't installed: without
     /// it herdr can't tell what they're doing (pi isn't even seen as an agent).
     @Published var unintegrated: [String] = []
@@ -198,7 +203,18 @@ final class Onboarding: ObservableObject {
         Task {
             if jevInstalled, let v = await Onboarding.jevRelease() { jevLatest = v }
             if herdrInstalled, let v = await Onboarding.herdrRelease() { herdrLatest = v }
+            if coreInstalled, let v = await Onboarding.coreRelease() { coreLatest = v }
         }
+    }
+
+    /// herdr-core publishes its own latest.json (what `hc update` reads).
+    nonisolated static func coreRelease() async -> String? {
+        var r = URLRequest(url: URL(string: "https://releases.herdr.dev/core/latest.json")!)
+        r.timeoutInterval = 10
+        guard let (data, _) = try? await URLSession.shared.data(for: r),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let v = json["version"] as? String, v.wholeMatch(of: #/\d+\.\d+\.\d+/#) != nil else { return nil }
+        return v
     }
 
     nonisolated static func jevRelease() async -> String? {
@@ -217,6 +233,57 @@ final class Onboarding: ObservableObject {
               let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
               let v = json["version"] as? String, v.wholeMatch(of: #/\d+\.\d+\.\d+/#) != nil else { return nil }
         return v
+    }
+
+    // MARK: herdr-core's version
+
+    /// Read again only when the binary changed (`hc update` swaps it).
+    private func readCoreVersion() {
+        guard let path = HerdrCore.binary(Daemon.shared.childEnvironment()) else { coreSeen = ""; coreVersion = nil; return }
+        let real = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+        let date = (try? FileManager.default.attributesOfItem(atPath: real))?[.modificationDate] as? Date
+        let seen = "\(real) \(date?.timeIntervalSince1970 ?? 0)"
+        guard seen != coreSeen else { return }
+        coreSeen = seen
+        Task.detached {
+            let v = Onboarding.version(of: real, ["--version"])
+            await MainActor.run { if self.coreSeen == seen { self.coreVersion = v } }
+        }
+    }
+
+    var coreBehind: Bool {
+        guard let v = coreVersion, let l = coreLatest else { return false }
+        return Onboarding.older(v, than: l)
+    }
+
+    /// What the herdr-core row says once it is installed.
+    var coreDetail: String? {
+        guard let v = coreVersion else { return nil }
+        if working == Tool.core.rawValue { return "Updating… your agents keep running." }
+        if let why = failures[Tool.core.rawValue] { return "Didn't work: \(why)" }
+        if coreBehind, let l = coreLatest { return "This is \(v); \(l) is out." }
+        return "Version \(v)."
+    }
+
+    /// herdr-core's own updater: it swaps the binary and restarts an older
+    /// running core in place — its terminals, and your agents, keep running.
+    func updateCore() {
+        guard working == nil else { return }
+        let before = coreVersion
+        let bin = HerdrCore.binary(Daemon.shared.childEnvironment()) ?? "hc"
+        let session = HerdrCore.session.replacingOccurrences(of: "'", with: "")
+        run(Tool.core.rawValue, "HC_SESSION='\(session)' '\(bin)' update --json") {
+            guard let path = HerdrCore.binary(Daemon.shared.childEnvironment()) else { return "It ran, but herdr-core isn't in ~/.local/bin." }
+            if let before, Onboarding.version(of: path, ["--version"]) == before, before != self.coreLatest { return "It ran, but herdr-core is still \(before)." }
+            return nil
+        }
+    }
+
+    /// Start the core now (it detaches by itself).
+    func startCore() {
+        guard let bin = HerdrCore.binary(Daemon.shared.childEnvironment()) else { return }
+        let session = HerdrCore.session.replacingOccurrences(of: "'", with: "")
+        run("core-start", "HC_SESSION='\(session)' '\(bin)' server start")
     }
 
     // MARK: herdr's version
@@ -296,6 +363,7 @@ final class Onboarding: ObservableObject {
 
     private func recount() {
         var next: [ToolUpdate] = []
+        if coreBehind, let l = coreLatest { next.append(ToolUpdate(tool: .core, version: l, restart: false)) }
         if herdrBehind, let l = herdrLatest { next.append(ToolUpdate(tool: .herdr, version: l, restart: false)) }
         else if herdrRestartDue, let v = herdrVersion { next.append(ToolUpdate(tool: .herdr, version: v, restart: true)) }
         if jevBehind, let l = jevLatest { next.append(ToolUpdate(tool: .jev, version: l, restart: false)) }
@@ -303,7 +371,7 @@ final class Onboarding: ObservableObject {
     }
 
     func perform(_ u: ToolUpdate) {
-        if u.restart { confirmHerdrRestart() } else if u.tool == .herdr { updateHerdr() } else { install(.jev) }
+        if u.restart { confirmHerdrRestart() } else if u.tool == .core { updateCore() } else if u.tool == .herdr { updateHerdr() } else { install(.jev) }
     }
 
     /// herdr's own updater. It replaces the binary; the running server
@@ -372,7 +440,7 @@ final class Onboarding: ObservableObject {
 
     /// The install button's word: an installed jev-fabric is updated.
     func installLabel(_ tool: Tool) -> String {
-        let update = tool == .jev && jevVersion != nil
+        let update = (tool == .jev && jevVersion != nil) || (tool == .core && coreVersion != nil)
         if working == tool.rawValue { return update ? "Updating…" : "Installing…" }
         if failures[tool.rawValue] != nil { return "Try Again" }
         return update ? "Update" : "Install"
@@ -380,9 +448,15 @@ final class Onboarding: ObservableObject {
 
     func refresh() {
         herdrInstalled = Onboarding.which("herdr")
+        coreInstalled = HerdrCore.binary(Daemon.shared.childEnvironment()) != nil
+        if coreInstalled {
+            Task.detached { let up = (try? HerdrCore.callSync("server.status", timeout: 2)) != nil
+                await MainActor.run { if self.coreRunning != up { self.coreRunning = up } } }
+        } else if coreRunning { coreRunning = false }
         jevInstalled = Onboarding.which("jev-fabric")
         readJevVersion()
         readHerdrVersion()
+        readCoreVersion()
         installed = Set(Onboarding.harnesses.filter { Onboarding.which($0) })
         let home = NSHomeDirectory()
         unintegrated = Onboarding.harnesses.filter { name in
@@ -394,7 +468,18 @@ final class Onboarding: ObservableObject {
         if folders.isEmpty && Store.shared.state.folders > 0 { Task { await loadFolders() } }
     }
 
+    /// The backend new sessions start in answers (herdr-core by default).
+    /// Which agents say what they're doing to herdr-core (it never guesses).
+    var statusDetail: String {
+        let quiet = installed.filter { !["claude", "pi"].contains($0) }.sorted()
+        if quiet.isEmpty { return "Claude Code and pi report working, done and questions themselves." }
+        return "Claude Code and pi report it themselves; \(quiet.joined(separator: ", ")) \(quiet.count == 1 ? "doesn't" : "don't") yet, so \(quiet.count == 1 ? "it shows" : "they show") without a status."
+    }
+
+    /// Your agents can be reached (herdr-core, or herdr meanwhile).
     var herdrRunning: Bool { Store.shared.connected && Store.shared.state.herdr }
+    /// herdr-core itself answers, polled while Setup or onboarding shows it.
+    @Published var coreRunning = false
 
     func loadFolders() async {
         folders = Array(await Client.local.folders("").prefix(8))
@@ -445,15 +530,16 @@ final class Onboarding: ObservableObject {
     /// installer: it checks its download and puts one binary in ~/.local/bin,
     /// with no password asked. Reflex runs that for you.
     enum Tool: String {
-        case herdr, jev = "jev-fabric"
+        case core = "herdr-core", herdr, jev = "jev-fabric"
         var command: String {
             switch self {
+            case .core: return "curl -fsSL https://releases.herdr.dev/core/install.sh | sh"
             case .herdr: return "curl -fsSL https://herdr.dev/install.sh | sh"
             case .jev: return "curl -fsSL https://raw.githubusercontent.com/fabric-runtime/jev-fabric/main/install.sh | sh"
             }
         }
         /// Where its installer comes from, in a word.
-        var source: String { self == .herdr ? "herdr.dev" : "GitHub" }
+        var source: String { self == .jev ? "GitHub" : "herdr.dev" }
     }
 
     /// Why the last setup command didn't work, by its label.
@@ -465,8 +551,10 @@ final class Onboarding: ObservableObject {
         // The same installer updates: it fetches the newest release.
         let before = tool == .jev ? jevVersion : nil
         run(tool.rawValue, "set -o pipefail; " + tool.command) { [weak self] in
-            guard let path = Onboarding.path(of: tool.rawValue) else { return "It ran, but \(tool.rawValue) isn't in ~/.local/bin." }
-            guard tool == .jev else { return nil }  // herdr: the store's next refresh starts its server.
+            guard let path = tool == .core ? HerdrCore.binary(Daemon.shared.childEnvironment()) : Onboarding.path(of: tool.rawValue) else {
+                return "It ran, but \(tool.rawValue) isn't in ~/.local/bin."
+            }
+            guard tool == .jev else { return nil }  // herdr, herdr-core: the store's next refresh starts its server.
             guard let before else { self?.test(); return nil }
             // Another copy earlier on the PATH would still be the one in use.
             if Onboarding.version(of: path) == before {
@@ -685,7 +773,7 @@ struct OnboardingView: View {
     private var title: String {
         switch model.step {
         case .welcome: return "Every agent,\none reflex away."
-        case .herdr: return "Agents live\nin herdr."
+        case .herdr: return Settings.shared.usesCore ? "Agents live\nin herdr-core." : "Agents live\nin herdr."
         case .jev: return "A reflex,\nnot a conversation."
         case .projects: return "Where do\nyou work?"
         case .machines: return "Agents on\nother Macs?"
@@ -699,13 +787,16 @@ struct OnboardingView: View {
         case .welcome:
             return "Reflex sends what you say to the right coding agent — or starts one in the right folder — and brings back everything that needs you. Your agents keep running in their own terminals, on the plans you already have."
         case .herdr:
+            if Settings.shared.usesCore {
+                return "Reflex starts and talks to your agents through herdr-core, the terminal runtime built for them: they keep running when windows close, and across its updates. Agents you still run in herdr show up too."
+            }
             return "Reflex sees and talks to agents through herdr, a terminal built for them. Run your agents in it; Reflex reads their state, answers their questions and opens their terminals."
         case .jev:
             return "No chat model rewrites your words. Jev, a System 1 model, answers typed questions — which session, which folder, is it a side question — in about a second. Unsure, it asks you instead. Try one: nothing is sent."
         case .projects:
             return "Reflex indexes the repositories under these folders — names, descriptions, recent commits — so a request like “fix the flaky test in jev fabric” starts in the right place."
         case .machines:
-            return "A work laptop, a Mac mini under the desk: their agents can show up here too, with their questions and terminals. Reflex reaches them over SSH — Tailscale works — through herdr. Only use this Mac? Skip it."
+            return "A work laptop, a Mac mini under the desk: their agents can show up here too, with their questions and terminals. Reflex reaches them over SSH — Tailscale works — through \(Settings.shared.usesCore ? "herdr-core" : "herdr"). Only use this Mac? Skip it."
         case .keys:
             return "Double-tap ⌥ anywhere to ask. Rest your pointer on the right edge for half a second to see your agents. Try both now."
         case .done:
@@ -719,6 +810,19 @@ struct OnboardingView: View {
         switch model.step {
         case .welcome:
             EmptyView()
+        case .herdr where settings.usesCore:
+            VStack(alignment: .leading, spacing: 10) {
+                Check(ok: model.coreInstalled, title: "herdr-core installed", detail: model.coreInstalled ? model.coreDetail : model.installDetail(.core)) {
+                    if !model.coreInstalled || model.coreBehind { InstallActions(model: model, tool: .core) }
+                }
+                Check(ok: model.coreRunning, title: "herdr-core running",
+                      detail: model.coreRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents")
+                        : (model.coreInstalled && settings.startCore ? "starting it…" : "run `hc server start` in your terminal")) {
+                    if !model.coreRunning && model.coreInstalled { GlassAction("Start") { model.startCore() } }
+                }
+                // Status is what an agent reports (OSC 7501): Claude Code and pi do.
+                Check(ok: true, title: "Agent status", detail: model.statusDetail) {}
+            }
         case .herdr:
             VStack(alignment: .leading, spacing: 10) {
                 Check(ok: model.herdrInstalled, title: "herdr installed", detail: model.herdrInstalled ? nil : model.installDetail(.herdr)) {
@@ -907,7 +1011,7 @@ struct OnboardingView: View {
         switch model.step {
         case .welcome: return "Get started"
         case .done: return "Start using Reflex"
-        case .herdr: return model.herdrRunning ? "Continue" : "Skip for now"
+        case .herdr: return (settings.usesCore ? model.coreRunning : model.herdrRunning) ? "Continue" : "Skip for now"
         case .jev: return pingOK ? "Continue" : "Skip for now"
         case .keys: return model.triedHotkey || model.triedEdge ? "Continue" : "Skip for now"
         case .machines: return machines.rows.isEmpty ? "Skip for now" : "Continue"
@@ -976,7 +1080,8 @@ private struct InstallActions: View {
         HStack(spacing: 6) {
             if model.failures[tool.rawValue] != nil { GlassAction("Copy") { model.copy(tool.command) } }
             GlassAction(model.installLabel(tool)) {
-                model.install(tool)
+                // An installed herdr-core updates itself in place, agents running.
+                if tool == .core && model.coreVersion != nil { model.updateCore() } else { model.install(tool) }
             }
             .disabled(model.working != nil)
             .help(tool.command)

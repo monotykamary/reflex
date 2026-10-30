@@ -909,6 +909,22 @@ private struct ProjectsPane: View {
                 } label: {
                     RowLabel("Folder index", "Rebuilt on its own every few minutes.")
                 }
+                Picker(selection: Binding(get: { s.backend }, set: { s.backend = $0; Daemon.shared.restart() })) {
+                    Text("herdr-core").tag("core")
+                    Text("herdr").tag("herdr")
+                } label: {
+                    RowLabel("New sessions start in", "Agents already running in either stay listed, and you can still answer and open them.")
+                }
+                LabeledContent {
+                    TextField("", text: $s.coreSession, prompt: Text("default"))
+                        .frame(maxWidth: 180)
+                        .multilineTextAlignment(.trailing)
+                } label: {
+                    RowLabel("herdr-core session", "HC_SESSION: leave empty for the default core. Restart reflexd after changing.")
+                }
+                Toggle(isOn: $s.startCore) {
+                    RowLabel("Start herdr-core when it isn't running", "Its agents keep running whatever happens to Reflex; after a reboot it starts again here.")
+                }
                 LabeledContent {
                     TextField("", text: $s.herdrSession, prompt: Text("default"))
                         .frame(maxWidth: 180)
@@ -917,7 +933,7 @@ private struct ProjectsPane: View {
                     RowLabel("herdr session", "Leave empty for herdr's default session. Restart reflexd after changing.")
                 }
                 Toggle(isOn: $s.startHerdr) {
-                    RowLabel("Start herdr when it isn't running", "After a restart, say: Reflex starts herdr's server in the background, the way herdr itself does.")
+                    RowLabel("Start herdr when it isn't running", "While new sessions start in herdr: after a restart, say, Reflex starts herdr's server in the background, the way herdr itself does.")
                 }
             }
         }
@@ -948,10 +964,73 @@ private struct MachinesPane: View {
                 Text("Reflex keeps one SSH tunnel to each enabled machine, with your own ssh config, keys and agent, and reconnects when it drops. Their agents wear the machine's name (and a \(Image(systemName: "circle.fill")) badge) in the rail, the inbox and the ⌥⌥ bar. `herdr machine disable`, `enable` and `remove` change this list.")
                     .font(Type.meta).foregroundStyle(.secondary)
             }
+            CoreMachinesSection()
             Section("Add a Mac") {
                 MachineSteps()
                 AddMachineView()
             }
+        }
+    }
+}
+
+/// herdr-core's machines: the core reaches them itself, and their terminals
+/// join its list (no tunnel of Reflex's). `hc machine rm` removes one.
+private struct CoreMachinesSection: View {
+    @ObservedObject var store = Store.shared
+    @State private var rows: [CoreMachines.Machine] = []
+    @State private var loaded = false
+
+    var body: some View {
+        Section {
+            if rows.isEmpty {
+                RowLabel(loaded ? "No machines yet" : "Asking herdr-core…",
+                         "Add one below, or in a terminal with `hc machine add <ssh-host>`.")
+            }
+            ForEach(rows, id: \.name) { m in
+                let agents = store.state.agents.filter { $0.machine == m.name }.count
+                LabeledContent {
+                    if m.state != "connected" {
+                        Button("Reconnect") { Task { _ = try? await HerdrCore.call("machine.connect", ["machine": m.name], timeout: 30); await load() } }
+                    }
+                } label: {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Image(systemName: m.state == "connected" ? "checkmark.circle.fill" : m.state == "connecting" ? "arrow.triangle.2.circlepath" : "exclamationmark.circle.fill")
+                            .foregroundStyle(m.state == "connected" ? Tone.done : m.state == "connecting" ? Tone.working : Tone.blocked)
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) { Text(m.name); MachineChip(machine: m.name) }
+                            Text("ssh \(m.target)" + (m.version.isEmpty ? "" : " · hc \(m.version)"))
+                                .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
+                            Text(Self.state(m, agents: agents)).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                }
+            }
+        } header: {
+            Text("From herdr-core")
+        } footer: {
+            Text("herdr-core dials each machine over your ssh and keeps the line up; its agents wear the machine's name in the rail, the inbox and the ⌥⌥ bar.")
+                .font(Type.meta).foregroundStyle(.secondary)
+        }
+        .task {
+            while !Task.isCancelled {
+                await load()
+                try? await Task.sleep(for: .seconds(3))
+            }
+        }
+    }
+
+    private func load() async {
+        rows = await CoreMachines.list(fresh: 2)
+        loaded = true
+    }
+
+    private static func state(_ m: CoreMachines.Machine, agents: Int) -> String {
+        switch m.state {
+        case "connected": return agents == 1 ? "Connected · 1 agent" : "Connected · \(agents) agents"
+        case "connecting": return "Connecting…"
+        case "needs_login": return "Needs you to sign in: run `hc machine connect \(m.name)` in Terminal."
+        case "needs_update": return "Its herdr-core needs updating: run `hc update` there."
+        default: return m.why.isEmpty ? m.state : m.why
         }
     }
 }
@@ -1078,6 +1157,7 @@ final class SetupState: ObservableObject {
 
 private struct SetupPane: View {
     @ObservedObject var o = Onboarding.shared
+    @ObservedObject var s = Settings.shared
     @ObservedObject var store = Store.shared
     var openTour: () -> Void = { AppDelegate.current?.showOnboarding() }
 
@@ -1085,7 +1165,26 @@ private struct SetupPane: View {
         Form {
             Section { PaneHeader(pane: .setup) }
                 .onAppear { o.refresh(); o.readHerdrServer(); o.askLatest() }
-            Section("herdr") {
+            Section("herdr-core") {
+                CheckRow(ok: o.coreInstalled, title: "herdr-core installed", detail: o.coreInstalled ? o.coreDetail : o.installDetail(.core),
+                         showAccessory: o.coreBehind) {
+                    if !o.coreInstalled {
+                        installButtons(.core)
+                    } else {
+                        Button(o.working == "herdr-core" ? "Updating…" : "Update") { o.updateCore() }
+                            .disabled(o.working != nil)
+                            .help("hc update: your agents keep running")
+                    }
+                }
+                if s.usesCore {
+                    CheckRow(ok: o.coreRunning, title: "herdr-core running",
+                             detail: o.coreRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `hc server start` in a terminal.") {
+                        Button("Start") { o.startCore() }.disabled(!o.coreInstalled)
+                    }
+                    CheckRow(ok: true, title: "Agent status", detail: o.statusDetail) {}
+                }
+            }
+            Section(s.usesCore ? "herdr (agents still running there)" : "herdr") {
                 CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? o.herdrDetail : o.installDetail(.herdr),
                          showAccessory: o.herdrBehind || o.herdrRestartDue) {
                     if !o.herdrInstalled {
@@ -1099,9 +1198,11 @@ private struct SetupPane: View {
                             .disabled(o.working != nil)
                     }
                 }
-                CheckRow(ok: o.herdrRunning, title: "herdr running",
-                         detail: o.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `herdr` in a terminal.") {
-                    Button("Copy Command") { o.copy("herdr") }
+                if !s.usesCore {
+                    CheckRow(ok: o.herdrRunning, title: "herdr running",
+                             detail: o.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `herdr` in a terminal.") {
+                        Button("Copy Command") { o.copy("herdr") }
+                    }
                 }
                 CheckRow(ok: o.integrations, title: "Agent integrations",
                          detail: o.integrations ? "Exact session ids, so side questions can fork the right session."

@@ -45,6 +45,7 @@ final class RemoteIndex: @unchecked Sendable {
     }
 
     private func tick() {
+        _ = Self.waitCoreMachines()
         let (machines, env) = Machines.shared.reachable()
         let keys = Set(machines.map(\.key))
         // A machine that went away: its sessions can't be brought back from here.
@@ -85,7 +86,7 @@ final class RemoteIndex: @unchecked Sendable {
         guard let script = script("reflex-remote.sh") else { return nil }
         let knownLines = cached.map { "\($0.value.mtime)\t\($0.key)" }.joined(separator: "\n")
         let input = script + (script.hasSuffix("\n") ? "" : "\n") + knownLines + "\n"
-        guard let out = ssh(m.target, #"f=$(mktemp -t reflex); cat > "$f"; sh "$f" "$f"; rm -f "$f""#, input: input, env: env, timeout: 90) else { return nil }
+        guard let out = run(m, #"f=$(mktemp -t reflex); cat > "$f"; sh "$f" "$f"; rm -f "$f""#, input: input, env: env, timeout: 90) else { return nil }
         var next: [String: (mtime: String, session: PastSession?)] = [:]
         var open = Set<String>()
         var background = Set<String>()
@@ -134,7 +135,7 @@ final class RemoteIndex: @unchecked Sendable {
         }
         let list = roots.isEmpty ? "$HOME/VCS" : roots.joined(separator: ":")
         let cmd = #"f=$(mktemp -t reflex-scan); cat > "$f"; chmod +x "$f"; REFLEX_ROOTS="\#(list)" "$f"; rm -f "$f""#
-        guard let out = ssh(m.target, cmd, input: script, env: env, timeout: 240) else { return }
+        guard let out = run(m, cmd, input: script, env: env, timeout: 240) else { return }
         // How often sessions started in each of its folders, from here.
         let usage = (try? String(contentsOf: Settings.supportDir.appendingPathComponent("usage.tsv"), encoding: .utf8)) ?? ""
         var uses: [String: Int] = [:]
@@ -153,11 +154,29 @@ final class RemoteIndex: @unchecked Sendable {
         Task { await Client.local.reindexMachines() }
     }
 
+    /// herdr-core's machines, read again for this round.
+    private static func waitCoreMachines() -> [CoreMachines.Machine] {
+        let done = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var got: [CoreMachines.Machine] = []
+        Task.detached { got = await CoreMachines.list(); done.signal() }
+        _ = done.wait(timeout: .now() + 5)
+        return got
+    }
+
     // MARK: ssh
 
     private static func script(_ name: String) -> String? {
         guard let url = Bundle.main.resourceURL?.appendingPathComponent("scripts/\(name)") else { return nil }
         return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// `command` on the machine: through herdr-core for one it added, else
+    /// over your ssh.
+    private static func run(_ m: Machines.Reach, _ command: String, input: String, env: [String: String], timeout: TimeInterval) -> String? {
+        guard m.core else { return ssh(m.target, command, input: input, env: env, timeout: timeout) }
+        let out = CoreMachines.exec(m.key, command, input: input, timeout: timeout)
+        if out == nil { NSLog("Reflex: machine %@: remote index through herdr-core failed", m.key) }
+        return out
     }
 
     /// stdout of `command` run on `target` with `input` on its stdin, if it

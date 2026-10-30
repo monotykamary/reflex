@@ -86,7 +86,7 @@ struct OpenInItems: View {
 
     var body: some View {
         Button { OpenIn.open(OpenIn.herdr, agent: agent, pane: pane, remember: true) } label: {
-            Label { Text("Show in herdr") } icon: { Image(systemName: "arrow.up.forward.app") }
+            Label { Text(HerdrCore.isCore(pane) ? "Open Terminal" : "Show in herdr") } icon: { Image(systemName: "arrow.up.forward.app") }
         }
         if agent?.cwd.isEmpty == false, agent?.remote != true {
             Section(agent.map { "Open \($0.folder) in" } ?? "Open in") {
@@ -121,7 +121,7 @@ struct OpenInButton: View {
         .fixedSize()
         .tint(tint)
         .foregroundStyle(tint)
-        .help(t.kind == .herdr ? "Show in herdr — the arrow lists more" : "Open \(agent?.folder ?? "the folder") in \(t.name) — the arrow lists more")
+        .help(t.kind == .herdr ? (HerdrCore.isCore(pane) ? "Open its terminal — the arrow lists more" : "Show in herdr — the arrow lists more") : "Open \(agent?.folder ?? "the folder") in \(t.name) — the arrow lists more")
         .id(settings.openIn)
     }
 }

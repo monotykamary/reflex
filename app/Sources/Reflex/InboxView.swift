@@ -127,7 +127,7 @@ struct InboxView: View {
             }
             Spacer()
             if !store.state.herdr {
-                Label("herdr unreachable", systemImage: "exclamationmark.triangle.fill")
+                Label(Settings.shared.usesCore ? "herdr-core and herdr unreachable" : "herdr unreachable", systemImage: "exclamationmark.triangle.fill")
                     .font(Type.meta).foregroundStyle(Tone.blocked)
             }
             if items.contains(where: { !asks($0) }) {

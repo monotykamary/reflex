@@ -47,11 +47,24 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.processDelegate = self
         view.optionAsMetaKey = true
         view.machine = Machines.machine(of: pane)
+        view.pane = pane
         view.onInput = { [weak self] data in
-            guard let self, self.watching else { return false }
+            guard let self else { return false }
+            // herdr-core: keys go down the stream (nowhere while it opens).
+            if self.core {
+                self.stream?.write(Data(data))
+                return true
+            }
+            guard self.watching else { return false }
             self.type(data)
             return true
         }
+        view.onResize = { [weak self] cols, rows in
+            guard let self, let stream = self.stream else { return }
+            stream.facts(self.display())
+            stream.resize(cols: cols, rows: rows)
+        }
+        view.onFocus = { [weak self] on in self?.stream?.focus(on) }
         view.onLink = { [weak self] url, at in self?.link = url.map { ($0, at) } }
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
@@ -78,12 +91,92 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.needsDisplay = true
     }
 
+    // MARK: herdr-core
+
+    /// An agent in herdr-core: its stream comes straight into this view, no
+    /// process in between. Any number of viewers can have it at once, so
+    /// there is no taking over and no sharing to fall back to: the one you
+    /// last typed in, resized or focused sets its size.
+    var core: Bool { HerdrCore.isCore(pane) }
+    private var stream: CoreStream?
+    private var reattaching = 0
+
+    /// What this view looks like (the core answers programs' display
+    /// queries with it): its colors, and its cell size in device pixels.
+    func display() -> [String: Any] {
+        var d: [String: Any] = ["fg": Themes.shared.current.foreground, "bg": Themes.shared.current.background,
+                                "cursor": Themes.shared.current.cursor]
+        let t = view.getTerminal()
+        let scale = view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        if t.cols > 0, t.rows > 0, view.bounds.width > 0 {
+            d["cell"] = [Int((view.bounds.width / CGFloat(t.cols) * scale).rounded()),
+                         Int((view.bounds.height / CGFloat(t.rows) * scale).rounded())]
+        }
+        return d
+    }
+
+    private func attachCore(reason: String) {
+        NSLog("Reflex: attach %@ through herdr-core (%@)", pane, reason)
+        stream?.close()
+        stream = nil
+        ended = false
+        elsewhere = false
+        watching = false
+        attached = true
+        // A fresh screen: the core paints it whole (screen, history, modes).
+        view.feed(text: "\u{1b}c")
+        view.resetKeys()
+        let t = view.getTerminal()
+        let cols = max(t.cols, 20), rows = max(t.rows, 5)
+        let display = display()
+        let pane = pane
+        Task { @MainActor [weak self] in
+            do {
+                let s = try await CoreLink.shared.attach(pane, cols: cols, rows: rows, history: 2000, display: display)
+                guard let self else { return s.close() }
+                guard self.attached, self.stream == nil else { return s.close() }
+                self.stream = s
+                s.start(data: { [weak self] d in self?.view.feed(byteArray: ArraySlice([UInt8](d))) },
+                        closed: { [weak self] why in self?.coreEnded(why) })
+                if self.view.window?.isKeyWindow == true { s.focus(true) }
+                // Its size now, if the window changed while this opened.
+                let now = self.view.getTerminal()
+                if now.cols != cols || now.rows != rows { s.resize(cols: now.cols, rows: now.rows) }
+                self.reattaching = 0
+            } catch {
+                NSLog("Reflex: attach %@ through herdr-core failed: %@", pane, error.localizedDescription)
+                self?.coreEnded((error as? HerdrCore.Failure)?.kind ?? "lost")
+            }
+        }
+    }
+
+    /// Its stream ended. Lost — the program (a kept terminal gets a new
+    /// shell) or the line to the core (an update restarts it) — comes back:
+    /// try again for a while. An exit or a kill is the end.
+    private func coreEnded(_ why: String) {
+        stream = nil
+        guard attached else { return }
+        let back = ["lost", "unavailable", "timeout", "signaled", "server_stop", "stopped_by_restart", "holder_lost"]
+        if back.contains(why), reattaching < 30 {
+            reattaching += 1
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                guard let self, self.attached, self.stream == nil else { return }
+                self.attachCore(reason: "back after \(why)")
+            }
+            return
+        }
+        NSLog("Reflex: %@ ended in herdr-core (%@)", pane, why)
+        attached = false
+        withAnimation(Motion.enter) { ended = true }
+    }
+
     /// Attach, retrying quietly: Herdr refuses an attach while a read is in
     /// flight. A terminal takes one attached client. One left behind by a
     /// Reflex that was killed or crashed is ended first (see endOrphans); one
     /// that is live — another window — keeps it, and this window says so and
     /// offers to take it (`takeover`), rather than the two taking it in turns.
     func attach(takeover: Bool = false, reason: String) {
+        if core { return attachCore(reason: reason) }
         if switchFromRunning({ [weak self] in self?.attach(takeover: takeover, reason: reason) }) { return }
         NSLog("Reflex: attach %@ (%@%@)", pane, reason, takeover ? ", taking over" : "")
         ended = false
@@ -122,6 +215,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// frames (JSON lines, base64), drawn here as they come; the size follows
     /// this window's (the stream restarts on a resize). Keys go nowhere.
     func watch(reason: String) {
+        if core { return attachCore(reason: reason) }
         if switchFromRunning({ [weak self] in self?.watch(reason: reason) }) { return }
         NSLog("Reflex: watch %@ (%@)", pane, reason)
         ended = false
@@ -235,6 +329,11 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     }
 
     func detach() {
+        if core {
+            attached = false
+            stream?.close()
+            stream = nil
+        }
         // The attach runs in its own session (setsid): end the whole group.
         // herdr's client ignores SIGTERM and could outlive the window,
         // keeping the pane from the next one.
@@ -467,10 +566,44 @@ final class AgentTerminalView: LocalProcessTerminalView {
         super.send(source: source, data: data)
     }
 
+    // MARK: Size and focus
+
+    /// The grid's size whenever it changes, and whether this view has the
+    /// keyboard: a herdr-core stream has no process to tell (SwiftTerm only
+    /// reports a size to one), so the view says it.
+    var onResize: ((Int, Int) -> Void)?
+    var onFocus: ((Bool) -> Void)?
+    private var grid = (cols: 0, rows: 0)
+
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(newSize)
+        let t = getTerminal()
+        guard t.cols != grid.cols || t.rows != grid.rows else { return }
+        grid = (t.cols, t.rows)
+        onResize?(t.cols, t.rows)
+    }
+
+    /// Focus follows its window: one terminal per window, which has the
+    /// keyboard while the window is key.
+    private var keyWatch: [NSObjectProtocol] = []
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        keyWatch.forEach(NotificationCenter.default.removeObserver)
+        keyWatch = []
+        guard let w = window else { return }
+        for (name, on) in [(NSWindow.didBecomeKeyNotification, true), (NSWindow.didResignKeyNotification, false)] {
+            keyWatch.append(NotificationCenter.default.addObserver(forName: name, object: w, queue: .main) { [weak self] _ in
+                MainActor.assumeIsolated { self?.onFocus?(on) }
+            })
+        }
+    }
+
     // MARK: Images
 
-    /// The Mac its agent runs on ("" for this one; see Machines).
+    /// The Mac its agent runs on ("" for this one; see Machines), and its pane.
     var machine = ""
+    var pane = ""
 
     /// ⌘V with an image (a screenshot, a file copied in Finder) pastes its
     /// path, as a drop into Ghostty does, and the agent reads it: Claude Code
@@ -483,7 +616,11 @@ final class AgentTerminalView: LocalProcessTerminalView {
         Task { @MainActor in
             var paths = images.map(\.url.path)
             if !machine.isEmpty {
-                do { paths = try await Attachments.copy(images.map(\.url), to: machine) } catch {
+                do {
+                    // herdr-core puts a file beside the terminal, on its machine.
+                    paths = HerdrCore.isCore(pane) ? try await Attachments.put(images.map(\.url), beside: pane)
+                        : try await Attachments.copy(images.map(\.url), to: machine)
+                } catch {
                     NSLog("Reflex: pasting an image to %@: %@", machine, (error as? Attachments.NotCopied)?.why ?? "\(error)")
                     NSSound.beep()
                     return
@@ -764,7 +901,7 @@ struct AgentPopout: View {
                 .lineLimit(1)
                 .contentTransition(.interpolate)
             Spacer(minLength: 8)
-            if session.attached && !session.watching {
+            if session.attached && !session.watching && !session.core {
                 Button { session.watch(reason: "let go") } label: {
                     Image(systemName: "rectangle.on.rectangle").font(.system(size: 11, weight: .medium))
                 }

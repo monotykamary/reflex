@@ -145,7 +145,9 @@ final class Store: ObservableObject {
             next.inbox.removeAll { clearing.contains($0.id) }
             observe(next)
             state = next
-            HerdrServer.ensure(reachable: next.herdr)
+            // `herdr`: whether your agents can be reached (herdr-core, or herdr).
+            // Without herdr-core installed, sessions start in herdr: keep it up.
+            if Settings.shared.usesCore && CoreServer.installed { CoreServer.ensure() } else { HerdrServer.ensure(reachable: next.herdr) }
             // Whatever arrives for the session you are looking at, you have seen.
             if let pane = watching() { seen(pane) }
             connected = true

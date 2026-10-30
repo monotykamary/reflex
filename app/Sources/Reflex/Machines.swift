@@ -132,6 +132,8 @@ final class Machines: @unchecked Sendable {
     struct Reach: Hashable {
         let key: String
         let target: String
+        /// One herdr-core added: reached through the core, not ssh.
+        var core = false
     }
 
     /// The machines whose tunnel is up now, and the environment ssh runs in
@@ -140,7 +142,12 @@ final class Machines: @unchecked Sendable {
     func reachable() -> (machines: [Reach], env: [String: String]) {
         q.sync {
             let up = tunnels.values.filter { $0.running && Date().timeIntervalSince($0.started) > 3 }
-            return (up.map { Reach(key: $0.key, target: $0.profile.target) }.sorted { $0.key < $1.key }, env)
+            var all = up.map { Reach(key: $0.key, target: $0.profile.target) }
+            // herdr-core's connected machines too (one named in both is the core's).
+            let core = CoreMachines.known.filter { $0.state == "connected" }
+            all.removeAll { r in core.contains { $0.name == r.key } }
+            all += core.map { Reach(key: $0.name, target: $0.target, core: true) }
+            return (all.sorted { $0.key < $1.key }, env)
         }
     }
 

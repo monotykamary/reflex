@@ -31,8 +31,17 @@ final class Settings: ObservableObject {
     @Published var jevProvider: String { didSet { d.set(jevProvider, forKey: "jevProvider") } }
     @Published var jevCredentialCommand: String { didSet { d.set(jevCredentialCommand, forKey: "jevCredentialCommand") } }
     @Published var herdrSession: String { didSet { d.set(herdrSession, forKey: "herdrSession") } }
-    /// Start herdr's server when it isn't running (after a restart).
+    /// Start herdr's server when it isn't running (after a restart): only
+    /// while new sessions start in herdr.
     @Published var startHerdr: Bool { didSet { d.set(startHerdr, forKey: "startHerdr") } }
+    /// Where new sessions start: "core" (herdr-core, the default) or "herdr".
+    /// Agents already running in either stay listed and reachable.
+    @Published var backend: String { didSet { d.set(backend, forKey: "backend") } }
+    /// The herdr-core session (HC_SESSION); empty is its default core.
+    @Published var coreSession: String { didSet { d.set(coreSession, forKey: "coreSession") } }
+    /// Start herdr-core when it isn't running.
+    @Published var startCore: Bool { didSet { d.set(startCore, forKey: "startCore") } }
+    var usesCore: Bool { backend != "herdr" }
     @Published var showStrip: Bool { didSet { d.set(showStrip, forKey: "showStrip") } }
     /// The rail lives under the menu bar icon instead of at the edge, and
     /// Reflex leaves the Dock.
@@ -72,6 +81,9 @@ final class Settings: ObservableObject {
         jevCredentialCommand = d.string(forKey: "jevCredentialCommand") ?? ""
         herdrSession = d.string(forKey: "herdrSession") ?? ""
         startHerdr = d.object(forKey: "startHerdr") as? Bool ?? true
+        backend = d.string(forKey: "backend") ?? "core"
+        coreSession = d.string(forKey: "coreSession") ?? ""
+        startCore = d.object(forKey: "startCore") as? Bool ?? true
         showStrip = d.object(forKey: "showStrip") as? Bool ?? true
         railAlways = d.bool(forKey: "railAlways")
         surfaceQuestions = d.object(forKey: "surfaceQuestions") as? Bool ?? true

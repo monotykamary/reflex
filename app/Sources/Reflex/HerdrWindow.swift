@@ -4,10 +4,17 @@ import AppKit
 // herdr to the front. If no herdr client is attached anywhere, open one (in
 // Ghostty when installed, else Terminal) — it attaches already on that pane.
 // A pane on another Mac opens herdr's own remote attach to that machine.
+// A herdr-core terminal has no app of its own to show it: Reflex's terminal
+// window does.
 
 @MainActor
 enum HerdrWindow {
     static func reveal(pane: String) {
+        // herdr-core draws nothing: its terminal opens in Reflex's own window.
+        if HerdrCore.isCore(pane) {
+            AppDelegate.current?.showPane(pane)
+            return
+        }
         Task {
             await Client.local.focus(pane)
             if let m = MachinesModel.shared.row(Machines.machine(of: pane)) {
