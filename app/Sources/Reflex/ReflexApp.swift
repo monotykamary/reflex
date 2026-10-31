@@ -20,6 +20,16 @@ struct ReflexMain {
         // Likewise a herdr-core terminal's: agents Reflex starts through the
         // core would become that terminal's children and end with it.
         unsetenv("HC_TERMINAL_ID")
+        // And a Claude Code session's (`open` from its shell passes them on):
+        // every agent Reflex starts would be its child, with no transcript
+        // saved ("inherited CLAUDE_CODE_CHILD_SESSION marker") and that
+        // session's messaging socket. Settings such as CLAUDE_CODE_USE_BEDROCK
+        // aren't a session's, and stay.
+        for key in ["CLAUDECODE", "CLAUDE_PID", "CLAUDE_EFFORT", "CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_ENTRYPOINT",
+                    "CLAUDE_CODE_EXECPATH", "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN",
+                    "CLAUDE_CODE_SESSION_ATTENDED", "CLAUDE_CODE_SESSION_ID"] {
+            unsetenv(key)
+        }
         // A pipe whose reader went away (herdr-core's `hc connect` during an
         // update) is an error to handle, never a reason for Reflex to die.
         signal(SIGPIPE, SIG_IGN)
