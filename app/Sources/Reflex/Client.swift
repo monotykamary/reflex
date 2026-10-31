@@ -86,6 +86,12 @@ struct Client {
                                        "label": "\(p.agent) · \(p.title.prefix(40))"], as: PendingInfo.self)
     }
 
+    /// A live agent's own session, brought back where new sessions start.
+    func resume(cwd: String, kind: String, session: String, label: String) async throws -> PendingInfo {
+        try await post("/api/resume", ["cwd": cwd, "kind": kind, "session": session, "mode": "resume", "text": "", "label": label],
+                       as: PendingInfo.self)
+    }
+
     /// Ends the session: herdr closes the pane and the agent in it.
     func close(_ pane: String) async { await post("/api/close", ["pane": pane]) }
     func reindex() async { await post("/api/reindex", [:]) }

@@ -95,6 +95,18 @@ def main():
         api(port, "/api/close", {"pane": new["pane"]})
         until("it to end", lambda: all(a["pane"] != new["pane"] for a in api(port, "/api/state")["agents"]))
         print("ok   closed it")
+
+        # What moving an agent from herdr does once herdr has closed it: the
+        # same session, resumed in the core, in the same folder.
+        api(port, "/api/resume", {"cwd": f"{work}/roots/proj", "kind": "pi", "session": new["session"], "mode": "resume", "text": "", "label": "move"})
+        back = until("the resumed session", lambda: next((a for a in api(port, "/api/state")["agents"] if a["session"] == new["session"]), None), timeout=40)
+        got = json.loads(subprocess.run([HC, "get", "--json", back["pane"]], env=core_env, capture_output=True, text=True).stdout)
+        argv = " ".join(got.get("argv") or got.get("cmd") or [])
+        assert back["pane"] != new["pane"] and ":" not in back["pane"] and got["labels"].get("reflex.session") == new["session"], (back, got["labels"])
+        assert f"--session {new['session']}" in argv, argv
+        print(f"ok   resumed that session in {back['pane']} (pi --session …)")
+        api(port, "/api/close", {"pane": back["pane"]})
+        until("it to end", lambda: all(a["pane"] != back["pane"] for a in api(port, "/api/state")["agents"]))
         print("reflexd on herdr-core: all checks passed")
     finally:
         if daemon:

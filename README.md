@@ -66,8 +66,11 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
   sessions line up from the first moment; a Claude you start yourself is
   matched through `~/.claude/sessions/<pid>.json` once it has a session.
 - [herdr](https://herdr.dev) 0.9+ is optional: agents running there stay
-  listed, and you can still answer, open and close them, while you move over
-  (Settings → Projects → *New sessions start in* picks herdr again). It needs
+  listed, and you can still answer, open and close them, while you move over.
+  Settings → Setup → *Move from herdr* moves them: between turns, each ends in
+  herdr and resumes the same conversation in herdr-core, in the same folder and
+  on the same Mac (an agent still working moves once its turn ends). Settings →
+  Projects → *New sessions start in* picks herdr again. It needs
   its agent integrations (`herdr integration install claude && herdr
   integration install pi`). Reflex does not ship herdr-core, herdr or
   jev-fabric: its setup has an Install button for each, which runs that
@@ -149,7 +152,8 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
 - `python3 scripts/test-core-daemon.py` — the real reflexd on a disposable
   core with no herdr anywhere: its API lists the core's agents, a prompt is
   answered, pi starts with the session id Reflex chose (no request: nothing
-  reaches a model), and closing it ends it.
+  reaches a model), closing it ends it, and its session resumes in the core
+  (what moving an agent from herdr does once herdr has closed it).
 - `scripts/test-corelink.sh` — the app's stream client (`CoreLink.swift`) on a
   disposable core: framed calls, the first paint, typing, resizing, flow
   control past the first 256 KiB, a reattach; then the phone's viewer

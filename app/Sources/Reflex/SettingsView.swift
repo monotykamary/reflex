@@ -201,7 +201,10 @@ struct SettingsView: View {
 
     private var agentsLine: String {
         let n = store.state.agents.count
-        return n == 1 ? "1 agent in herdr" : "\(n) agents in herdr"
+        let all = n == 1 ? "1 agent" : "\(n) agents"
+        guard Settings.shared.usesCore else { return all + " in herdr" }
+        let old = store.state.agents.filter(HerdrMove.inHerdr).count
+        return old == 0 ? all : "\(all) · \(old) in herdr"
     }
 }
 
@@ -1150,7 +1153,8 @@ final class SetupState: ObservableObject {
     func update() {
         let o = Onboarding.shared
         o.refresh()
-        let ok = [o.herdrInstalled, o.herdrRunning, o.integrations, o.jevInstalled && !o.jevTooOld, o.trusted]
+        let terminals = Settings.shared.usesCore ? [o.coreInstalled, o.coreRunning] : [o.herdrInstalled, o.herdrRunning, o.integrations]
+        let ok = terminals + [o.jevInstalled && !o.jevTooOld, o.trusted]
         missing = ok.filter { !$0 }.count
     }
 }
@@ -1165,58 +1169,50 @@ private struct SetupPane: View {
         Form {
             Section { PaneHeader(pane: .setup) }
                 .onAppear { o.refresh(); o.readHerdrServer(); o.askLatest() }
-            Section("herdr-core") {
-                CheckRow(ok: o.coreInstalled, title: "herdr-core installed", detail: o.coreInstalled ? o.coreDetail : o.installDetail(.core),
-                         showAccessory: o.coreBehind) {
-                    if !o.coreInstalled {
-                        installButtons(.core)
-                    } else {
-                        Button(o.working == "herdr-core" ? "Updating…" : "Update") { o.updateCore() }
-                            .disabled(o.working != nil)
-                            .help("hc update: your agents keep running")
-                    }
-                }
-                if s.usesCore {
+            if s.usesCore {
+                Section("herdr-core") {
+                    coreInstalledRow
                     CheckRow(ok: o.coreRunning, title: "herdr-core running",
-                             detail: o.coreRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `hc server start` in a terminal.") {
+                             detail: o.coreRunning ? count(coreAgents.count) : "Run `hc server start` in a terminal.") {
                         Button("Start") { o.startCore() }.disabled(!o.coreInstalled)
                     }
                     CheckRow(ok: true, title: "Agent status", detail: o.statusDetail) {}
+                    piShellsRow
                 }
-            }
-            Section(s.usesCore ? "herdr (agents still running there)" : "herdr") {
-                CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? o.herdrDetail : o.installDetail(.herdr),
-                         showAccessory: o.herdrBehind || o.herdrRestartDue) {
-                    if !o.herdrInstalled {
-                        installButtons(.herdr)
-                    } else if o.herdrBehind {
-                        Button(o.working == "herdr" ? "Updating…" : "Update") { o.updateHerdr() }
-                            .disabled(o.working != nil)
-                            .help("herdr update")
-                    } else {
-                        Button(o.working == "herdr-restart" ? "Restarting…" : "Restart herdr…") { o.confirmHerdrRestart() }
-                            .disabled(o.working != nil)
+                if !herdrAgents.isEmpty {
+                    Section {
+                        MoveFromHerdr(agents: herdrAgents, coreUp: o.coreRunning)
+                    } header: {
+                        Text("Move from herdr")
+                    } footer: {
+                        Text("Between turns, each agent ends in herdr and resumes the same conversation in herdr-core, in the same folder. If a step fails, nothing is lost: the conversation stays in Recent sessions.")
+                            .font(.system(size: 11)).foregroundStyle(.secondary)
                     }
                 }
-                if !s.usesCore {
+            } else {
+                Section("herdr") {
+                    CheckRow(ok: o.herdrInstalled, title: "herdr installed", detail: o.herdrInstalled ? o.herdrDetail : o.installDetail(.herdr),
+                             showAccessory: o.herdrBehind || o.herdrRestartDue) {
+                        if !o.herdrInstalled {
+                            installButtons(.herdr)
+                        } else if o.herdrBehind {
+                            Button(o.working == "herdr" ? "Updating…" : "Update") { o.updateHerdr() }
+                                .disabled(o.working != nil)
+                                .help("herdr update")
+                        } else {
+                            Button(o.working == "herdr-restart" ? "Restarting…" : "Restart herdr…") { o.confirmHerdrRestart() }
+                                .disabled(o.working != nil)
+                        }
+                    }
                     CheckRow(ok: o.herdrRunning, title: "herdr running",
-                             detail: o.herdrRunning ? (store.state.agents.count == 1 ? "1 agent" : "\(store.state.agents.count) agents") : "Run `herdr` in a terminal.") {
+                             detail: o.herdrRunning ? count(store.state.agents.count) : "Run `herdr` in a terminal.") {
                         Button("Copy Command") { o.copy("herdr") }
                     }
+                    integrationsRow
+                    piShellsRow
                 }
-                CheckRow(ok: o.integrations, title: "Agent integrations",
-                         detail: o.integrations ? "Exact session ids, so side questions can fork the right session."
-                             : "herdr can't see what \(o.unintegratedNames) is doing without it: no status, and its terminal window shows “no agent”.") {
-                    Button(o.working == "integrations" ? "Installing…" : "Install") {
-                        o.run("integrations", o.integrationCommand)
-                    }
-                    .disabled(o.working != nil)
-                }
-                if o.installed.contains("pi") {
-                    CheckRow(ok: o.piShells, title: "pi background shells",
-                             detail: "While pi-fabric shells still run after a turn, the session counts as working — no early “finished”, and the Mac stays awake. New pi sessions pick it up.") {
-                        Button("Install") { o.installPiShells() }
-                    }
+                Section("herdr-core") {
+                    coreInstalledRow
                 }
             }
             Section("Jev") {
@@ -1243,6 +1239,43 @@ private struct SetupPane: View {
         .onAppear { SetupState.shared.update(); if o.ping == .idle { o.test() } }
     }
 
+    private var coreAgents: [AgentInfo] { store.state.agents.filter { !HerdrMove.inHerdr($0) } }
+    private var herdrAgents: [AgentInfo] { store.state.agents.filter(HerdrMove.inHerdr) }
+    private func count(_ n: Int) -> String { n == 1 ? "1 agent" : "\(n) agents" }
+
+    private var coreInstalledRow: some View {
+        CheckRow(ok: o.coreInstalled, title: "herdr-core installed", detail: o.coreInstalled ? o.coreDetail : o.installDetail(.core),
+                 showAccessory: o.coreBehind) {
+            if !o.coreInstalled {
+                installButtons(.core)
+            } else {
+                Button(o.working == "herdr-core" ? "Updating…" : "Update") { o.updateCore() }
+                    .disabled(o.working != nil)
+                    .help("hc update: your agents keep running")
+            }
+        }
+    }
+
+    private var integrationsRow: some View {
+        CheckRow(ok: o.integrations, title: "Agent integrations",
+                 detail: o.integrations ? "Exact session ids, so side questions can fork the right session."
+                     : "herdr can't see what \(o.unintegratedNames) is doing without it: no status, and its terminal window shows “no agent”.") {
+            Button(o.working == "integrations" ? "Installing…" : "Install") {
+                o.run("integrations", o.integrationCommand)
+            }
+            .disabled(o.working != nil)
+        }
+    }
+
+    @ViewBuilder private var piShellsRow: some View {
+        if o.installed.contains("pi") {
+            CheckRow(ok: o.piShells, title: "pi background shells",
+                     detail: "While pi-fabric shells still run after a turn, the session counts as working — no early “finished”, and the Mac stays awake. New pi sessions pick it up.") {
+                Button("Install") { o.installPiShells() }
+            }
+        }
+    }
+
     /// Install, and once that has failed, the command to run by hand.
     @ViewBuilder private func installButtons(_ tool: Onboarding.Tool) -> some View {
         if o.failures[tool.rawValue] != nil { Button("Copy Command") { o.copy(tool.command) } }
@@ -1259,6 +1292,72 @@ private struct SetupPane: View {
         case .testing: return "Asking Jev…"
         case .ok(let ms): return "Answered in \(ms) ms."
         case .failed(let e): return e
+        }
+    }
+}
+
+/// The agents still in herdr, each with what its move waits on, and the
+/// button that moves them to herdr-core.
+private struct MoveFromHerdr: View {
+    var agents: [AgentInfo]
+    var coreUp: Bool
+    @ObservedObject private var move = HerdrMove.shared
+
+    var body: some View {
+        let ready = agents.filter { move.readiness($0) == .ready }.count
+        let busy = agents.filter { move.readiness($0) == .busy }.count
+        LabeledContent {
+            if !move.moving.isEmpty {
+                Button("Moving…") {}.disabled(true)
+            } else if !move.queued.isEmpty {
+                Button("Stop Waiting") { move.cancel() }
+                    .help("The agents still working stay in herdr")
+            } else {
+                Button("Move All") { move.move(agents) }
+                    .disabled(!coreUp || ready + busy == 0)
+            }
+        } label: {
+            RowLabel(agents.count == 1 ? "1 agent still in herdr" : "\(agents.count) agents still in herdr", summary(ready: ready, busy: busy))
+        }
+        .onAppear { move.refresh() }
+        ForEach(agents) { a in
+            LabeledContent {
+                if move.readiness(a) == .ready && !move.moving.contains(a.pane) {
+                    Button("Move") { move.move([a]) }.disabled(!coreUp || !move.moving.isEmpty)
+                }
+            } label: {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    AgentGlyph(status: a.status, size: 10, machine: a.machine)
+                    RowLabel(a.label, why(a))
+                }
+            }
+        }
+        if let p = move.problem {
+            Label(p, systemImage: "exclamationmark.triangle.fill")
+                .font(.system(size: 11.5)).foregroundStyle(Tone.blocked)
+        }
+    }
+
+    private func summary(ready: Int, busy: Int) -> String {
+        if !coreUp { return "herdr-core isn't running: start it above, then move them." }
+        if !move.queued.isEmpty { return "Each one still working moves as soon as it finishes its turn." }
+        switch (ready, busy) {
+        case (0, 0): return "None of them can move yet: see why below."
+        case (_, 0): return ready == agents.count ? "All between turns: they can move now." : "\(ready) can move now."
+        case (0, _): return "\(busy) still working: Move All moves each one once it finishes."
+        default: return "\(ready) can move now; \(busy) still working move once they finish."
+        }
+    }
+
+    private func why(_ a: AgentInfo) -> String {
+        if move.moving.contains(a.pane) { return "Moving to herdr-core…" }
+        if move.queued.contains(a.pane) { return "Moves when this turn ends." }
+        switch move.readiness(a) {
+        case .ready: return "Between turns · \(a.place)"
+        case .busy: return a.status == "blocked" ? "Waiting on you: it can move once answered." : "Working: it can move once it's done."
+        case .noSession: return "herdr has no session id for it: run `herdr integration install \(a.kind)`, and it can move after its next turn."
+        case .kind: return "\(a.kind) can't be resumed by id: start a new session in herdr-core once it's done."
+        case .machine: return "\(a.machine) has no herdr-core connected: add it under Machines first."
         }
     }
 }
