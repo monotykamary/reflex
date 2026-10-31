@@ -431,11 +431,17 @@ final class TerminalContainer: NSView {
     override func layout() {
         super.layout()
         // Hidden first, then sized: the columns follow the width left over.
-        for case let scroller as NSScroller in term.subviews { scroller.isHidden = true }
+        var hid = false
+        for case let scroller as NSScroller in term.subviews where !scroller.isHidden {
+            scroller.isHidden = true
+            hid = true
+        }
         // setFrameSize recomputes them even when the size is unchanged, as it
         // is when the first layout finds a size set with the scroller shown.
+        // It also repaints the whole terminal, and the window lays out again
+        // whenever its header changes: so only then, or when the size moved.
         term.frame.origin = .zero
-        term.setFrameSize(bounds.size)
+        if hid || term.frame.size != bounds.size { term.setFrameSize(bounds.size) }
     }
 }
 

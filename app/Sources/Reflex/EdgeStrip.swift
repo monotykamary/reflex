@@ -113,13 +113,7 @@ struct AgentGlyph: View {
             switch status {
             case "working":
                 Circle().stroke(Tone.working.opacity(0.25), lineWidth: 1.6)
-                // One turn every 0.9 s, read from the clock: it never stalls,
-                // however the agent's state came and went.
-                TimelineView(.animation(minimumInterval: 1.0 / 60, paused: reduce)) { ctx in
-                    Circle().trim(from: 0, to: 0.72)
-                        .stroke(Tone.working, style: StrokeStyle(lineWidth: 1.6, lineCap: .round))
-                        .rotationEffect(.degrees(reduce ? 0 : 360 * Loop.phase(ctx.date, period: 0.9)))
-                }
+                WorkingArc(turning: !reduce)
             case "blocked":
                 Circle().fill(Tone.blocked).frame(width: size * 0.62, height: size * 0.62)
             case "done":
@@ -137,6 +131,76 @@ struct AgentGlyph: View {
                 SpringKeyframe(1, duration: 0.3, spring: .bouncy)
             }
         }
+    }
+}
+
+/// A working agent's arc: one turn every 0.9 s, read from the clock, so it
+/// never stalls however the agent's state came and went, and every arc on
+/// screen turns together. Core Animation turns it in the window server: a
+/// SwiftUI timeline here re-rendered the whole rail (and the terminal window
+/// under its header) every frame for as long as an agent worked.
+private struct WorkingArc: NSViewRepresentable {
+    var turning: Bool
+    func makeNSView(context: Context) -> WorkingArcView { WorkingArcView() }
+    func updateNSView(_ v: WorkingArcView, context: Context) { v.turning = turning }
+}
+
+final class WorkingArcView: NSView {
+    private static let period = 0.9
+    private let arc = CAShapeLayer()
+    var turning = true {
+        didSet { if turning != oldValue { turn() } }
+    }
+
+    init() {
+        super.init(frame: .zero)
+        wantsLayer = true
+        arc.fillColor = nil
+        arc.strokeColor = NSColor(Tone.working).cgColor
+        arc.lineWidth = 1.6
+        arc.lineCap = .round
+        arc.strokeEnd = 0.72
+        layer?.addSublayer(arc)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // Drawn as SwiftUI draws a trimmed circle: from three o'clock, clockwise.
+    override var isFlipped: Bool { true }
+    // The glyph sits on buttons: clicks go to them.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        arc.frame = bounds
+        arc.path = CGPath(ellipseIn: bounds, transform: nil)
+        CATransaction.commit()
+    }
+
+    override func viewDidChangeBackingProperties() {
+        super.viewDidChangeBackingProperties()
+        arc.contentsScale = window?.backingScaleFactor ?? 2
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        turn()
+    }
+
+    private func turn() {
+        arc.removeAnimation(forKey: "turn")
+        guard turning, window != nil else { return }
+        let a = CABasicAnimation(keyPath: "transform.rotation.z")
+        a.fromValue = 0
+        a.toValue = 2 * Double.pi
+        a.duration = Self.period
+        a.repeatCount = .infinity
+        a.isRemovedOnCompletion = false
+        // In phase with the clock, as every other arc is.
+        a.timeOffset = CACurrentMediaTime().truncatingRemainder(dividingBy: Self.period)
+        arc.add(a, forKey: "turn")
     }
 }
 
