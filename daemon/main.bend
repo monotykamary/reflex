@@ -1530,6 +1530,7 @@ type Ep is Data:
   EClose{}
   ESessions{}
   EResume{}
+  EStopped{}
   EJevPing{}
   EStatic{}
   EMissing{}
@@ -1562,6 +1563,7 @@ def rows() -> List<&2, Row>:
     Row{"/api/close", EClose{}},
     Row{"/api/sessions", ESessions{}},
     Row{"/api/resume", EResume{}},
+    Row{"/api/stopped", EStopped{}},
     Row{"/api/jev/ping", EJevPing{}},
   ]
 
@@ -1865,6 +1867,11 @@ def endpoint(ep: Ep, +cfg: Cfg, +chan: Chan(Env), +req: Http.Req, +body: J.JSON)
     case EResume{}:
       do IO<String>:
         r : String <- ask_text(chan, M.Enqueue{M.Resume{Js.text_at(body, "cwd"), Js.or_else(Js.text_at(body, "kind"), "claude"), Js.text_at(body, "session"), Js.or_else(Js.text_at(body, "mode"), "resume"), Js.text_at(body, "text")}, "resume " ++ Js.or_else(Js.text_at(body, "label"), R.leaf(Js.text_at(body, "cwd"))), 0})
+        ok(r)
+    # The agents the core lost (a restart, a lost holder): shown to bring back.
+    case EStopped{}:
+      do IO<String>:
+        r : String <- Hc.list_stopped(Cfg.core(cfg))
         ok(r)
     case EStatic{}:
       serve_static(cfg, static_name(Http.Req.path(req)))

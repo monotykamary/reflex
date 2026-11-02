@@ -36,6 +36,8 @@ struct Client {
     }
 
     func state() async throws -> StateInfo { try await get("/api/state", as: StateInfo.self) }
+    /// The agents herdr-core lost (a restart): shown to bring back.
+    func stopped() async throws -> [StoppedInfo] { try await get("/api/stopped", as: StoppedResponse.self).stopped }
 
     private struct Health: Decodable { var ok: Bool }
     /// reflexd is up and answering.
@@ -86,9 +88,10 @@ struct Client {
                                        "label": "\(p.agent) · \(p.title.prefix(40))"], as: PendingInfo.self)
     }
 
-    /// A live agent's own session, brought back where new sessions start.
-    func resume(cwd: String, kind: String, session: String, label: String) async throws -> PendingInfo {
-        try await post("/api/resume", ["cwd": cwd, "kind": kind, "session": session, "mode": "resume", "text": "", "label": label],
+    /// A live agent's own session, brought back where new sessions start
+    /// (mode "continue": the folder's latest, its id never known).
+    func resume(cwd: String, kind: String, session: String, mode: String = "resume", label: String) async throws -> PendingInfo {
+        try await post("/api/resume", ["cwd": cwd, "kind": kind, "session": session, "mode": mode, "text": "", "label": label],
                        as: PendingInfo.self)
     }
 
@@ -118,6 +121,11 @@ final class Store: ObservableObject {
 
     @Published private(set) var state = StateInfo.empty
     @Published private(set) var connected = false
+    /// Agents herdr-core lost (a restart), asked for every few seconds.
+    @Published private(set) var stopped: [StoppedInfo] = []
+    private var stoppedAt = Date.distantPast
+    /// Resumed or dismissed: gone at once, not back while the core still lists it.
+    private var leaving: Set<String> = []
     /// Bumped per pane when a dispatch to it ran — the receiving bead pulses.
     @Published private(set) var pulses: [String: Int] = [:]
     /// A question that just arrived, surfaced at the edge for a few seconds.
@@ -151,6 +159,7 @@ final class Store: ObservableObject {
             next.inbox.removeAll { clearing.contains($0.id) }
             observe(next)
             state = next
+            if Date().timeIntervalSince(stoppedAt) > 3 { await refreshStopped() }
             // `herdr`: whether your agents can be reached (herdr-core, or herdr).
             // Without herdr-core installed, sessions start in herdr: keep it up.
             if Settings.shared.usesCore && CoreServer.installed { CoreServer.ensure() } else { HerdrServer.ensure(reachable: next.herdr) }
@@ -160,6 +169,20 @@ final class Store: ObservableObject {
         } catch {
             connected = false
         }
+    }
+
+    func refreshStopped() async {
+        stoppedAt = Date()
+        guard let s = try? await Client.local.stopped() else { return }
+        leaving.formIntersection(s.map(\.pane))
+        let next = s.filter { !leaving.contains($0.pane) }
+        if next != stopped { stopped = next }
+    }
+
+    /// Off the list now (resumed or dismissed); the core forgets it shortly.
+    func leave(_ pane: String) {
+        leaving.insert(pane)
+        stopped.removeAll { $0.pane == pane }
     }
 
     private func observe(_ next: StateInfo) {

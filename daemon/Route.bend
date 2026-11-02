@@ -827,9 +827,26 @@ def resume_args.pick(claude: Bool, pi: Bool, codex: Bool, +mode: String, +id: St
     case False{} False{} False{}:
       ["--resume", id]
 
-# The agent's own arguments to bring a session back.
+# Its latest session in that folder, for an agent whose id we never had (a
+# stopped one started outside Reflex).
+def continue_args(codex: Bool) -> List<&2, String>:
+  match codex:
+    case True{}:
+      ["resume", "--last"]
+    case False{}:
+      ["--continue"]
+
+def resume_args.go(cont: Bool, +kind: String, +mode: String, +id: String) -> List<&2, String>:
+  match cont:
+    case True{}:
+      continue_args(String.eq(kind, "codex"))
+    case False{}:
+      resume_args.pick(String.eq(kind, "claude"), String.eq(kind, "pi"), String.eq(kind, "codex"), mode, id)
+
+# The agent's own arguments to bring a session back (mode "continue": the
+# folder's latest).
 def resume_args(+kind: String, +mode: String, +id: String) -> List<&2, String>:
-  resume_args.pick(String.eq(kind, "claude"), String.eq(kind, "pi"), String.eq(kind, "codex"), mode, id)
+  resume_args.go(String.eq(mode, "continue"), kind, mode, id)
 
 # A separate question, defaulting to "none", and a step after the decision:
 # it may turn the decision into a resume only when Jev is sure, and never

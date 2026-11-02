@@ -25,6 +25,51 @@ struct AgentInfo: Codable, Identifiable, Hashable {
     var folder: String { (cwd as NSString).lastPathComponent }
 }
 
+/// An agent herdr-core lost, not one you ended: a restart, a lost holder
+/// or a signal took it (`/api/stopped`; daemon/Hc.bend). Shown until you
+/// resume or dismiss it.
+struct StoppedInfo: Codable, Identifiable, Hashable {
+    var pane: String
+    var name: String
+    var kind: String
+    var cwd: String
+    var title: String
+    /// "" when Reflex never had its id: it resumes the folder's latest.
+    var session: String
+    /// The core's reason ("stopped_by_restart", "signaled"…), or "restart"
+    /// for a kept terminal the core gave a new shell.
+    var why: String
+    /// When it ended (ms since the epoch), "" when the core doesn't say.
+    var at: String
+    var id: String { pane }
+
+    var machine: String { Machines.machine(of: pane) }
+    var folder: String { (cwd as NSString).lastPathComponent }
+    /// Its folder on its own Mac, as a resume takes it ("work:/Users/…").
+    var place: String { Place.on(machine, cwd) }
+    var title_: String { title.isEmpty ? "\(kind) · \(folder)" : title }
+
+    /// "lost in a restart · 2 h ago".
+    var line: String {
+        let how: String
+        switch why {
+        case "signaled": how = "crashed"
+        case "holder_lost": how = "lost with herdr-core"
+        case "host_shutdown": how = "lost at shutdown"
+        default: how = "lost in a restart"
+        }
+        guard let ms = Double(at), ms > 0 else { return how }
+        let s = Date().timeIntervalSince1970 - ms / 1000
+        let ago = s < 3600 ? "\(max(1, Int(s / 60))) min ago" : s < 86400 ? "\(Int(s / 3600)) h ago" : "\(Int(s / 86400)) d ago"
+        return "\(how) · \(ago)"
+    }
+}
+
+struct StoppedResponse: Codable {
+    var ok: Bool
+    var stopped: [StoppedInfo]
+}
+
 /// A folder or an earlier session on another Mac has the path
 /// "<machine>:<path>" ("work:/Users/you/VCS/app"); one on this Mac has its
 /// plain absolute path. reflexd reads it the same way (daemon/Index.bend):

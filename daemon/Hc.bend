@@ -262,31 +262,144 @@ def fill_session.if(want: Bool, +home: String, +t: J.JSON, a: M.Agent) -> IO(M.A
         r : Result<&1, &1, U32 & String, String> <- Fs.read(session_file(home, fg_pid(t)), 65536)
         return with_session(a, session_in(r))
 
-def fill_sessions(xs: List<&2, J.JSON>, +home: String) -> IO(List<&2, M.Agent>):
+# Stopped agents
+# --------------
+# An agent the core lost, not one you ended: a finished terminal whose
+# program a restart, a lost holder, a shutdown or a signal took (an exit or
+# a kill is the end), or a kept terminal the core gave a new shell after
+# such a loss. That shell looks like an agent you quit, so Reflex marks a
+# kept terminal with its shell's pid (label reflex.shell) while an agent
+# runs in it: the same shell back in front is an agent you quit (the mark
+# goes); another one is a shell the core put there.
+
+def keeps(+t: J.JSON) -> Bool:
+  Js.as_bool(Js.get(t, "keep"))
+
+def shell_pid(+t: J.JSON) -> String:
+  Js.text_at(t, "pid")
+
+# What reflex.shell should say now: the shell an agent runs in; nothing once
+# the agent quit and its own shell is back in front; else as it was.
+def shell_mark.now(+t: J.JSON) -> String:
+  when(String.is_empty(kind_of(t)), when(String.eq(label(t, "reflex.shell"), shell_pid(t)), "", label(t, "reflex.shell")), shell_pid(t))
+
+# ...only once the core says what is in front: right after a restart a kept
+# terminal has no program for a moment, then its new shell before it's in
+# front, and its labels alone would read as the agent still there.
+def shell_mark(+t: J.JSON) -> String:
+  when(String.is_empty(fg_pid(t)) || String.is_empty(shell_pid(t)), label(t, "reflex.shell"), shell_mark.now(t))
+
+def p_label(+t: String, +k: String, +v: String) -> String:
+  Js.obj([Js.kv("terminal", Js.str(t)), Js.kv("labels", Js.obj([Js.kv(k, Js.str(v))]))])
+
+def mark_shell.if(change: Bool, sock: String, +t: J.JSON, +v: String) -> IO(Unit):
+  match change:
+    case False{}:
+      IO.pure(Unit, Unit{})
+    case True{}:
+      do IO<Unit>:
+        r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "terminal.label", p_label(Js.text_at(t, "address"), "reflex.shell", v), 3000)
+        return Unit{}
+
+def mark_shell(sock: String, +t: J.JSON) -> IO(Unit):
+  do IO<Unit>:
+    +v : String = shell_mark(t)
+    mark_shell.if(keeps(t) && nb(String.eq(v, label(t, "reflex.shell"))), sock, t, v)
+
+def fill_sessions(xs: List<&2, J.JSON>, +sock: String, +home: String) -> IO(List<&2, M.Agent>):
   match xs:
     case Nil{}:
       IO.pure(List<&2, M.Agent>, [])
     case Con{+t, rest}:
       do IO<List<&2, M.Agent>>:
+        mark_shell(sock, t)
         +a : M.Agent = agent_of(t)
         h : M.Agent <- fill_session.if(fill_session.want(a), home, t, a)
-        tail : List<&2, M.Agent> <- fill_sessions(rest, home)
+        tail : List<&2, M.Agent> <- fill_sessions(rest, sock, home)
         return agents_of.put(nb(String.is_empty(kind_of(t))), h, tail)
 
-def list.of(r: Result<&1, &1, U32 & String, J.JSON>, +home: String) -> IO(Result<&1, &1, U32 & String, Listed>):
+def list.of(r: Result<&1, &1, U32 & String, J.JSON>, +sock: String, +home: String) -> IO(Result<&1, &1, U32 & String, Listed>):
   match r:
     case Fail{e}:
       IO.pure(Result<&1, &1, U32 & String, Listed>, Fail{e})
     case Done{+v}:
       do IO<Result<&1, &1, U32 & String, Listed>>:
-        agents : List<&2, M.Agent> <- fill_sessions(Js.as_list(Js.get(v, "terminals")), home)
+        agents : List<&2, M.Agent> <- fill_sessions(Js.as_list(Js.get(v, "terminals")), sock, home)
         return Done{Listed{agents, down_of(Js.as_list(Js.get(v, "machines")))}}
 
 # Every agent the core runs, this Mac's and its connected machines' alike.
-def list_agents(sock: String, +home: String) -> IO(Result<&1, &1, U32 & String, Listed>):
+def list_agents(+sock: String, +home: String) -> IO(Result<&1, &1, U32 & String, Listed>):
   do IO<Result<&1, &1, U32 & String, Listed>>:
     r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "terminal.list", "{}", 3000)
-    list.of(r, home)
+    list.of(r, sock, home)
+
+def lost_reasons() -> List<&2, String>:
+  ["stopped_by_restart", "server_stop", "holder_lost", "host_shutdown", "signaled"]
+
+# A kept terminal whose agent the core replaced with a shell.
+def replaced(+t: J.JSON) -> Bool:
+  String.is_empty(kind_of(t)) && nb(String.is_empty(label(t, "reflex.shell"))) && nb(String.eq(label(t, "reflex.shell"), shell_pid(t)))
+
+def finished(+t: J.JSON) -> Bool:
+  String.eq(Js.text_at(t, "state"), "finished")
+
+# Why the core lost it ("restart" for a replaced one), or "" if it didn't.
+def lost_why(+t: J.JSON) -> String:
+  when(finished(t), when(known.in(lost_reasons(), Js.text_at(t, "reason")), Js.text_at(t, "reason"), ""), when(replaced(t), "restart", ""))
+
+# A pi session is its file (…/<time>_<id>.jsonl) or its id.
+def same_session(+a: String, +b: String) -> Bool:
+  String.eq(a, b) || String.ends_with(a, "_" ++ b ++ ".jsonl") || String.ends_with(b, "_" ++ a ++ ".jsonl")
+
+# Another live terminal carries it on: the same name, or the same session.
+def carried(xs: List<&2, J.JSON>, +addr: String, +name: String, +session: String) -> Bool:
+  match xs:
+    case Nil{}:
+      False{}
+    case Con{+x, t}:
+      (nb(finished(x)) && nb(String.eq(Js.text_at(x, "address"), addr)) && ((nb(String.is_empty(name)) && String.eq(Js.text_at(x, "name"), name)) || (nb(String.is_empty(session)) && same_session(label(x, "reflex.session"), session)))) || carried(t, addr, name, session)
+
+def stopped.want(+all: List<&2, J.JSON>, +t: J.JSON) -> Bool:
+  nb(String.is_empty(lost_why(t))) && nb(String.is_empty(kind_of.any(t))) && nb(carried(all, Js.text_at(t, "address"), Js.text_at(t, "name"), label(t, "reflex.session")))
+
+def stopped_json(+t: J.JSON) -> String:
+  Js.obj([
+    Js.kv("pane", Js.str(Js.text_at(t, "address"))),
+    Js.kv("name", Js.str(Js.or_else(Js.text_at(t, "name"), Js.text_at(t, "address")))),
+    Js.kv("kind", Js.str(kind_of.any(t))),
+    Js.kv("cwd", Js.str(cwd_of(t))),
+    Js.kv("title", Js.str(Js.text_at(t, "title"))),
+    Js.kv("session", Js.str(label(t, "reflex.session"))),
+    Js.kv("why", Js.str(lost_why(t))),
+    Js.kv("at", Js.str(Js.text_at(t, "finished_ms"))),
+  ])
+
+def stopped.put(keep: Bool, x: String, rest: List<&2, String>) -> List<&2, String>:
+  match keep:
+    case True{}:
+      x <> rest
+    case False{}:
+      rest
+
+def stopped_of(+all: List<&2, J.JSON>, xs: List<&2, J.JSON>) -> List<&2, String>:
+  match xs:
+    case Nil{}:
+      []
+    case Con{+t, rest}:
+      stopped.put(stopped.want(all, t), stopped_json(t), stopped_of(all, rest))
+
+def stopped.of(r: Result<&1, &1, U32 & String, J.JSON>) -> String:
+  match r:
+    case Fail{e}:
+      "{\"ok\":false,\"stopped\":[]}"
+    case Done{+v}:
+      "{\"ok\":true,\"stopped\":" ++ Js.arr(stopped_of(Js.as_list(Js.get(v, "terminals")), Js.as_list(Js.get(v, "terminals")))) ++ "}"
+
+# The agents the core lost, this Mac's and its connected machines', as JSON.
+def list_stopped(sock: String) -> IO(String):
+  do IO<String>:
+    r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "terminal.list", "{\"all\":true}", 3000)
+    return stopped.of(r)
 
 # Requests
 # --------
@@ -487,7 +600,6 @@ def strs(xs: List<&2, String>) -> List<&2, String>:
 # A shell that runs `"$@"` (fish and nu don't): yours, else zsh.
 def posix(+shell: String) -> String:
   when(String.eq(base(shell), "fish") || String.eq(base(shell), "nu"), "/bin/zsh", shell)
-
 
 def wrap.pick(here: Bool, +shell: String, xs: List<&2, String>) -> List<&2, String>:
   match here:

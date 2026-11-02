@@ -118,6 +118,9 @@ struct AgentGlyph: View {
                 Circle().fill(Tone.blocked).frame(width: size * 0.62, height: size * 0.62)
             case "done":
                 Circle().fill(Tone.done).frame(width: size * 0.62, height: size * 0.62)
+            case "stopped":
+                // Lost by the core, not running: an empty ring.
+                Circle().strokeBorder(Color.primary.opacity(0.32), lineWidth: 1.2).frame(width: size * 0.62, height: size * 0.62)
             default:
                 Circle().fill(Color.primary.opacity(0.28)).frame(width: size * 0.5, height: size * 0.5)
             }
@@ -353,6 +356,12 @@ extension Rail {
         }
     }
 
+    /// The column's rows: the agents' dots, then one for the agents the core
+    /// lost (a restart) — click it for them.
+    @MainActor static func dotRows(_ store: Store) -> [RailDot] {
+        dots(store.state.agents, limit: dotLimit) + (store.stopped.isEmpty ? [] : [.state("stopped", store.stopped.count)])
+    }
+
     /// The edge tab's height for these rows (glyphs, or glyph-and-count).
     @MainActor static func tabHeight(_ agents: [AgentInfo]) -> CGFloat {
         let rows = dots(active(agents), limit: tabLimit)
@@ -380,8 +389,8 @@ extension Rail {
     @MainActor static func side(_ rail: RailModel, _ store: Store, inboxShown: Bool) -> RailSideMode {
         guard rail.visible, !inboxShown else { return .none }
         let agents = store.state.agents
-        if rail.panel == .agents && !agents.isEmpty { return .agents }
-        let rows = dots(agents, limit: dotLimit)
+        if rail.panel == .agents && !(agents.isEmpty && store.stopped.isEmpty) { return .agents }
+        let rows = dotRows(store)
         if rail.panel != .agents, let id = rail.hoverDot, let i = rows.firstIndex(where: { $0.id == id }) {
             switch rows[i] {
             case .agent(let a): return .pill(index: i, status: norm(a.status), label: a.remote ? "\(a.folder) · \(a.machine)" : a.folder, word: StatusPill.word(a.status))
@@ -542,12 +551,12 @@ struct Rail: View {
                 }
             }
 
-            if !store.state.agents.isEmpty {
+            if !Rail.dotRows(store).isEmpty {
                 // The dots: click for every agent's details, click again to put them away.
                 // Up to 8, one dot per agent; past that, one row per state with
                 // its count — click it for the list, filtered to that state.
                 VStack(spacing: 0) {
-                    ForEach(Rail.dots(store.state.agents, limit: Rail.dotLimit)) { row in
+                    ForEach(Rail.dotRows(store)) { row in
                         Button { open(row) } label: {
                             Group {
                                 switch row {
@@ -723,7 +732,7 @@ struct RailSide: View {
             }
         case .agents:
             AgentList(agents: store.state.agents, pulses: store.pulses, waiting: questions.count,
-                      background: archive.backgroundSessions,
+                      background: archive.backgroundSessions, stopped: store.stopped,
                       open: openAgent, ask: { openBar($0) }, reveal: reveal,
                       showQuestion: { rail.panel = .question })
                 .transition(.surface(reduce: reduce))
@@ -757,6 +766,7 @@ private struct StatusPill: View {
         case "working": return "Working"
         case "blocked": return "Needs you"
         case "done": return "Done"
+        case "stopped": return "Stopped"
         default: return "Idle"
         }
     }
@@ -784,6 +794,8 @@ struct AgentList: View {
     var waiting: Int
     /// `claude --bg` sessions, running or stopped: one click brings them here.
     var background: [PastSession] = []
+    /// Agents the core lost (a restart): one click brings each back.
+    var stopped: [StoppedInfo] = []
     var open: (AgentInfo) -> Void
     var ask: (AgentInfo) -> Void
     var reveal: (AgentInfo) -> Void
@@ -806,6 +818,15 @@ struct AgentList: View {
         return inState.filter { a in
             [a.title, a.folder, a.kind, a.status, a.machine].contains { $0.localizedCaseInsensitiveContains(q) }
         }
+    }
+
+    /// The stopped ones shown: all, or those the filter keeps (a state other
+    /// than "stopped" hides them).
+    private var stoppedShown: [StoppedInfo] {
+        guard rail.stateFilter == nil || rail.stateFilter == "stopped" else { return [] }
+        let q = query.trimmingCharacters(in: .whitespaces)
+        guard !q.isEmpty else { return stopped }
+        return stopped.filter { s in [s.title, s.folder, s.kind, "stopped", s.machine].contains { $0.localizedCaseInsensitiveContains(q) } }
     }
 
     private func header(_ title: String) -> some View {
@@ -878,9 +899,10 @@ struct AgentList: View {
     private var summary: String {
         let w = agents.filter { $0.status == "working" }.count
         let b = agents.filter { $0.status == "blocked" }.count
-        var parts = [agents.count == 1 ? "1 agent" : "\(agents.count) agents"]
+        var parts = [agents.isEmpty ? "No agents running" : agents.count == 1 ? "1 agent" : "\(agents.count) agents"]
         if w > 0 { parts.append("\(w) working") }
         if b > 0 { parts.append("\(b) waiting") }
+        if !stopped.isEmpty { parts.append("\(stopped.count) stopped") }
         return parts.joined(separator: " · ")
     }
 
@@ -978,6 +1000,10 @@ struct AgentList: View {
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
                         }
                     }
+                    if !stoppedShown.isEmpty {
+                        header("Stopped")
+                        ForEach(stoppedShown) { s in StoppedRow(stopped: s) }
+                    }
                     if !background.isEmpty && query.isEmpty {
                         header("Background")
                         ForEach(background) { p in BackgroundRow(session: p) }
@@ -1007,9 +1033,11 @@ struct AgentList: View {
         }
         let projects = self.projects
         // Glyph, padding and the four actions around a row's two lines.
-        let rows = agents.map { a in
+        let rows = (agents.map { a in
             max(w(AgentRow.title(a), 12, .semibold), w(AgentRow.subtitle(a, inside(a, projects) ?? a.folder), 10.5)) + 136
-        }.max() ?? 0
+        } + stopped.map { s in
+            max(w(s.title_, 12, .semibold), w(StoppedRow.subtitle(s, failed: false), 10.5)) + 120
+        }).max() ?? 0
         var top = w(summary, 11, .medium) + 28
         if waiting > 0 { top += w(waiting == 1 ? "1 question" : "\(waiting) questions", 10.5, .medium) + 37 }
         var row = 0.0
@@ -1064,6 +1092,62 @@ private struct BackgroundRow: View {
         }
         .onHover { h in withAnimation(Motion.micro) { hover = h } }
         .help(session.state == .running ? "Attach to it in herdr" : "Resume it in herdr")
+    }
+}
+
+/// An agent herdr-core lost (a restart, a crash): Resume brings its session
+/// back in a new terminal, which opens once it is up, and forgets this one;
+/// × (twice) only forgets it.
+private struct StoppedRow: View {
+    var stopped: StoppedInfo
+    @State private var hover = false
+    @State private var busy = false
+    @State private var failed = false
+
+    static func subtitle(_ s: StoppedInfo, failed: Bool) -> String {
+        [s.kind, s.folder, failed ? "couldn't resume it" : s.line].joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            AgentGlyph(status: "stopped", size: 9, machine: stopped.machine).frame(width: 12)
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 5) {
+                    Text(stopped.title_).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.dim).lineLimit(1)
+                    MachineChip(machine: stopped.machine)
+                }
+                Text(StoppedRow.subtitle(stopped, failed: failed)).font(.system(size: 10.5)).foregroundStyle(Ink.dim).lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if busy { ProgressView().controlSize(.mini) }
+            if hover && !busy {
+                CloseSessionButton(pane: stopped.pane, size: 20, tint: Ink.dim, word: "Dismiss",
+                                   help: "Forget this stopped agent (its conversation stays)…",
+                                   confirm: { Sessions.dismiss(stopped) })
+                    .transition(.opacity)
+            }
+            Text("Resume")
+                .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.text)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Color.primary.opacity(hover ? 0.14 : 0.08), in: Capsule())
+                .opacity(hover ? 1 : 0.6)
+        }
+        .padding(.horizontal, 8).padding(.vertical, 3)
+        .background(hover ? Color.primary.opacity(0.08) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .contentShape(Rectangle())
+        .onTapGesture {
+            guard !busy else { return }
+            busy = true
+            failed = false
+            Task {
+                do { try await Sessions.resume(stopped) } catch { failed = true }
+                busy = false
+            }
+        }
+        .onHover { h in withAnimation(Motion.micro) { hover = h } }
+        .help(stopped.session.isEmpty
+              ? "Resume \(stopped.kind)'s latest session in \(Place.short(stopped.place))"
+              : "Resume this session in a new terminal")
     }
 }
 

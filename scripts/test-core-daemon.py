@@ -105,8 +105,30 @@ def main():
         assert back["pane"] != new["pane"] and ":" not in back["pane"] and got["labels"].get("reflex.session") == new["session"], (back, got["labels"])
         assert f"--session {new['session']}" in argv, argv
         print(f"ok   resumed that session in {back['pane']} (pi --session …)")
-        api(port, "/api/close", {"pane": back["pane"]})
-        until("it to end", lambda: all(a["pane"] != back["pane"] for a in api(port, "/api/state")["agents"]))
+
+        # The core loses it (stopped, then started: a restart alone keeps programs
+        # running): its kept terminal gets a new shell, and Reflex shows the
+        # agent as stopped, not as a plain shell nor as nothing.
+        def hcget(pane):
+            return json.loads(subprocess.run([HC, "get", "--json", pane], env=core_env, capture_output=True, text=True).stdout)
+        until("its shell marked", lambda: hcget(back["pane"])["labels"].get("reflex.shell") == str(hcget(back["pane"])["pid"]))
+        subprocess.run([HC, "server", "stop"], env=core_env, check=True, capture_output=True, timeout=30)
+        subprocess.run([HC, "server", "start"], env=core_env, check=True, capture_output=True, timeout=30)
+        lost = until("it listed as stopped", lambda: next((x for x in api(port, "/api/stopped").get("stopped", []) if x["pane"] == back["pane"]), None), timeout=30)
+        assert lost["kind"] == "pi" and lost["session"] == new["session"] and lost["why"] == "restart", lost
+        # The state is the last poll's (each 0.7 s): it drops out there too.
+        until("it out of the live agents", lambda: all(a["pane"] != back["pane"] for a in api(port, "/api/state")["agents"]), timeout=10)
+        print(f"ok   the core lost it: {lost['pane']} stopped ({lost['why']}), session {lost['session']}")
+
+        # Resume, as the app's Resume does: the session in a new terminal, the old one closed.
+        api(port, "/api/resume", {"cwd": lost["cwd"], "kind": lost["kind"], "session": lost["session"], "mode": "resume", "text": "", "label": "stopped"})
+        api(port, "/api/close", {"pane": lost["pane"]})
+        again = until("it back", lambda: next((a for a in api(port, "/api/state")["agents"] if a["session"] == new["session"]), None), timeout=40)
+        assert again["pane"] != back["pane"], again
+        assert all(x["pane"] != lost["pane"] for x in api(port, "/api/stopped")["stopped"]), "resumed: no longer stopped"
+        print(f"ok   brought it back in {again['pane']}; the stopped one is gone")
+        api(port, "/api/close", {"pane": again["pane"]})
+        until("it to end", lambda: all(a["pane"] != again["pane"] for a in api(port, "/api/state")["agents"]))
         print("reflexd on herdr-core: all checks passed")
     finally:
         if daemon:

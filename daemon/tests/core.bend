@@ -77,12 +77,8 @@ def got_labels(r: Result<&1, &1, U32 & String, J.JSON>) -> String:
       "fail " ++ m
 
 
-def main() -> IO(Unit):
+def before(+s: String, +home: String) -> IO(Unit):
   do IO<Unit>:
-    e : Result<&1, &1, U32 & String, String> <- IO.get_env("REFLEX_TEST_CORE")
-    +s : String = env_or(e)
-    h : Result<&1, &1, U32 & String, String> <- IO.get_env("REFLEX_TEST_HOME")
-    +home : String = env_or(h)
     IO.print(route("t7") ++ route("box/t12") ++ route("wBE:p1") ++ route("work/wBE:p1") ++ route(""))
     IO.print("uuid " ++ Hc.uuid(305419896, 2596069104, 4294967295, 0))
     l : Result<&1, &1, U32 & String, Hc.Listed> <- Hc.list_agents(s, home)
@@ -114,3 +110,25 @@ def main() -> IO(Unit):
     up : Bool <- Hc.up(s)
     down : Bool <- Hc.up("/nonexistent/core.sock")
     IO.print("up " ++ show_b(up) ++ " " ++ show_b(down))
+
+# After the test restarted the core: the agents it lost, as /api/stopped has them.
+def after(+s: String) -> IO(Unit):
+  do IO<Unit>:
+    j : String <- Hc.list_stopped(s)
+    IO.print("stopped-json " ++ j)
+
+def phase(restarted: Bool, +s: String, +home: String) -> IO(Unit):
+  match restarted:
+    case True{}:
+      after(s)
+    case False{}:
+      before(s, home)
+
+def main() -> IO(Unit):
+  do IO<Unit>:
+    e : Result<&1, &1, U32 & String, String> <- IO.get_env("REFLEX_TEST_CORE")
+    +s : String = env_or(e)
+    h : Result<&1, &1, U32 & String, String> <- IO.get_env("REFLEX_TEST_HOME")
+    +home : String = env_or(h)
+    ph : Result<&1, &1, U32 & String, String> <- IO.get_env("REFLEX_TEST_PHASE")
+    phase(String.eq(env_or(ph), "after"), s, home)

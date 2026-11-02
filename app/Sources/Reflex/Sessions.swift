@@ -55,6 +55,28 @@ enum Sessions {
         return d
     }
 
+    /// Bring back an agent the core lost: its session (or, its id never known,
+    /// the folder's latest) in a new terminal on its own Mac, opened once it
+    /// is up; the lost one is forgotten (a kept shell closed, a finished
+    /// record removed).
+    @MainActor static func resume(_ s: StoppedInfo) async throws {
+        let d = try await Client.local.resume(cwd: s.place, kind: s.kind, session: s.session,
+                                              mode: s.session.isEmpty ? "continue" : "resume",
+                                              label: "\(s.kind) · \(s.title_.prefix(40))")
+        Store.shared.leave(s.pane)
+        watchStart(d.id, cwd: s.place, open: true)
+        await Client.local.close(s.pane)
+    }
+
+    /// Forget an agent the core lost; its conversation stays (search, /resume).
+    @MainActor static func dismiss(_ s: StoppedInfo) {
+        Store.shared.leave(s.pane)
+        Task {
+            await Client.local.close(s.pane)
+            await Store.shared.refreshStopped()
+        }
+    }
+
     /// `claude respawn <id>`: restart a stopped background session.
     @MainActor static func respawn(_ id: String) async { await claude(["respawn", id]) }
 

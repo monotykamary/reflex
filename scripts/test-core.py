@@ -37,6 +37,24 @@ AGENTS = {
 LABELS = {"echo": ["reflex.session=s-echo"], "slow": ["reflex.kind=claude"], "quit": ["reflex.kind=claude"]}
 NOT = ["agent plain ", "agent quit "]
 
+# What a core restart leaves, and what Reflex shows of it as stopped (/api/stopped).
+LOST = {
+    # Kept, an agent running: Reflex marks its shell; the restart gives it another one.
+    "kept": (["--keep", "--label", "reflex.kind=pi", "--label", "reflex.session=s-kept"], R + "r state=idle:app=pi; sleep 300"),
+    # Kept, its agent quit to the same shell (marked earlier): the mark goes, it's a shell.
+    "keptquit": (["--keep", "--label", "reflex.kind=claude"], "exec sh -i"),
+    # Not kept: the restart ends it.
+    "lost": (["--label", "reflex.kind=claude", "--label", "reflex.session=s-lost"], "sleep 300"),
+    # Brought back since, by name or by session: not shown twice.
+    "dup": (["--label", "reflex.kind=pi"], "sleep 300"),
+    "bysession": (["--label", "reflex.kind=claude", "--label", "reflex.session=s-carried"], "sleep 300"),
+    # Ended on purpose: an exit, a kill.
+    "ended": (["--label", "reflex.kind=pi"], "exit 0"),
+    "killed": (["--label", "reflex.kind=pi"], "sleep 300"),
+}
+SHOWN = {"kept": ("pi", "s-kept", {"restart"}), "lost": ("claude", "s-lost", {"stopped_by_restart", "server_stop"})}
+HIDDEN = ["keptquit", "dup", "bysession", "ended", "killed", "plain"]
+
 EXPECT = [
     "t7 core=yes at=/core.sock bare=t7 on=t7",
     "box/t12 core=yes at=/core.sock bare=box/t12 on=box/t12",
@@ -94,7 +112,12 @@ def main():
         # A program called codex that says nothing (a script would show its shell in front).
         (bin_dir / "codex").symlink_to("/bin/sleep")
         hc(env, "run", "--bg", "--no-parent", "--name", "cx", "--", str(bin_dir / "codex"), "300")
+        for name, (flags, script) in LOST.items():
+            hc(env, "run", "--bg", "--no-parent", "--name", name, *flags, "--", "sh", "-c", script)
         time.sleep(1.5)
+        hc(env, "kill", "killed")
+        quit_pid = json.loads(hc(env, "get", "--json", "keptquit").stdout)["pid"]
+        hc(env, "label", "keptquit", f"reflex.shell={quit_pid}")
         # Claude names its session in ~/.claude/sessions/<pid>.json.
         got = json.loads(hc(env, "get", "--json", "claudeish").stdout)
         pid = got["foreground"]["pid"]
@@ -107,7 +130,35 @@ def main():
         missing += [f"(not) {n}" for n in NOT if any(l.startswith(n) for l in out)]
         if run.returncode or missing:
             raise SystemExit("core adapter regression:\nmissing: " + "\n  ".join(missing) + "\n--- got:\n" + run.stdout + run.stderr)
-        print(f"herdr-core adapter: {len(EXPECT) + len(NOT)} checks passed (build {built - started:.1f}s, run {time.monotonic() - built:.1f}s)")
+        # The poll marked the kept agent's shell and unmarked the one whose agent quit.
+        kept = json.loads(hc(env, "get", "--json", "kept").stdout)
+        quit = json.loads(hc(env, "get", "--json", "keptquit").stdout)
+        if kept["labels"].get("reflex.shell") != str(kept["pid"]) or quit["labels"].get("reflex.shell", ""):
+            raise SystemExit(f"shell marks: kept {kept['labels']} pid {kept['pid']}, keptquit {quit['labels']}")
+        # A stop ends the programs (a restart alone keeps them in the holder); the
+        # next start gives kept terminals a shell.
+        hc(env, "server", "stop")
+        hc(env, "server", "start")
+        time.sleep(3)
+        again = json.loads(hc(env, "get", "--json", "kept").stdout)
+        if again["state"] != "live" or again["pid"] == kept["pid"]:
+            raise SystemExit(f"the restart didn't give kept a new shell: {again['state']} pid {again['pid']}")
+        hc(env, "run", "--bg", "--no-parent", "--name", "dup", "--", "sleep", "300")
+        hc(env, "run", "--bg", "--no-parent", "--name", "carrier", "--label", "reflex.session=s-carried", "--", "sleep", "300")
+        after = subprocess.run([f"{work}/core"], cwd=ROOT, timeout=60, capture_output=True, text=True,
+                               env={**os.environ, "REFLEX_TEST_CORE": sock, "REFLEX_TEST_HOME": str(home), "REFLEX_TEST_PHASE": "after"})
+        line = next((l for l in after.stdout.splitlines() if l.startswith("stopped-json ")), "")
+        if after.returncode or not line:
+            raise SystemExit("no stopped list after the restart:\n" + after.stdout + after.stderr)
+        got = json.loads(line[len("stopped-json "):])
+        names = {x["name"]: x for x in got["stopped"]}
+        bad = [f"{n}: missing" for n in SHOWN if n not in names]
+        bad += [f"{n}: {names[n]['kind']} {names[n]['session']} {names[n]['why']}" for n, (k, sess, why) in SHOWN.items()
+                if n in names and (names[n]["kind"] != k or names[n]["session"] != sess or names[n]["why"] not in why)]
+        bad += [f"{n}: shown, shouldn't be" for n in HIDDEN if n in names]
+        if not got["ok"] or bad:
+            raise SystemExit("stopped agents:\n  " + "\n  ".join(bad) + "\n--- got:\n" + json.dumps(got, indent=1))
+        print(f"herdr-core adapter: {len(EXPECT) + len(NOT) + 2 + len(SHOWN) + len(HIDDEN)} checks passed (build {built - started:.1f}s, run {time.monotonic() - built:.1f}s)")
     finally:
         hc(env, "server", "stop", check=False)
         shutil.rmtree(run_dir, ignore_errors=True)

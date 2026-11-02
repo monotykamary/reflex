@@ -48,9 +48,10 @@ struct MenuBarPanel: View {
     /// nothing waits (here, unlike the rail, it is what you came for).
     static func mode(_ rail: RailModel, _ store: Store) -> Mode {
         let agents = store.state.agents
-        if rail.panel == .agents && !agents.isEmpty { return .agents }
+        let none = agents.isEmpty && store.stopped.isEmpty
+        if rail.panel == .agents && !none { return .agents }
         if Rail.card(rail, store.state.inbox) != nil { return .question }
-        return agents.isEmpty ? .empty : .agents
+        return none ? .empty : .agents
     }
 
     private var mode: Mode { MenuBarPanel.mode(rail, store) }
@@ -110,7 +111,7 @@ struct MenuBarPanel: View {
             }
         case .agents:
             AgentList(agents: store.state.agents, pulses: store.pulses, waiting: questions.count,
-                      background: archive.backgroundSessions,
+                      background: archive.backgroundSessions, stopped: store.stopped,
                       open: openAgent, ask: { openBar($0) }, reveal: reveal,
                       showQuestion: { rail.panel = .question })
                 .transition(.surface(reduce: reduce))

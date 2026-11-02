@@ -47,7 +47,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 | **Unsure? It asks.** | When Jev isn't sure, nothing is sent on its own: its best guess is highlighted for you to confirm. Without Jev at all (no key, not installed) the bar still works — you choose. |
 | **Questions** | Every question an agent stops on — numbered options, Claude's `AskUserQuestion` (several questions, multi-select with a Next step, the review), arrow menus like the folder-trust prompt — becomes a card you can answer from the rail, the inbox or your phone. For Claude the rail's card reads the question from its session file: the whole question, each choice's description, which of several questions it is, and for a permission prompt what the command is for, with the command itself a click away. Choices with a preview say so; the preview stays in the terminal. |
 | **Inbox** | Questions first, then updates: what each session said last (read from Claude's and pi's own session files, on the Mac it runs on, otherwise its screen, cleaned of terminal noise; a pi started outside Reflex is found by its folder and session name). Opening a session clears its notifications. |
-| **Resume** | Earlier Claude, pi and Codex sessions (from their own session files) and Claude background sessions (`claude agents`) come back into herdr: ⏎ resumes or attaches, ⌘⏎ forks. Jev may offer one when a request clearly continues it — only when sure, and never over a live session (both proved). A background session nobody is watching notifies you when it finishes. |
+| **Resume** | Earlier Claude, pi and Codex sessions (from their own session files) and Claude background sessions (`claude agents`) come back into herdr: ⏎ resumes or attaches, ⌘⏎ forks. Jev may offer one when a request clearly continues it — only when sure, and never over a live session (both proved). A background session nobody is watching notifies you when it finishes. Agents herdr-core lost — to a restart, a lost holder or a crash, not ones you quit or closed — stay in the rail under **Stopped**: **Resume** brings the session back in a new terminal (one started outside Reflex: its folder's latest), × forgets it. |
 | **btw** | Start with `btw` to ask without interrupting: Claude Code gets its native `/btw`; pi (and Claude when it is blocked on a dialog) gets a headless, unsaved fork of its session. |
 | **Terminals** | A real terminal on any agent (SwiftTerm, attached through herdr): full colour, keys and resizing go straight to its TUI. ⌘⌫ clears the line, ⌘← / ⌘→ go to its start and end, ⇧⏎ starts a new line in Claude Code and ⌃⏎ steers it, and ⌥ with an arrow, Home, End or ⌦ reaches the agent (pi's ⌥↑ brings back a queued message), as in Ghostty. ⌘-click opens a link, written out or OSC 8. ⌘V with an image (a screenshot, a file copied in Finder) pastes its path, which the agent reads as an image. One window per session. herdr gives a terminal to one attached client at a time: while another window or another Mac has it, the window shares it — shown live, and what you type goes in too (through herdr's API), while the other sets the size. **Take Over** makes this one the attached one; taken from, it goes back to sharing; the button in its header hands it over. A herdr-core agent's terminal is the core's stream straight into the window, with no client process in between: any number of windows, Macs and the phone see it and type into it at once, and the one you last typed in, resized or focused sets its size (no Take Over needed); if the core restarts for an update, the window reattaches by itself. Ghostty themes with light and dark slots, Geist Mono when installed. |
 | **Phone** | ⋯ on the rail → *Take Reflex with You*: a QR code that works once and expires in ten minutes. On the phone: your agents, their questions with big answer buttons, updates, and a live terminal you can type into (keys for esc, tab, arrows, ⏎, ^C, ctrl). The terminal takes the phone's size, so the agent lays out for it instead of wrapping, and is drawn cell by cell (box drawing, wide characters and symbols line up); swipe to scroll Claude's or pi's own screen, or a shell's scrollback. While your Mac's window has the terminal it keeps the Mac's size, and **Fit to phone** takes it. Light, dark or system. |
@@ -148,12 +148,17 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   and state, never yours) with fake agents that report OSC 7501: which
   terminals are agents and what they are, status words, sessions from labels
   and from Claude's session file, a prompt refused while starting or blocked,
-  keys, reads, a start and a close, and which backend each pane id goes to.
+  keys, reads, a start and a close, and which backend each pane id goes to;
+  then the core is stopped and started: which agents it lost are stopped
+  (a kept terminal given a new shell, a finished one), and which aren't (an
+  agent you quit, an exit, a kill, one brought back by name or session).
 - `python3 scripts/test-core-daemon.py` — the real reflexd on a disposable
   core with no herdr anywhere: its API lists the core's agents, a prompt is
   answered, pi starts with the session id Reflex chose (no request: nothing
   reaches a model), closing it ends it, and its session resumes in the core
-  (what moving an agent from herdr does once herdr has closed it).
+  (what moving an agent from herdr does once herdr has closed it); then the
+  core loses it in a stop and start, `/api/stopped` lists it, and resuming it
+  and closing the lost one brings it back.
 - `scripts/test-corelink.sh` — the app's stream client (`CoreLink.swift`) on a
   disposable core: framed calls, the first paint, typing, resizing, flow
   control past the first 256 KiB, a reattach; then the phone's viewer
@@ -199,10 +204,10 @@ curl -H 'authorization: Bearer dev' localhost:47823/api/state
 
 `GET /api/state` · `POST /api/route {text, dry?, memory?}` · `POST /api/candidates {text, harness?, memory?, machine?}` ·
 `POST /api/explain {text}` · `POST /api/send {pane, text}` · `POST /api/side {pane, text}` ·
-`POST /api/spawn {cwd, kind?, text}` · `POST /api/resume {cwd, kind, session, mode, text}` ·
+`POST /api/spawn {cwd, kind?, text}` · `POST /api/resume {cwd, kind, session, mode, text}` (mode `resume`, `fork`, `attach` or `continue`: the folder's latest) ·
 `POST /api/answer {item, key}` · `POST /api/dismiss {item}` · `POST /api/note {pane, agent, title, body}` ·
 `GET /api/pane?id=&lines=&format=ansi` · `POST /api/keys {pane, key}` · `POST /api/text {pane, text}` ·
-`POST /api/focus {pane}` · `POST /api/close {pane}` · `GET /api/folders?q=&machine=` · `GET /api/sessions` ·
+`POST /api/focus {pane}` · `POST /api/close {pane}` · `GET /api/stopped` · `GET /api/folders?q=&machine=` · `GET /api/sessions` ·
 `POST /api/reindex {machines?}` · `POST /api/cancel {id}` · `GET /api/jev/ping` · `GET /api/health` · `POST /api/pair {code}`.
 A folder or earlier session on another Mac has the path `<machine>:<path>`
 (`work:/Users/you/VCS/app`): `spawn` and `resume` start it on that Mac, through
