@@ -297,12 +297,22 @@ final class CommandModel: ObservableObject {
         return String(text.dropFirst()).lowercased()
     }
 
-    /// The machine "@word" names: its key, or the start of its name in herdr.
+    /// Your other Macs as "@" names them: herdr-core's (`hc machine add`) and
+    /// herdr's saved ones that are on, one named in both being the core's (as
+    /// Machines.reachable has it).
+    static var otherMacs: [(key: String, label: String)] {
+        let core = CoreMachines.known.map { (key: $0.name, label: $0.name) }
+        let herdr = MachinesModel.shared.rows.filter { r in r.link != .off && !core.contains { $0.key == r.key } }
+            .map { (key: $0.key, label: $0.label) }
+        return core + herdr
+    }
+
+    /// The machine "@word" names: its key, or the start of its name.
     static func machineNamed(_ word: String) -> String? {
         let w = word.lowercased()
-        let rows = MachinesModel.shared.rows
-        return (rows.first { $0.key == w || $0.label.lowercased() == w }
-            ?? rows.first { $0.key.hasPrefix(w) || $0.label.lowercased().hasPrefix(w) }).map(\.key)
+        let macs = otherMacs
+        return (macs.first { $0.key == w || $0.label.lowercased() == w }
+            ?? macs.first { $0.key.hasPrefix(w) || $0.label.lowercased().hasPrefix(w) }).map(\.key)
     }
 
     enum Mode: Equatable { case search, ask }
@@ -388,6 +398,14 @@ final class CommandModel: ObservableObject {
     }
 
     private func textChanged() {
+        // "@": herdr-core's machines as they are now (read again when older
+        // than ten seconds), then the list again with them.
+        if text == "@" {
+            Task { [weak self] in
+                _ = await CoreMachines.list()
+                if self?.machineQuery != nil { self?.schedule() }
+            }
+        }
         // A leading "@work " (typed or pasted) becomes the machine token.
         if text.hasPrefix("@"), let space = text.firstIndex(where: \.isWhitespace) {
             let word = String(text[text.index(after: text.startIndex)..<space])
@@ -703,7 +721,7 @@ final class CommandModel: ObservableObject {
             }
         }
         if let q = machineQuery {
-            return MachinesModel.shared.rows.filter { $0.link != .off && (q.isEmpty || $0.key.hasPrefix(q) || $0.label.lowercased().hasPrefix(q)) }.map {
+            return CommandModel.otherMacs.filter { q.isEmpty || $0.key.hasPrefix(q) || $0.label.lowercased().hasPrefix(q) }.map {
                 let c = SlashCommand.machine($0.key)
                 return Candidate(id: "c:" + c.token, kind: .command, title: c.token, detail: c.help, command: c)
             }
