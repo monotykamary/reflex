@@ -413,7 +413,7 @@ extension Rail {
         let rail = RailModel.shared, store = Store.shared
         if mode == .agents {
             if press.key == .escape { rail.filter = ""; return .handled }
-            if press.key == .delete { if !rail.filter.isEmpty { rail.filter.removeLast() }; return .handled }
+            if press.isBackspace { if !rail.filter.isEmpty { rail.filter.removeLast() }; return .handled }
             let c = press.characters
             if c.count == 1, let ch = c.first, ch.isLetter || ch.isNumber || ch == " " || ch == "-" || ch == "_" || ch == "." {
                 rail.filter.append(ch)
@@ -804,9 +804,6 @@ struct AgentList: View {
     @ObservedObject private var rail = RailModel.shared
     private var query: String { rail.filter }
 
-    /// Past this many agents a filter appears; the list is built for dozens.
-    static let filterAt = 12
-
     @State private var expanded: Set<String> = []
     /// A project shows this many sessions, then "Show N more".
     static let groupLimit = 5
@@ -944,16 +941,14 @@ struct AgentList: View {
                 }
                 .padding(.horizontal, 10).padding(.bottom, 4)
             }
-            // Type while the pointer is on the list to filter it (no field to click).
-            if agents.count > AgentList.filterAt || !query.isEmpty {
+            // Type while the pointer is on the list to filter it (no field to
+            // click): the field shows only what you've typed, and goes once
+            // ⌫ or esc empties it.
+            if !query.isEmpty {
                 HStack(spacing: 5) {
                     Image(systemName: "magnifyingglass").font(.system(size: 10, weight: .medium)).foregroundStyle(Ink.dim)
-                    if query.isEmpty {
-                        Text("Type to filter \(agents.count) agents").foregroundStyle(Ink.dim)
-                    } else {
-                        Text(query).foregroundStyle(Ink.text)
-                        Text("· esc to clear").foregroundStyle(Ink.dim)
-                    }
+                    Text(query).foregroundStyle(Ink.text)
+                    Text("· esc to clear").foregroundStyle(Ink.dim)
                     Spacer(minLength: 0)
                 }
                 .font(.system(size: 11.5))
@@ -1488,6 +1483,12 @@ struct Sliver: View {
 }
 
 // MARK: - Keys
+
+extension KeyPress {
+    /// ⌫. A Mac's Delete key sends DEL (U+007F), and KeyEquivalent.delete is
+    /// BS (U+0008): comparing `key` with `.delete` alone never matches it.
+    var isBackspace: Bool { key == .delete || key.character == "\u{7F}" }
+}
 
 /// An invisible window that holds the keyboard while the pointer is on the
 /// rail, so the rail's own windows never become key — becoming key would

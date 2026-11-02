@@ -1344,7 +1344,7 @@ struct CommandBar: View {
             // ⏎ is the bar's main key, so it is handled here.
             model.submit()
             return .handled
-        case .delete where press.modifiers.contains(.command) && model.selected?.kind == .session:
+        case _ where press.isBackspace && press.modifiers.contains(.command) && model.selected?.kind == .session:
             model.closeSelected()
             return .handled
         default: break
