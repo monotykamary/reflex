@@ -995,8 +995,10 @@ struct AgentList: View {
         let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
         ForEach(multi, id: \.0) { folder, list in
             header(folder)
+            // Its folder always shows: where in the project it is, or the
+            // project's own folder (the header is a group, not a place).
             ForEach(list) { a in
-                AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects),
+                AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects) ?? a.folder,
                          open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
             }
         }
