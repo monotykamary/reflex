@@ -269,11 +269,23 @@ final class CoreLink: @unchecked Sendable {
     /// first in the paint.
     func attach(_ terminal: String, cols: Int, rows: Int, history: Int = 0, observe: Bool = false,
                 display: [String: Any] = [:]) async throws -> CoreStream {
-        let stream = CoreStream(link: self)
         var params: [String: Any] = ["terminal": terminal, "cols": max(1, cols), "rows": max(1, rows),
                                      "history": history, "observe": observe]
         if !display.isEmpty { params["display"] = display }
-        _ = try await call("terminal.attach", params) { [weak self] r in
+        return try await open("terminal.attach", params)
+    }
+
+    /// Follow one terminal's facts: its stream carries JSON lines, an `event`
+    /// notification each (size, status, turn…), then a heartbeat every 15 s.
+    func subscribe(_ terminal: String) async throws -> CoreStream {
+        try await open("events.subscribe", ["terminal": terminal])
+    }
+
+    /// A call that opens a channel: its stream, registered as the reply is
+    /// read, so none of its frames go astray.
+    private func open(_ method: String, _ params: [String: Any]) async throws -> CoreStream {
+        let stream = CoreStream(link: self)
+        _ = try await call(method, params) { [weak self] r in
             guard let self, let ch = (r["channel"] as? NSNumber)?.uint32Value else { return }
             self.lock.lock()
             stream.channel = ch
@@ -282,7 +294,7 @@ final class CoreLink: @unchecked Sendable {
             self.lock.unlock()
             before.forEach { stream.got($0.0, $0.1) }
         }
-        guard stream.channel != 0 else { throw HerdrCore.Failure(kind: "protocol", message: "attach opened no stream") }
+        guard stream.channel != 0 else { throw HerdrCore.Failure(kind: "protocol", message: "\(method) opened no stream") }
         return stream
     }
 }

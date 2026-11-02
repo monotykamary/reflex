@@ -51,8 +51,15 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.onInput = { [weak self] data in
             guard let self else { return false }
             // herdr-core: keys go down the stream (nowhere while it opens).
+            // Typed while another window has the size: this one takes it,
+            // and they follow once it has.
             if self.core {
-                self.stream?.write(Data(data))
+                if self.sizedElsewhere {
+                    self.pendingKeys.append(contentsOf: data)
+                    self.takeSize()
+                } else {
+                    self.stream?.write(Data(data))
+                }
                 return true
             }
             guard self.watching else { return false }
@@ -61,10 +68,16 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         }
         view.onResize = { [weak self] cols, rows in
             guard let self, let stream = self.stream else { return }
+            if self.sizedElsewhere { return self.takeSize() }
             stream.facts(self.display())
+            self.sizing.ask(cols: cols, rows: rows)
             stream.resize(cols: cols, rows: rows)
         }
-        view.onFocus = { [weak self] on in self?.stream?.focus(on) }
+        view.onFocus = { [weak self] on in
+            guard let self else { return }
+            if on, self.sizedElsewhere { return self.takeSize() }
+            self.stream?.focus(on)
+        }
         view.onLink = { [weak self] url, at in self?.link = url.map { ($0, at) } }
         TerminalScroll.install()
         TerminalScroll.views[ObjectIdentifier(view)] = view
@@ -96,10 +109,22 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// An agent in herdr-core: its stream comes straight into this view, no
     /// process in between. Any number of viewers can have it at once, so
     /// there is no taking over and no sharing to fall back to: the one you
-    /// last typed in, resized or focused sets its size.
+    /// last typed in, resized or focused sets its size, and the others show
+    /// it at that size until they are used (CoreSize).
     var core: Bool { HerdrCore.isCore(pane) }
     private var stream: CoreStream?
     private var reattaching = 0
+    /// The terminal's facts as they change (`events.subscribe`): its size,
+    /// which another window may set (see CoreSize).
+    private var facts: CoreStream?
+    private var factsLine = Data()
+    private var sizing = CoreSize()
+    private var stepping: DispatchWorkItem?
+    /// Another window sets the size: this one watches at it (see CoreSize)
+    /// until it is used again.
+    @Published var sizedElsewhere = false
+    /// Typed while taking the size back: sent once it is this window's.
+    private var pendingKeys: [UInt8] = []
 
     /// What this view looks like (the core answers programs' display
     /// queries with it): its colors, and its cell size in device pixels.
@@ -115,6 +140,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         return d
     }
 
+    /// A blank view for the core's paint (CorePaint).
+    private func freshScreen() {
+        view.feed(text: CorePaint.blank)
+        view.resetKeys()
+    }
+
     private func attachCore(reason: String) {
         NSLog("Reflex: attach %@ through herdr-core (%@)", pane, reason)
         stream?.close()
@@ -123,11 +154,13 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         elsewhere = false
         watching = false
         attached = true
-        // A fresh screen: the core paints it whole (screen, history, modes).
-        view.feed(text: "\u{1b}c")
-        view.resetKeys()
-        let t = view.getTerminal()
-        let cols = max(t.cols, 20), rows = max(t.rows, 5)
+        // A fresh screen at this window's size: the core paints it whole
+        // (screen, history, modes).
+        sizedElsewhere = false
+        view.pin(nil)
+        freshScreen()
+        let own = view.ownGrid
+        let cols = max(own.cols, 20), rows = max(own.rows, 5)
         let display = display()
         let pane = pane
         Task { @MainActor [weak self] in
@@ -136,13 +169,18 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                 guard let self else { return s.close() }
                 guard self.attached, self.stream == nil else { return s.close() }
                 self.stream = s
+                self.sizing.painted()
                 s.start(data: { [weak self] d in self?.view.feed(byteArray: ArraySlice([UInt8](d))) },
                         closed: { [weak self] why in self?.coreEnded(why) })
                 if self.view.window?.isKeyWindow == true { s.focus(true) }
                 // Its size now, if the window changed while this opened.
-                let now = self.view.getTerminal()
-                if now.cols != cols || now.rows != rows { s.resize(cols: now.cols, rows: now.rows) }
+                let now = self.view.ownGrid
+                if now.cols != cols || now.rows != rows {
+                    self.sizing.ask(cols: now.cols, rows: now.rows)
+                    s.resize(cols: now.cols, rows: now.rows)
+                }
                 self.reattaching = 0
+                self.followSize()
             } catch {
                 NSLog("Reflex: attach %@ through herdr-core failed: %@", pane, error.localizedDescription)
                 self?.coreEnded((error as? HerdrCore.Failure)?.kind ?? "lost")
@@ -167,7 +205,107 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         }
         NSLog("Reflex: %@ ended in herdr-core (%@)", pane, why)
         attached = false
+        endFacts()
         withAnimation(Motion.enter) { ended = true }
+    }
+
+    /// Follow the terminal's size (once per window): another window sizing
+    /// it, or this one's resize settling (CoreSize).
+    private func followSize() {
+        guard facts == nil else { return }
+        let pane = pane
+        Task { @MainActor [weak self] in
+            guard let s = try? await CoreLink.shared.subscribe(pane) else { return }
+            guard let self, self.attached, self.facts == nil else { return s.close() }
+            self.facts = s
+            s.start(data: { [weak self] d in self?.gotFacts(d) },
+                    closed: { [weak self, weak s] _ in
+                        // Lost with the line to the core: the next attach follows again.
+                        guard let self, self.facts === s else { return }
+                        self.facts = nil
+                    })
+        }
+    }
+
+    private func gotFacts(_ d: Data) {
+        factsLine.append(d)
+        while let nl = factsLine.firstIndex(of: 0x0a) {
+            let line = factsLine[factsLine.startIndex..<nl]
+            factsLine.removeSubrange(factsLine.startIndex...nl)
+            guard let v = try? JSONSerialization.jsonObject(with: line) as? [String: Any],
+                  let p = v["params"] as? [String: Any], p["type"] as? String == "size",
+                  let size = p["data"] as? [String: Any],
+                  let cols = size["cols"] as? Int, let rows = size["rows"] as? Int else { continue }
+            switch sizing.sized(cols: cols, rows: rows, own: view.ownGrid, following: sizedElsewhere) {
+            case .stay: break
+            case .repaint, .own: soon { $0.swap() }
+            case .follow(let c, let r): soon { $0.swap(follow: (c, r)) }
+            }
+        }
+    }
+
+    /// Once the size has stayed put a moment (a window dragged sends many):
+    /// the last step wins.
+    private func soon(_ step: @escaping (TerminalSession) -> Void) {
+        stepping?.cancel()
+        let work = DispatchWorkItem { [weak self] in if let self { step(self) } }
+        stepping = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
+    }
+
+    /// This window is used while another has the size: take it back.
+    func takeSize() {
+        stepping?.cancel()
+        swap()
+    }
+
+    /// The core's screen again, from a second stream drawn in place of this
+    /// one once its paint arrives (nothing flashes on the way): at this
+    /// window's size, which takes the size, or, following, watching at the
+    /// size another window set, the grid pinned to it so what its program
+    /// draws lands where it should.
+    private func swap(follow size: (cols: Int, rows: Int)? = nil) {
+        guard core, attached, let old = stream else { return }
+        let own = view.ownGrid
+        let cols = size?.cols ?? own.cols, rows = size?.rows ?? own.rows
+        let display = display(), pane = pane
+        Task { @MainActor [weak self] in
+            guard let s = try? await CoreLink.shared.attach(pane, cols: cols, rows: rows, history: 2000,
+                                                            observe: size != nil, display: display) else { return }
+            guard let self, self.attached, self.stream === old else { return s.close() }
+            self.stream = s
+            old.close()
+            self.sizing.painted()
+            if self.sizedElsewhere != (size != nil) {
+                withAnimation(Motion.enter) { self.sizedElsewhere = size != nil }
+            }
+            var first = true
+            s.start(data: { [weak self] d in
+                guard let self else { return }
+                if first {
+                    first = false
+                    self.view.pin(size)
+                    self.freshScreen()
+                }
+                self.view.feed(byteArray: ArraySlice([UInt8](d)))
+            }, closed: { [weak self] why in self?.coreEnded(why) })
+            guard size == nil else { return }
+            if self.view.window?.isKeyWindow == true { s.focus(true) }
+            if !self.pendingKeys.isEmpty {
+                s.write(Data(self.pendingKeys))
+                self.pendingKeys = []
+            }
+        }
+    }
+
+    private func endFacts() {
+        stepping?.cancel()
+        stepping = nil
+        pendingKeys = []
+        sizedElsewhere = false
+        facts?.close()
+        facts = nil
+        factsLine = Data()
     }
 
     /// Attach, retrying quietly: Herdr refuses an attach while a read is in
@@ -333,6 +471,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
             attached = false
             stream?.close()
             stream = nil
+            endFacts()
         }
         // The attach runs in its own session (setsid): end the whole group.
         // herdr's client ignores SIGTERM and could outlive the window,
@@ -580,13 +719,51 @@ final class AgentTerminalView: LocalProcessTerminalView {
     var onResize: ((Int, Int) -> Void)?
     var onFocus: ((Bool) -> Void)?
     private var grid = (cols: 0, rows: 0)
+    /// A grid not this frame's: the terminal's own size while another window
+    /// sets it (TerminalSession.swap). A layout pass at the same frame keeps
+    /// it; a real resize of the window ends it (the window is being used).
+    private var pinned: (cols: Int, rows: Int)?
+
+    /// The grid this window holds, pinned or not.
+    var ownGrid: (cols: Int, rows: Int) {
+        let t = getTerminal()
+        return pinned == nil || grid.cols == 0 ? (t.cols, t.rows) : grid
+    }
 
     override func setFrameSize(_ newSize: NSSize) {
+        let same = newSize == frame.size
         super.setFrameSize(newSize)
         let t = getTerminal()
+        if let pinned {
+            if same {
+                if t.cols != pinned.cols || t.rows != pinned.rows { pin(pinned) }
+                return
+            }
+            self.pinned = nil
+            grid = (t.cols, t.rows)
+            onResize?(t.cols, t.rows)
+            return
+        }
         guard t.cols != grid.cols || t.rows != grid.rows else { return }
         grid = (t.cols, t.rows)
         onResize?(t.cols, t.rows)
+    }
+
+    /// Pin the grid to a size (nil: back to the frame's). The terminal's
+    /// own resize, not the view's: that one soft-resets, and wraparound back
+    /// on would draw a program that turned it off in the wrong places.
+    func pin(_ size: (cols: Int, rows: Int)?) {
+        let t = getTerminal()
+        if let size {
+            if pinned == nil, grid.cols == 0 { grid = (t.cols, t.rows) }
+            pinned = size
+            if t.cols != size.cols || t.rows != size.rows { t.resize(cols: size.cols, rows: size.rows) }
+        } else {
+            guard pinned != nil else { return }
+            pinned = nil
+            if t.cols != grid.cols || t.rows != grid.rows { t.resize(cols: grid.cols, rows: grid.rows) }
+        }
+        needsDisplay = true
     }
 
     /// Focus follows its window: one terminal per window, which has the
@@ -821,6 +998,27 @@ struct AgentPopout: View {
                             .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 5)
                             .raySurface(Capsule())
                             .help("Another window or Mac has \(agent?.kind ?? "the agent") open too: both see it and type here. That one sets the size; Take Over makes it this one, with the mouse.")
+                        }
+                        .padding(10)
+                        Spacer()
+                    }
+                    .transition(.surface(reduce: reduce))
+                }
+                if session.sizedElsewhere && !session.ended {
+                    // herdr-core: another window has the size; this one shows
+                    // the terminal at it. Clicking or typing here takes it back.
+                    VStack {
+                        HStack(spacing: 8) {
+                            Spacer()
+                            HStack(spacing: 8) {
+                                Image(systemName: "rectangle.on.rectangle").font(.system(size: 11, weight: .semibold))
+                                Text("Sized elsewhere").font(.system(size: 12, weight: .semibold))
+                                Button("Take Back") { session.takeSize() }
+                                    .buttonStyle(.glassProminent).controlSize(.small)
+                            }
+                            .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 5)
+                            .raySurface(Capsule())
+                            .help("Another window or Mac has \(agent?.kind ?? "the agent") open and set its size, so it shows here at that size. Click or type here to make it this window's again.")
                         }
                         .padding(10)
                         Spacer()

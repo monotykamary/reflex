@@ -158,7 +158,12 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   disposable core: framed calls, the first paint, typing, resizing, flow
   control past the first 256 KiB, a reattach; then the phone's viewer
   (`PhoneLink.swift`) asked as reflexd asks it. Needs the app built once.
-  These three take `REFLEX_TEST_HC=/path/to/herdr-core` when `hc` isn't on PATH.
+- `scripts/test-resize.sh [command]` — a window's view of a full-screen
+  program (pi by default) on a disposable core, drawn into SwiftTerm as the
+  app draws it: after resizes, a reattach over an older frame, another
+  window taking the size (this one follows at it, then takes it back) and
+  that window leaving, the view must match the core's screen row for row.
+  These four take `REFLEX_TEST_HC=/path/to/herdr-core` when `hc` isn't on PATH.
 - `daemon/tests/machines.bend` — which herdr an agent on another Mac is
   reached through, its agents kept while the tunnel reconnects, and places
   there (`work:/Users/you/VCS/app`): their machine, path, how Jev reads them
