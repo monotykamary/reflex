@@ -504,14 +504,9 @@ struct Rail: View {
 
     // MARK: Column
 
+    /// Every agent, whichever row was clicked: the chips and typing are what
+    /// narrow the list. A row again puts it away.
     private func open(_ row: RailDot) {
-        if case .state(let s, _) = row {
-            // Straight to that state's agents; the same row again puts them away.
-            if side == .agents && rail.stateFilter == s { toggleAgents(); return }
-            rail.stateFilter = s
-            if side != .agents { toggleAgents() }
-            return
-        }
         rail.stateFilter = nil
         toggleAgents()
     }
@@ -554,7 +549,7 @@ struct Rail: View {
             if !Rail.dotRows(store).isEmpty {
                 // The dots: click for every agent's details, click again to put them away.
                 // Up to 8, one dot per agent; past that, one row per state with
-                // its count — click it for the list, filtered to that state.
+                // its count — click any for the whole list (its chips filter it).
                 VStack(spacing: 0) {
                     ForEach(Rail.dotRows(store)) { row in
                         Button { open(row) } label: {
@@ -804,10 +799,6 @@ struct AgentList: View {
     @ObservedObject private var rail = RailModel.shared
     private var query: String { rail.filter }
 
-    @State private var expanded: Set<String> = []
-    /// A project shows this many sessions, then "Show N more".
-    static let groupLimit = 5
-
     private var shown: [AgentInfo] {
         let q = query.trimmingCharacters(in: .whitespaces)
         let inState = rail.stateFilter.map { s in agents.filter { Rail.norm($0.status) == s } } ?? agents
@@ -967,25 +958,13 @@ struct AgentList: View {
                     let groups = self.groups(projects)
                     let multi = groups.filter { $0.1.count > 1 }
                     let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
+                    // Every agent, in one scroll: rows are built as they come
+                    // into view, so a long list costs only what's on screen.
                     ForEach(multi, id: \.0) { folder, list in
                         header(folder)
-                        // A big project shows its first few; the rest one click away.
-                        let folded = query.isEmpty && list.count > AgentList.groupLimit + 1 && !expanded.contains(folder)
-                        ForEach(folded ? Array(list.prefix(AgentList.groupLimit)) : list) { a in
+                        ForEach(list) { a in
                             AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects),
                                      open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
-                        }
-                        if folded {
-                            Button {
-                                withAnimation(Motion.swap) { _ = expanded.insert(folder) }
-                            } label: {
-                                Text("Show \(list.count - AgentList.groupLimit) more")
-                                    .font(.system(size: 10.5, weight: .medium)).foregroundStyle(Ink.dim)
-                                    .padding(.horizontal, 28).padding(.vertical, 4)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle())
-                            }
-                            .buttonStyle(Pressable())
                         }
                     }
                     if !singles.isEmpty {
