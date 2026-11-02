@@ -949,42 +949,25 @@ struct AgentList: View {
                 .padding(.horizontal, 8).padding(.bottom, 3)
             }
 
+            let projects = self.projects
+            let groups = self.groups(projects)
             ScrollView {
-                LazyVStack(alignment: .leading, spacing: 0) {
-                    // A project gets a header only when it holds two or more
-                    // agents; one-agent projects stay a flat list that names
-                    // each folder — under "Other" only when real groups are above.
-                    let projects = self.projects
-                    let groups = self.groups(projects)
-                    let multi = groups.filter { $0.1.count > 1 }
-                    let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
-                    // Every agent, in one scroll: rows are built as they come
-                    // into view, so a long list costs only what's on screen.
-                    ForEach(multi, id: \.0) { folder, list in
-                        header(folder)
-                        ForEach(list) { a in
-                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects),
-                                     open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
-                        }
-                    }
-                    if !singles.isEmpty {
-                        if !multi.isEmpty { header("Other") }
-                        ForEach(singles) { a in
-                            AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: a.folder,
-                                     open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
-                        }
-                    }
-                    if !stoppedShown.isEmpty {
-                        header("Stopped")
-                        ForEach(stoppedShown) { s in StoppedRow(stopped: s) }
-                    }
-                    if !background.isEmpty && query.isEmpty {
-                        header("Background")
-                        ForEach(background) { p in BackgroundRow(session: p) }
+                // Every agent, in one scroll. Up to `eager` rows they are built
+                // when the list opens, so scrolling only moves what's drawn;
+                // past it, as they come into view, so a long list costs only
+                // what's on screen.
+                Group {
+                    if groups.reduce(0, { $0 + $1.1.count }) + stoppedShown.count + background.count <= AgentList.eager {
+                        VStack(alignment: .leading, spacing: 0) { rows(projects, groups) }
+                    } else {
+                        LazyVStack(alignment: .leading, spacing: 0) { rows(projects, groups) }
                     }
                 }
-                .padding(.horizontal, 4).padding(.top, groups(projects).contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { h in
+                .padding(.horizontal, 4).padding(.top, groups.contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
+                // Only up to the tallest the list gets: past it, scrolling (and
+                // a lazy stack's estimates as rows come into view) changes
+                // nothing here, so the list isn't redrawn while it scrolls.
+                .onGeometryChange(for: CGFloat.self) { min($0.size.height, AgentList.tallest) } action: { h in
                     // A chip or the filter changes how many rows there are:
                     // the list grows or shrinks to fit, rather than jumping.
                     if rowsHeight == 0 { rowsHeight = h } else { withAnimation(Motion.swap) { rowsHeight = h } }
@@ -993,10 +976,45 @@ struct AgentList: View {
             .scrollIndicators(.never)
             .scrollBounceBehavior(.basedOnSize)
             // As tall as the rows, up to a point; then it scrolls.
-            .frame(height: min(max(rowsHeight, 30), 520))
+            .frame(height: min(max(rowsHeight, 30), AgentList.tallest))
         }
         .frame(width: width)
         .raySurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
+    }
+
+    /// Rows built at once when the list opens; past this, as they scroll in.
+    static let eager = 120
+    /// The list's height before it scrolls.
+    static let tallest: CGFloat = 520
+
+    /// A project gets a header only when it holds two or more agents;
+    /// one-agent projects stay a flat list that names each folder — under
+    /// "Other" only when real groups are above.
+    @ViewBuilder private func rows(_ projects: [String: String], _ groups: [(String, [AgentInfo])]) -> some View {
+        let multi = groups.filter { $0.1.count > 1 }
+        let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
+        ForEach(multi, id: \.0) { folder, list in
+            header(folder)
+            ForEach(list) { a in
+                AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects),
+                         open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
+            }
+        }
+        if !singles.isEmpty {
+            if !multi.isEmpty { header("Other") }
+            ForEach(singles) { a in
+                AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: a.folder,
+                         open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
+            }
+        }
+        if !stoppedShown.isEmpty {
+            header("Stopped")
+            ForEach(stoppedShown) { s in StoppedRow(stopped: s) }
+        }
+        if !background.isEmpty && query.isEmpty {
+            header("Background")
+            ForEach(background) { p in BackgroundRow(session: p) }
+        }
     }
 
     /// As wide as its longest line needs, from 340 to 480 pt. Measured over
