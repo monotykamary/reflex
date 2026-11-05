@@ -163,6 +163,10 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   disposable core: framed calls, the first paint, typing, resizing, flow
   control past the first 256 KiB, a reattach; then the phone's viewer
   (`PhoneLink.swift`) asked as reflexd asks it. Needs the app built once.
+- `scripts/test-phone-open.sh` — macOS regression for concurrent phone-terminal
+  opens: shared attachment, active-viewer upgrade, failure recovery and reopen.
+  Uses the real opening code with a controlled core; no live agents or app build.
+  A watchdog off the main thread catches a completed-task loop freezing the UI.
 - `scripts/test-resize.sh [command]` — a window's view of a full-screen
   program (pi by default) on a disposable core, drawn into SwiftTerm as the
   app draws it: after resizes, a reattach over an older frame, another

@@ -109,6 +109,9 @@ final class PhoneViewer: TerminalDelegate {
         if stream != nil && (active || !want) { return }
         let task = Task { @MainActor [weak self] in
             guard let self else { return }
+            // Clear before this task completes. Otherwise a waiting caller can
+            // spin on its finished value and starve the caller that clears it.
+            defer { self.opening = nil }
             stream?.close()
             stream = nil
             let t = try await HerdrCore.call("terminal.get", ["terminal": pane])
@@ -125,7 +128,6 @@ final class PhoneViewer: TerminalDelegate {
             active = want
         }
         opening = task
-        defer { opening = nil }
         try await task.value
     }
 
