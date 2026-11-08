@@ -126,7 +126,8 @@ final class MachineSetup: ObservableObject {
         return .other(last)
     }
 
-    nonisolated private static func run(_ env: [String: String], _ exe: String, _ args: [String]) -> (status: Int32, out: String, err: String) {
+    /// Shared with machine removal: no stdin, bounded runtime, and diagnostics for the UI.
+    nonisolated static func run(_ env: [String: String], _ exe: String, _ args: [String], timeout: TimeInterval = 90) -> (status: Int32, out: String, err: String) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: exe)
         p.arguments = args
@@ -137,7 +138,7 @@ final class MachineSetup: ObservableObject {
         p.standardInput = FileHandle.nullDevice
         guard (try? p.run()) != nil else { return (-1, "", "couldn't run \(exe)") }
         let killer = DispatchWorkItem { if p.isRunning { p.terminate() } }
-        DispatchQueue.global().asyncAfter(deadline: .now() + 90, execute: killer)
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeout, execute: killer)
         let o = out.fileHandleForReading.readDataToEndOfFile()
         let e = err.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()

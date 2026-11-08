@@ -41,6 +41,9 @@ final class RemoteIndex: @unchecked Sendable {
             self.sessionsAt = [:]
             self.foldersAt = [:]
             self.tick()
+            // A forgotten machine may have no scan left to trigger this:
+            // drop its cached folders from routing without rescanning this Mac.
+            Task { await Client.local.reindexMachines() }
         }
     }
 

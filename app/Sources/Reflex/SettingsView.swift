@@ -75,7 +75,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
-        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale"
+        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale remove forget delete"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
         case .about: return "version"
@@ -992,9 +992,13 @@ private struct CoreMachinesSection: View {
             ForEach(rows, id: \.name) { m in
                 let agents = store.state.agents.filter { $0.machine == m.name }.count
                 LabeledContent {
-                    if m.state != "connected" {
-                        Button("Reconnect") { Task { _ = try? await HerdrCore.call("machine.connect", ["machine": m.name], timeout: 30); await load() } }
-                    }
+                    MachineActions(name: m.name, reconnect: m.state == "connected" ? nil : {
+                        _ = try? await HerdrCore.call("machine.connect", ["machine": m.name], timeout: 30)
+                        await load()
+                    }, remove: {
+                        try await CoreMachines.remove(m.name)
+                        await load()
+                    })
                 } label: {
                     HStack(alignment: .firstTextBaseline, spacing: 8) {
                         Image(systemName: m.state == "connected" ? "checkmark.circle.fill" : m.state == "connecting" ? "arrow.triangle.2.circlepath" : "exclamationmark.circle.fill")
@@ -1053,10 +1057,11 @@ private struct MachineRow: View {
 
     var body: some View {
         LabeledContent {
-            if machine.link != .off {
-                Button("Reconnect") { Machines.shared.reconnect(machine.key) }
-                    .disabled(machine.link == .connecting)
-            }
+            MachineActions(name: machine.label, reconnect: machine.link == .off ? nil : {
+                Machines.shared.reconnect(machine.key)
+            }, reconnectDisabled: machine.link == .connecting, remove: {
+                try await Machines.shared.remove(machine.id)
+            })
         } label: {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Image(systemName: state.symbol).foregroundStyle(state.tone)
@@ -1073,6 +1078,49 @@ private struct MachineRow: View {
             }
         }
         .animation(Motion.enter, value: machine)
+    }
+}
+
+/// The same confirmed, non-blocking removal for either machine backend.
+/// Only saved external machines get these controls; this Mac is never a row.
+private struct MachineActions: View {
+    let name: String
+    var reconnect: (() async -> Void)?
+    var reconnectDisabled = false
+    var remove: () async throws -> Void
+    @State private var confirming = false
+    @State private var removing = false
+    @State private var failure: String?
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if let reconnect {
+                Button("Reconnect") { Task { await reconnect() } }
+                    .disabled(removing || reconnectDisabled)
+            }
+            Button(removing ? "Removing…" : "Remove…", role: .destructive) { confirming = true }
+                .disabled(removing)
+        }
+        .confirmationDialog("Remove \(name)?", isPresented: $confirming, titleVisibility: .visible) {
+            Button("Remove Machine", role: .destructive) {
+                removing = true
+                Task { @MainActor in
+                    defer { removing = false }
+                    do { try await remove() }
+                    catch { failure = error.localizedDescription }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This forgets the saved connection and disconnects it from Reflex. Agents and terminals keep running on that Mac. You can add it again later.")
+        }
+        .alert("Couldn't remove \(name)", isPresented: Binding(
+            get: { failure != nil }, set: { if !$0 { failure = nil } }
+        )) {
+            Button("OK", role: .cancel) { failure = nil }
+        } message: {
+            Text(failure ?? "")
+        }
     }
 }
 

@@ -233,13 +233,15 @@ enum CoreMachines {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var cached: [Machine] = []
     nonisolated(unsafe) private static var at = Date.distantPast
+    /// A list started before a removal must not put the forgotten machine back.
+    nonisolated(unsafe) private static var revision = 0
 
     /// The last list read, without waiting.
     static var known: [Machine] { lock.withLock { cached } }
 
     /// The list, read again when it is more than `fresh` seconds old.
     static func list(fresh: TimeInterval = 10) async -> [Machine] {
-        let old = lock.withLock { Date().timeIntervalSince(at) > fresh }
+        let (old, version) = lock.withLock { (Date().timeIntervalSince(at) > fresh, revision) }
         guard old else { return known }
         guard let r = try? await HerdrCore.call("machine.list", [:], timeout: 3) else { return known }
         let ms = (r["machines"] as? [[String: Any]] ?? []).compactMap { m -> Machine? in
@@ -248,11 +250,28 @@ enum CoreMachines {
                            state: m["state"] as? String ?? "", why: m["why"] as? String ?? "",
                            version: m["version"] as? String ?? "")
         }
-        lock.withLock {
+        return lock.withLock {
+            guard revision == version else { return cached }
             cached = ms
             at = Date()
+            return ms
         }
-        return ms
+    }
+
+    /// Forget the saved connection, not the terminals running on that Mac.
+    static func remove(_ name: String) async throws {
+        let r = await Task.detached { HerdrCore.run(["machine", "rm", name, "--json"], timeout: 10) }.value
+        guard r.status == 0 else {
+            let why = (r.err.isEmpty ? r.out : r.err).trimmingCharacters(in: .whitespacesAndNewlines)
+            throw HerdrCore.Failure(kind: "machine.remove",
+                message: why.isEmpty ? "herdr-core couldn't remove this machine (exit \(r.status))." : why)
+        }
+        lock.withLock {
+            revision += 1
+            cached.removeAll { $0.name == name }
+            at = .distantPast
+        }
+        RemoteIndex.shared.refresh()
     }
 
     /// One the core reaches now.

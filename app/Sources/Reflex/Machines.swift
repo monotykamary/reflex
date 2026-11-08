@@ -124,6 +124,32 @@ final class Machines: @unchecked Sendable {
         }
     }
 
+    /// Forget a saved herdr machine, then drop only its tunnel. Its agents
+    /// keep running on the other Mac. Serialize with polling and reconnects.
+    func remove(_ id: String) async throws {
+        try await withCheckedThrowingContinuation { (done: CheckedContinuation<Void, Error>) in
+            q.async {
+                let r = MachineSetup.run(self.env, "/bin/sh",
+                                         ["-c", "herdr machine remove \"$1\"", "herdr-remove", id], timeout: 10)
+                guard r.status == 0 else {
+                    let why = (r.err.isEmpty ? r.out : r.err).trimmingCharacters(in: .whitespacesAndNewlines)
+                    done.resume(throwing: HerdrCore.Failure(kind: "machine.remove",
+                        message: why.isEmpty ? "herdr couldn't remove this machine (exit \(r.status))." : why))
+                    return
+                }
+                for (key, t) in self.tunnels where t.profile.id == id {
+                    self.close(t)
+                    self.tunnels[key] = nil
+                }
+                self.all.removeAll { $0.id == id }
+                self.writeList()
+                self.publish()
+                RemoteIndex.shared.refresh()
+                done.resume()
+            }
+        }
+    }
+
     /// Ask herdr for its machines now.
     func refresh() { q.async { self.tick() } }
 
@@ -303,10 +329,11 @@ final class Machines: @unchecked Sendable {
     }
 
     private func close(_ t: Tunnel) {
-        guard let p = t.process else { return }
-        t.process = nil
-        track(t.key, nil)
-        p.terminate()
+        if let p = t.process {
+            t.process = nil
+            track(t.key, nil)
+            p.terminate()
+        }
         for name in ["\(t.key).sock", "\(t.key)-client.sock"] {
             try? FileManager.default.removeItem(at: Self.dir.appendingPathComponent(name))
         }
