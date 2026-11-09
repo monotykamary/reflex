@@ -171,6 +171,11 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   opens: shared attachment, active-viewer upgrade, failure recovery and reopen.
   Uses the real opening code with a controlled core; no live agents or app build.
   A watchdog off the main thread catches a completed-task loop freezing the UI.
+- `scripts/test-size-ownership.sh` — portable regression for two machines viewing
+  one terminal: only typing, focus, or resizing transfers control. Read-only
+  repaints cannot take it back; screen refreshes coalesce during resize bursts
+  and stale async paints are discarded. Runs the real session lifecycle against
+  a controlled core.
 - `scripts/test-resize.sh [command]` — a window's view of a full-screen
   program (pi by default) on a disposable core, drawn into SwiftTerm as the
   app draws it: after resizes, a reattach over an older frame, another

@@ -91,7 +91,9 @@ Task { @MainActor in
         s.close()
         let again = try await link.attach(name, cols: 107, rows: 29, history: 2000)
         var firstAgain = true
+        var paint: CoreStream?
         again.start(data: { d in
+            guard paint == nil else { return }
             if firstAgain { firstAgain = false; term.feed(text: CorePaint.blank) }
             term.feed(byteArray: [UInt8](d))
         }, closed: { _ in })
@@ -102,7 +104,7 @@ Task { @MainActor in
         // view follows (watches at that size, its grid pinned to it) while
         // the program draws for that window, then takes the size back.
         // TerminalSession.gotFacts and swap, step for step.
-        var stream = again
+        // The interactive stream remains open; read-only streams repaint it.
         var sizing = CoreSize()
         var following = false
         let own = (cols: 107, rows: 29)
@@ -123,9 +125,9 @@ Task { @MainActor in
         }, closed: { _ in })
         func swap(follow size: (cols: Int, rows: Int)? = nil) async throws {
             let cols = size?.cols ?? own.cols, rows = size?.rows ?? own.rows
-            let n = try await link.attach(name, cols: cols, rows: rows, history: 2000, observe: size != nil)
-            stream.close()
-            stream = n
+            let n = try await link.attach(name, cols: cols, rows: rows, history: 2000, observe: true)
+            paint?.close()
+            paint = n
             sizing.painted()
             following = size != nil
             var first = true
@@ -161,7 +163,9 @@ Task { @MainActor in
             }
             try await pause(1)
             try await compare("following \(c)×\(r) while that window types")
-            // Used here again: take the size back.
+            // Used here again: take the size on the original control stream.
+            again.resize(cols: own.cols, rows: own.rows)
+            again.focus(true)
             try await swap()
             try await compare("taken back")
             check(!following, "taking it back ends following")
@@ -171,8 +175,8 @@ Task { @MainActor in
             check(steps.isEmpty, "that window leaving changes nothing here")
         }
 
-        // Following when the other window leaves: nobody sizes it (the core's
-        // headless size), so this one takes it back rather than follow.
+        // Following when the other window leaves: the persistent interactive
+        // stream still holds our size. A read-only repaint does not claim it.
         let other = try await link.attach(name, cols: 90, rows: 25)
         other.start(data: { _ in }, closed: { _ in })
         try await pause(0.8)
@@ -186,7 +190,8 @@ Task { @MainActor in
         try await compare("after the other window left")
         check(!sizing.stale, "a paint leaves the view current")
         facts.close()
-        stream.close()
+        paint?.close()
+        again.close()
     } catch { print("FAIL", error); exit(1) }
     sem.signal()
 }

@@ -51,15 +51,11 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.onInput = { [weak self] data in
             guard let self else { return false }
             // herdr-core: keys go down the stream (nowhere while it opens).
-            // Typed while another window has the size: this one takes it,
-            // and they follow once it has.
+            // Taking the size and sending keys use the same persistent stream,
+            // in order. A read-only screen refresh must never take it back.
             if self.core {
-                if self.sizedElsewhere {
-                    self.pendingKeys.append(contentsOf: data)
-                    self.takeSize()
-                } else {
-                    self.stream?.write(Data(data))
-                }
+                if self.sizedElsewhere { self.takeSize() }
+                self.stream?.write(Data(data))
                 return true
             }
             guard self.watching else { return false }
@@ -69,6 +65,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.onResize = { [weak self] cols, rows in
             guard let self, let stream = self.stream else { return }
             if self.sizedElsewhere { return self.takeSize() }
+            self.cancelPaint()
             stream.facts(self.display())
             self.sizing.ask(cols: cols, rows: rows)
             stream.resize(cols: cols, rows: rows)
@@ -112,7 +109,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// last typed in, resized or focused sets its size, and the others show
     /// it at that size until they are used (CoreSize).
     var core: Bool { HerdrCore.isCore(pane) }
+    /// The interactive stream stays open across paints. Reattaching it to
+    /// refresh a screen would make this machine the last active viewer again.
     private var stream: CoreStream?
+    private var paintStream: CoreStream?
+    private var openingPaint: CoreStream?
+    private var paintRevision = 0
     private var reattaching = 0
     /// The terminal's facts as they change (`events.subscribe`): its size,
     /// which another window may set (see CoreSize).
@@ -123,8 +125,6 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// Another window sets the size: this one watches at it (see CoreSize)
     /// until it is used again.
     @Published var sizedElsewhere = false
-    /// Typed while taking the size back: sent once it is this window's.
-    private var pendingKeys: [UInt8] = []
 
     /// What this view looks like (the core answers programs' display
     /// queries with it): its colors, and its cell size in device pixels.
@@ -148,6 +148,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
 
     private func attachCore(reason: String) {
         NSLog("Reflex: attach %@ through herdr-core (%@)", pane, reason)
+        endFacts()
         stream?.close()
         stream = nil
         ended = false
@@ -170,8 +171,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                 guard self.attached, self.stream == nil else { return s.close() }
                 self.stream = s
                 self.sizing.painted()
-                s.start(data: { [weak self] d in self?.view.feed(byteArray: ArraySlice([UInt8](d))) },
-                        closed: { [weak self] why in self?.coreEnded(why) })
+                s.start(data: { [weak self] d in
+                    guard let self, self.paintStream == nil else { return }
+                    self.view.feed(byteArray: ArraySlice([UInt8](d)))
+                }, closed: { [weak self] why in self?.coreEnded(why) })
                 if self.view.window?.isKeyWindow == true { s.focus(true) }
                 // Its size now, if the window changed while this opened.
                 let now = self.view.ownGrid
@@ -193,6 +196,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// try again for a while. An exit or a kill is the end.
     private func coreEnded(_ why: String) {
         stream = nil
+        endFacts()
         guard attached else { return }
         let back = ["lost", "unavailable", "timeout", "signaled", "server_stop", "stopped_by_restart", "holder_lost"]
         if back.contains(why), reattaching < 30 {
@@ -205,7 +209,6 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         }
         NSLog("Reflex: %@ ended in herdr-core (%@)", pane, why)
         attached = false
-        endFacts()
         withAnimation(Motion.enter) { ended = true }
     }
 
@@ -236,6 +239,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                   let p = v["params"] as? [String: Any], p["type"] as? String == "size",
                   let size = p["data"] as? [String: Any],
                   let cols = size["cols"] as? Int, let rows = size["rows"] as? Int else { continue }
+            cancelPaint()
             switch sizing.sized(cols: cols, rows: rows, own: view.ownGrid, following: sizedElsewhere) {
             case .stay: break
             case .repaint, .own: soon { $0.swap() }
@@ -248,60 +252,84 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// the last step wins.
     private func soon(_ step: @escaping (TerminalSession) -> Void) {
         stepping?.cancel()
-        let work = DispatchWorkItem { [weak self] in if let self { step(self) } }
+        let revision = paintRevision
+        let work = DispatchWorkItem { [weak self] in
+            guard let self, self.paintRevision == revision else { return }
+            step(self)
+        }
         stepping = work
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.15, execute: work)
     }
 
-    /// This window is used while another has the size: take it back.
+    /// Only real activity takes the size. Keep the interactive stream so a
+    /// resize followed by keys reaches the core in that order, without an
+    /// asynchronous attach racing another machine's activity.
     func takeSize() {
-        stepping?.cancel()
+        guard core, attached, let stream else { return }
+        cancelPaint()
+        let own = view.ownGrid
+        sizedElsewhere = false
+        stream.facts(display())
+        sizing.ask(cols: own.cols, rows: own.rows)
+        stream.resize(cols: own.cols, rows: own.rows)
+        if view.window?.isKeyWindow == true { stream.focus(true) }
         swap()
     }
 
-    /// The core's screen again, from a second stream drawn in place of this
-    /// one once its paint arrives (nothing flashes on the way): at this
-    /// window's size, which takes the size, or, following, watching at the
-    /// size another window set, the grid pinned to it so what its program
-    /// draws lands where it should.
+    /// A newer size or user action supersedes any delayed/in-flight paint.
+    private func cancelPaint() {
+        stepping?.cancel()
+        stepping = nil
+        paintRevision += 1
+        openingPaint?.close()
+        openingPaint = nil
+    }
+
+    /// Refresh from a read-only stream, whether following another window or
+    /// repainting our own resize. Never close/reopen the interactive stream:
+    /// even an attach at our current size can steal ownership from a newer
+    /// viewer on another machine. Only replace the displayed stream when its
+    /// first paint arrives; late paints cannot undo a newer size decision.
     private func swap(follow size: (cols: Int, rows: Int)? = nil) {
-        guard core, attached, let old = stream else { return }
+        guard core, attached, let control = stream else { return }
         let own = view.ownGrid
         let cols = size?.cols ?? own.cols, rows = size?.rows ?? own.rows
-        let display = display(), pane = pane
+        let display = display(), pane = pane, revision = paintRevision
         Task { @MainActor [weak self] in
+            guard let self, self.attached, self.stream === control, self.paintRevision == revision else { return }
             guard let s = try? await CoreLink.shared.attach(pane, cols: cols, rows: rows, history: 2000,
-                                                            observe: size != nil, display: display) else { return }
-            guard let self, self.attached, self.stream === old else { return s.close() }
-            self.stream = s
-            old.close()
-            self.sizing.painted()
-            if self.sizedElsewhere != (size != nil) {
-                withAnimation(Motion.enter) { self.sizedElsewhere = size != nil }
-            }
+                                                            observe: true, display: display) else { return }
+            guard self.attached, self.stream === control, self.paintRevision == revision else { return s.close() }
+            self.openingPaint?.close()
+            self.openingPaint = s
             var first = true
-            s.start(data: { [weak self] d in
-                guard let self else { return }
+            s.start(data: { [weak self, weak s] d in
+                guard let self, let s else { return }
                 if first {
+                    guard self.openingPaint === s, self.paintRevision == revision else { return }
                     first = false
+                    self.paintStream?.close()
+                    self.paintStream = s
+                    self.openingPaint = nil
+                    self.sizing.painted()
+                    withAnimation(Motion.enter) { self.sizedElsewhere = size != nil }
                     self.view.pin(size)
                     self.freshScreen()
                 }
+                guard self.paintStream === s else { return }
                 self.view.feed(byteArray: ArraySlice([UInt8](d)))
-            }, closed: { [weak self] why in self?.coreEnded(why) })
-            guard size == nil else { return }
-            if self.view.window?.isKeyWindow == true { s.focus(true) }
-            if !self.pendingKeys.isEmpty {
-                s.write(Data(self.pendingKeys))
-                self.pendingKeys = []
-            }
+            }, closed: { [weak self, weak s] _ in
+                guard let self, let s else { return }
+                if self.openingPaint === s { self.openingPaint = nil }
+                if self.paintStream === s { self.paintStream = nil }
+            })
         }
     }
 
     private func endFacts() {
-        stepping?.cancel()
-        stepping = nil
-        pendingKeys = []
+        cancelPaint()
+        paintStream?.close()
+        paintStream = nil
         sizedElsewhere = false
         facts?.close()
         facts = nil

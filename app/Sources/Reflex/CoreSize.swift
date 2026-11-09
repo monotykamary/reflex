@@ -26,11 +26,11 @@ enum CorePaint {
 struct CoreSize {
     enum Step: Equatable {
         case stay
-        /// Take a fresh paint at this view's size.
+        /// Take a read-only fresh paint at this view's size.
         case repaint
         /// Another window set this size: watch at it.
         case follow(cols: Int, rows: Int)
-        /// The size is this view's again after another's.
+        /// The size matches this view again; this does not claim control.
         case own
     }
 
@@ -49,15 +49,12 @@ struct CoreSize {
     }
 
     /// The terminal's size changed to this. `own` is the grid this view's
-    /// window holds; `following` whether it watches at another's size now;
-    /// `headless` the size the core gives a terminal no window sizes.
+    /// window holds; `following` whether it watches at another's size now.
+    /// Every result is a display decision, never permission to claim control.
     mutating func sized(cols: Int, rows: Int, own: (cols: Int, rows: Int), following: Bool,
-                        headless: (cols: Int, rows: Int) = CoreSize.headless, now: Date = Date()) -> Step {
+                        now: Date = Date()) -> Step {
         forget(now)
         if cols == own.cols && rows == own.rows { return following ? .own : (stale ? .repaint : .stay) }
-        // The window that had it let go, and no other sizes it: nobody's
-        // using it, so this one takes it back rather than watch at that.
-        if following && cols == headless.cols && rows == headless.rows { return .own }
         // One of this view's own on the way to its last (a window dragged),
         // which the paint at the end covers.
         if asked.contains(where: { $0.cols == cols && $0.rows == rows }) { return .stay }
@@ -70,23 +67,6 @@ struct CoreSize {
         stale = false
         asked = []
     }
-
-    /// herdr-core's `headless` setting (~/.config/herdr-core/config.toml,
-    /// "COLSxROWS"), 200×120 by default. A terminal on another Mac follows
-    /// that Mac's setting; this Mac's stands in for it.
-    static let headless: (cols: Int, rows: Int) = {
-        let home = ProcessInfo.processInfo.environment["XDG_CONFIG_HOME"].map { URL(fileURLWithPath: $0) }
-            ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".config")
-        let file = home.appendingPathComponent("herdr-core/config.toml")
-        if let text = try? String(contentsOf: file, encoding: .utf8),
-           let line = text.split(separator: "\n").first(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("headless") }),
-           let value = line.split(separator: "=").last?.trimmingCharacters(in: CharacterSet(charactersIn: " \"'")),
-           case let parts = value.split(separator: "x"), parts.count == 2,
-           let c = Int(parts[0]), let r = Int(parts[1]) {
-            return (c, r)
-        }
-        return (200, 120)
-    }()
 
     private mutating func forget(_ now: Date) {
         asked.removeAll { now.timeIntervalSince($0.at) > Self.memory }
