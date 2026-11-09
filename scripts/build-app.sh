@@ -54,10 +54,12 @@ ditto "$(dirname "$bin")/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.fr
 rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$app/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
-cp scripts/reflex-scan.sh scripts/reflex-fork.sh scripts/reflex-remote.sh "$app/Contents/Resources/scripts/"
+cp scripts/reflex-scan.sh scripts/reflex-fork.sh scripts/reflex-remote.sh scripts/reflex.sh "$app/Contents/Resources/scripts/"
 cp web/* "$app/Contents/Resources/web/"
 mkdir -p "$app/Contents/Resources/integrations/pi"
 cp integrations/pi/reflex-shells.ts "$app/Contents/Resources/integrations/pi/"
+mkdir -p "$app/Contents/Resources/integrations/skills/reflex"
+cp integrations/skills/reflex/SKILL.md "$app/Contents/Resources/integrations/skills/reflex/"
 # CFBundleVersion must be numeric (updaters compare it): the commit count.
 # The commit itself is kept in ReflexCommit.
 build_number=$(git -C "$root" rev-list --count HEAD 2>/dev/null || echo 1)

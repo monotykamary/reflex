@@ -77,6 +77,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         command.openSetup = { [weak self] step in self?.showSettings(pane: step == .jev ? .routing : .setup) }
         SetupState.shared.start()
         SessionArchive.shared.start()
+        // Agents asking to move (`reflex move self`), and the skill they
+        // follow kept at this version once you've used it.
+        MoveRequests.shared.start()
+        Boat.updateInstalled()
         hotkey = DoubleOption { [weak self] in
             if Onboarding.shared.consumeHotkey() { return }
             self?.toggleBar()

@@ -84,6 +84,15 @@ import Foundation
         try write("hc.json", core)
         _ = await CoreMachines.list(fresh: 0)
         check(CoreMachines.known.count == 2, "Only saved external core machines are shown")
+        // A temporary one Reflex made (a boat machine) is shown.
+        let made = Settings.supportDir.appendingPathComponent("boat/machines", isDirectory: true)
+        try fm.createDirectory(at: made, withIntermediateDirectories: true)
+        try Data("bx_test\n".utf8).write(to: made.appendingPathComponent("transient"))
+        _ = await CoreMachines.list(fresh: 0)
+        check(CoreMachines.known.map(\.name) == ["office", "offline", "transient"] && CoreMachines.known[2].temporary,
+              "A temporary machine Reflex made is shown, marked temporary")
+        try fm.removeItem(at: made.appendingPathComponent("transient"))
+        _ = await CoreMachines.list(fresh: 0)
         try Data().write(to: Settings.supportDir.appendingPathComponent("fail"))
         await expectFailure { try await CoreMachines.remove("office") }
         check(CoreMachines.known.count == 2, "Failed core removal preserves cached machines")

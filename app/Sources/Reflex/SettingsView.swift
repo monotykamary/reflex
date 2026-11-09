@@ -967,12 +967,81 @@ private struct MachinesPane: View {
                 Text("Reflex keeps one SSH tunnel to each enabled machine, with your own ssh config, keys and agent, and reconnects when it drops. Their agents wear the machine's name (and a \(Image(systemName: "circle.fill")) badge) in the rail, the inbox and the ⌥⌥ bar. `herdr machine disable`, `enable` and `remove` change this list.")
                     .font(Type.meta).foregroundStyle(.secondary)
             }
+            BoatSection()
             CoreMachinesSection()
             Section("Add a Mac") {
                 MachineSteps()
                 AddMachineView()
             }
         }
+    }
+}
+
+/// boat.dev: sessions moved to a new sandbox (the ⛵ in a terminal window), the
+/// template they start from, who approves an agent's move, and where new
+/// sessions start.
+private struct BoatSection: View {
+    @ObservedObject var s = Settings.shared
+    @ObservedObject var template = BoatTemplate.shared
+    @State private var skill = Boat.skillInstalled
+    @State private var machines: [String] = CoreMachines.known.map(\.name)
+
+    private var templateText: (String, String) {
+        switch template.state {
+        case .unknown: return ("Checking…", "")
+        case .none: return ("No template yet", "The first move to boat asks the agent to build one with the reflex skill: this Mac's tools and settings on a sandbox, saved as a private snapshot in your boat account. Your logins never go in it; Reflex copies them to each machine.")
+        case .current(let built): return ("Template up to date", "Built \(Self.day(built)). New boat machines start from it in seconds.")
+        case .stale(let built, let changed):
+            return ("Template out of date", "Built \(Self.day(built)); changed here since: \(changed.joined(separator: ", ")). Moves still use it; ⛵ → Rebuild Template asks an agent to build it again.")
+        }
+    }
+
+    var body: some View {
+        Section {
+            if !Boat.hasBoat {
+                RowLabel("The boat CLI isn't installed", "Install it from docs.boat.dev and run `boat login`: then ⛵ in a terminal window moves a session to a new boat machine.")
+            } else {
+                LabeledContent {
+                    Button("Check") { Task { await template.refresh(fresh: 0) } }
+                } label: {
+                    RowLabel(templateText.0, templateText.1)
+                }
+            }
+            LabeledContent {
+                Button(skill ? "Reinstall" : "Install") {
+                    Boat.install()
+                    skill = Boat.skillInstalled
+                }
+            } label: {
+                RowLabel(skill ? "Reflex skill installed" : "Reflex skill",
+                         "Teaches claude, pi and codex to build your template and move themselves (`reflex move self`). Installed in ~/.claude, ~/.codex and ~/.pi, with `reflex` in ~/.local/bin.")
+            }
+            Picker(selection: $s.moveApproval) {
+                Text("Ask every time").tag("ask")
+                Text("Approve for boat machines").tag("made")
+                Text("Always approve").tag("always")
+            } label: {
+                RowLabel("When an agent asks to move", "It asks with `reflex move self`; its window shows Move and Not Now. The ⛵ button is your OK by itself.")
+            }
+            Picker(selection: $s.defaultMachine) {
+                Text("This Mac").tag("")
+                if Boat.hasBoat { Text("A new boat machine").tag(Boat.key) }
+                ForEach(machines, id: \.self) { Text($0).tag($0) }
+            } label: {
+                RowLabel("Start new sessions on", "The ⌥⌥ bar starts with this @machine; × or ⌫ on the token starts one here instead.")
+            }
+        } header: {
+            Text("boat.dev")
+        }
+        .task {
+            await template.refresh()
+            machines = await CoreMachines.list().filter { !Boat.made($0.name) }.map(\.name)
+        }
+    }
+
+    private static func day(_ iso: String) -> String {
+        guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
+        return d.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
@@ -996,7 +1065,8 @@ private struct CoreMachinesSection: View {
                         _ = try? await HerdrCore.call("machine.connect", ["machine": m.name], timeout: 30)
                         await load()
                     }, remove: {
-                        try await CoreMachines.remove(m.name)
+                        // One Reflex made: its boat sandbox goes too.
+                        if Boat.made(m.name) { try await Boat.remove(m.name) } else { try await CoreMachines.remove(m.name) }
                         await load()
                     })
                 } label: {
@@ -1005,7 +1075,8 @@ private struct CoreMachinesSection: View {
                             .foregroundStyle(m.state == "connected" ? Tone.done : m.state == "connecting" ? Tone.working : Tone.blocked)
                         VStack(alignment: .leading, spacing: 2) {
                             HStack(spacing: 6) { Text(m.name); MachineChip(machine: m.name) }
-                            Text("ssh \(m.target)" + (m.version.isEmpty ? "" : " · hc \(m.version)"))
+                            Text((Boat.made(m.name) ? "boat sandbox, made by Reflex" : m.temporary ? "temporary · \(m.target)" : "ssh \(m.target)")
+                                 + (m.version.isEmpty ? "" : " · hc \(m.version)"))
                                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
                             Text(Self.state(m, agents: agents)).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
@@ -1406,6 +1477,7 @@ private struct MoveFromHerdr: View {
         case .noSession: return "herdr has no session id for it: run `herdr integration install \(a.kind)`, and it can move after its next turn."
         case .kind: return "\(a.kind) can't be resumed by id: start a new session in herdr-core once it's done."
         case .machine: return "\(a.machine) has no herdr-core connected: add it under Machines first."
+        case .notHere: return "Only this Mac's agents move to another machine."
         }
     }
 }

@@ -228,6 +228,9 @@ enum CoreMachines {
         let state: String
         let why: String
         let version: String
+        /// Short-lived (`hc machine add --temp`): a sandbox for a task, like
+        /// the boat machines Reflex makes.
+        var temporary = false
     }
 
     private static let lock = NSLock()
@@ -245,10 +248,12 @@ enum CoreMachines {
         guard old else { return known }
         guard let r = try? await HerdrCore.call("machine.list", [:], timeout: 3) else { return known }
         let ms = (r["machines"] as? [[String: Any]] ?? []).compactMap { m -> Machine? in
-            guard let name = m["name"] as? String, (m["temporary"] as? Bool) != true else { return nil }
+            // Short-lived ones only when Reflex made them (a boat machine):
+            // other tools' task sandboxes stay theirs.
+            guard let name = m["name"] as? String, (m["temporary"] as? Bool) != true || madeByReflex(name) else { return nil }
             return Machine(name: name, target: m["target"] as? String ?? m["host"] as? String ?? "",
                            state: m["state"] as? String ?? "", why: m["why"] as? String ?? "",
-                           version: m["version"] as? String ?? "")
+                           version: m["version"] as? String ?? "", temporary: m["temporary"] as? Bool == true)
         }
         return lock.withLock {
             guard revision == version else { return cached }
@@ -256,6 +261,11 @@ enum CoreMachines {
             at = Date()
             return ms
         }
+    }
+
+    /// A boat machine Reflex made (scripts/reflex.sh keeps a record of each).
+    static func madeByReflex(_ name: String) -> Bool {
+        !name.contains("/") && FileManager.default.fileExists(atPath: Settings.supportDir.appendingPathComponent("boat/machines/\(name)").path)
     }
 
     /// Forget the saved connection, not the terminals running on that Mac.

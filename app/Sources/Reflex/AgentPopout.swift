@@ -1053,6 +1053,13 @@ struct AgentPopout: View {
                     }
                     .transition(.surface(reduce: reduce))
                 }
+                // An agent asking to move, or a move under way: top centre.
+                VStack {
+                    MoveBanner(pane: session.pane, tint: Color(hex: theme.foreground))
+                        .padding(10)
+                    Spacer()
+                }
+                .animation(Motion.micro, value: MoveRequests.shared.pending)
                 if session.ended {
                     VStack(spacing: 10) {
                         if session.elsewhere {
@@ -1141,6 +1148,7 @@ struct AgentPopout: View {
                 .foregroundStyle(Color(hex: theme.foreground).opacity(0.6))
                 .help("Share: let another window or Mac have the size and mouse; this one still sees and types")
             }
+            MoveButton(agent: agent, tint: Color(hex: theme.foreground).opacity(0.6))
             OpenInButton(agent: agent, pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
             CloseSessionButton(pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
         }

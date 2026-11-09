@@ -64,7 +64,9 @@ enum SlashCommand: Equatable, Hashable {
         case .btw: return "Ask a side question, without interrupting"
         case .folder: return "Choose any folder to start in"
         case .resume: return "Bring back an earlier session — Claude, pi or Codex"
-        case .machine(let m): return "Only \(m)'s sessions, folders and earlier sessions; new sessions start there"
+        case .machine(let m):
+            if m == Boat.key { return "New sessions start on a new boat machine from your template, with this Mac's project" }
+            return "Only \(m)'s sessions, folders and earlier sessions; new sessions start there"
         }
     }
 
@@ -107,7 +109,16 @@ final class CommandModel: ObservableObject {
     @Published var sideForced = false
     @Published var newForced = false
     /// "@work": the request, the search and new sessions stay on that Mac.
+    /// "@boat": new sessions start on a new boat machine; the rest is this Mac's.
     @Published var machine: String?
+    /// Whose sessions, folders and earlier sessions the list offers: "@work"'s,
+    /// or everyone's (with "@boat" too: its projects are this Mac's).
+    private var scope: String? { machine == Boat.key ? nil : machine }
+    /// Settings → Machines' default target: the token a fresh bar starts with.
+    static var defaultMachine: String? {
+        let m = Settings.shared.defaultMachine
+        return m.isEmpty || (m == Boat.key && !Boat.hasBoat) ? nil : m
+    }
 
     // The list.
     @Published private(set) var jev: CandidatesResponse?
@@ -200,7 +211,7 @@ final class CommandModel: ObservableObject {
         resumeOnly = false
         sideForced = false
         newForced = false
-        machine = nil
+        machine = Self.defaultMachine
         jev = nil
         jevText = ""
         thinking = false
@@ -219,7 +230,7 @@ final class CommandModel: ObservableObject {
     /// Words, images or a slash command in force: something to come back to.
     var hasDraft: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !attachments.isEmpty
-            || harness != nil || resumeOnly || sideForced || newForced || machine != nil
+            || harness != nil || resumeOnly || sideForced || newForced || machine != Self.defaultMachine
     }
 
     /// When the bar last went away with its request unsent.
@@ -304,7 +315,9 @@ final class CommandModel: ObservableObject {
         let core = CoreMachines.known.map { (key: $0.name, label: $0.name) }
         let herdr = MachinesModel.shared.rows.filter { r in r.link != .off && !core.contains { $0.key == r.key } }
             .map { (key: $0.key, label: $0.label) }
-        return core + herdr
+        // "@boat": a new boat machine each time (scripts/reflex.sh).
+        let boat = Boat.hasBoat ? [(key: Boat.key, label: Boat.key)] : []
+        return boat + core + herdr
     }
 
     /// The machine "@word" names: its key, or the start of its name.
@@ -531,12 +544,12 @@ final class CommandModel: ObservableObject {
 
     /// Whose folders the list offers: "@work"'s; for a request, this Mac's
     /// (new work starts here unless you name a Mac); a search finds every Mac's.
-    private var folderScope: String? { machine ?? (mode == .search ? nil : ".") }
+    private var folderScope: String? { scope ?? (mode == .search ? nil : ".") }
 
     /// Jev's answer for the words as they are: remembered, asked now, or
     /// asked when the call in flight comes back.
     private func askJev() {
-        let gen = generation, words = request, h = harness, m = machine
+        let gen = generation, words = request, h = harness, m = scope
         if let r = remembered(words, h) { return land(r, words) }
         if let asking {
             if asking != gen { queued = true }
@@ -620,7 +633,7 @@ final class CommandModel: ObservableObject {
     // MARK: Rows
 
     /// The live sessions the bar offers: all of them, or "@work"'s.
-    private var agents: [AgentInfo] { Store.shared.state.agents.filter { (machine == nil || $0.machine == machine) && (harness == nil || $0.kind == harness) } }
+    private var agents: [AgentInfo] { Store.shared.state.agents.filter { (scope == nil || $0.machine == scope) && (harness == nil || $0.kind == harness) } }
 
     private func leaf(_ path: String) -> String { (path as NSString).lastPathComponent }
 
@@ -787,7 +800,7 @@ final class CommandModel: ObservableObject {
     /// until you type; then a live session that matches comes first too (it
     /// is open already, so ⏎ shows it rather than resuming a second copy).
     private var searchRows: [Candidate] {
-        let pasts = SessionArchive.shared.matching(request, on: machine, harness: harness, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
+        let pasts = SessionArchive.shared.matching(request, on: scope, harness: harness, limit: resumeOnly ? 30 : (request.isEmpty ? 4 : 6)).map { resumeRow($0, bp: nil) }
         if resumeOnly && request.isEmpty { return pasts }
         let live = sessionMatches.map { a in
             Candidate(id: "s:" + a.pane, kind: .session,
@@ -1017,6 +1030,7 @@ final class CommandModel: ObservableObject {
     }
 
     private func spawn(in path: String, kind: String, text: String, isNew: Bool = false, open: Bool = false) {
+        if machine == Boat.key, Place.machine(path).isEmpty, !isNew { return spawnOnBoat(in: path, kind: kind, text: text, open: open) }
         let m = Place.machine(path)
         let label = "\(kind) in \((path as NSString).lastPathComponent)" + (m.isEmpty ? "" : " on \(m)")
         phase = .sending((isNew ? "new folder · " : "") + label)
@@ -1033,6 +1047,31 @@ final class CommandModel: ObservableObject {
                 // Starting an agent takes a few seconds; a failure lands in the inbox.
                 done("Starting " + label, ticket: t)
             } catch { fail("reflexd did not answer — \(error.localizedDescription)", ticket: t) }
+        }
+    }
+
+    /// "@boat": a new machine from your template, this project and your
+    /// logins copied there, then the agent. Half a minute or so; the bar
+    /// says how far it got, and can be closed meanwhile.
+    private func spawnOnBoat(in path: String, kind: String, text: String, open: Bool) {
+        let folder = leaf(path), t = ticket
+        phase = .sending("Starting a boat machine for \(kind) in \(folder)")
+        Task {
+            do {
+                await BoatTemplate.shared.refresh(fresh: 0)
+                guard BoatTemplate.shared.exists else {
+                    return fail("No boat template yet: move a session to boat once (⛵ in its window) and its agent builds one.", ticket: t)
+                }
+                let m = try await Boat.newMachine(template: true)
+                if t == ticket { phase = .sending("Copying \(folder) to \(m)") }
+                _ = try await Boat.sync(m, path)
+                try await Boat.creds(m)
+                let cwd = try await Boat.reflex(["where", m, path])
+                _ = await CoreMachines.list(fresh: 0)
+                let p = try await Client.local.spawn(cwd: Place.on(m, cwd), kind: kind, text: text)
+                Sessions.watchStart(p.id, cwd: Place.on(m, cwd), open: open)
+                done("Starting \(kind) in \(folder) on \(m)", ticket: t)
+            } catch { fail("Not started on boat: \(error.localizedDescription)", ticket: t) }
         }
     }
 

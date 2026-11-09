@@ -67,6 +67,13 @@ final class Settings: ObservableObject {
     var regularApp: Bool { showInDock && !menuBar }
     /// "system", "light" or "dark": Reflex's surfaces in either of Raycast's tones.
     @Published var appearance: String { didSet { d.set(appearance, forKey: "appearance") } }
+    /// An agent asking to move to another machine (`reflex move self`):
+    /// "ask" every time, "made" approved when it's a machine Reflex made (a
+    /// boat sandbox), or "always".
+    @Published var moveApproval: String { didSet { d.set(moveApproval, forKey: "moveApproval") } }
+    /// Where the ⌥⌥ bar starts new sessions: "" this Mac, a machine's name,
+    /// or "boat" (a new boat machine from your template each time).
+    @Published var defaultMachine: String { didSet { d.set(defaultMachine, forKey: "defaultMachine") } }
 
     private init() {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
@@ -96,6 +103,8 @@ final class Settings: ObservableObject {
         showInDock = d.object(forKey: "showInDock") as? Bool ?? true
         menuBar = d.bool(forKey: "menuBar")
         appearance = d.string(forKey: "appearance") ?? "system"
+        moveApproval = d.string(forKey: "moveApproval") ?? "ask"
+        defaultMachine = d.string(forKey: "defaultMachine") ?? ""
         Settings.writeFolders(extraFolders)
     }
 
