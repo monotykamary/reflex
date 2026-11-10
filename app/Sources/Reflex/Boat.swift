@@ -384,6 +384,13 @@ final class BoatLifetime: ObservableObject {
             working[m] = now
         }
         for m in Array(down.keys) where !machines.contains(m) { down[m] = nil }
+        // Back without Resume here (another Reflex, boat itself, a script):
+        // not stopped any more, and its windows reattach.
+        for m in Array(down.keys) where up.contains(m) && !resuming.contains(m) {
+            NSLog("Reflex: %@ is connected again", m)
+            down[m] = nil
+            back[m] = Date()
+        }
         Task { await checkDown(machines) }
     }
 
@@ -421,16 +428,25 @@ final class BoatLifetime: ObservableObject {
         problem[m] = nil
         Task {
             defer { resuming.remove(m) }
+            let were = down[m] ?? []
             do {
-                _ = try await Boat.reflex(["machine", "resume", m] + Boat.typeArgs, timeout: 300)
+                _ = try await Boat.reflex(["machine", "resume", m] + Boat.typeArgs, timeout: 600)
                 NSLog("Reflex: %@ resumed", m)
                 down[m] = nil
                 working[m] = nil
                 renewed[m] = Date()
                 _ = await CoreMachines.list(fresh: 0)
                 // (Its kept terminals take a moment to start their agents.)
-                try? await Task.sleep(for: .seconds(3))
+                try? await Task.sleep(for: .seconds(8))
                 back[m] = Date()
+                // Any that didn't come back (resumed on a different size, its
+                // herdr-core starts empty): their sessions again, there.
+                let there = Set(Store.shared.state.agents.filter { $0.machine == m }.map(\.session))
+                for a in were where HerdrMove.kinds.contains(a.kind) && !a.session.isEmpty && !there.contains(a.session) {
+                    NSLog("Reflex: %@ on %@ didn't come back; resuming its session", a.kind, m)
+                    _ = try? await Client.local.resume(cwd: Place.on(m, a.cwd), kind: a.kind, session: a.session,
+                                                       label: "resume \(a.kind) · \(a.folder) on \(m)")
+                }
             } catch {
                 problem[m] = error.localizedDescription
             }

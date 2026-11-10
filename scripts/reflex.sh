@@ -211,12 +211,36 @@ machine_state() { # machine_state NAME: boat's word for it (running, idle, stopp
 machine_resume() { # machine_resume NAME [--type T]: running (at that size) and connected again
   ours "$1" || die "$1 isn't a machine Reflex made"
   _rt=""; [ "${2:-}" = --type ] && _rt=${3:-}
-  say "Resuming $(boat_id "$1")${_rt:+ as $_rt}..."
-  boat resume "$(boat_id "$1")" --ttl 3600 ${_rt:+--type "$_rt"} --json --no-update >/dev/null 2>&1 || die "boat resume $(boat_id "$1") failed"
+  _id=$(boat_id "$1")
+  # (Already running, after all: nothing to resume.)
+  _st=$(machine_state "$1" 2>/dev/null || true)
+  if [ "$_st" = stopping ]; then
+    say "$_id is still saving; waiting for it to stop..."
+    i=0
+    while [ "$(machine_state "$1" 2>/dev/null || true)" = stopping ]; do
+      i=$((i + 1)); [ $i -lt 120 ] || die "$_id is still stopping after 6 minutes"
+      sleep 3
+    done
+    _st=stopped
+  fi
+  case $_st in
+    running|idle|ready|busy) ;;
+    *)
+      say "Resuming $_id${_rt:+ as $_rt}..."
+      boat resume "$_id" --ttl 3600 ${_rt:+--type "$_rt"} --json --no-update >/dev/null 2>&1 || die "boat resume $_id failed"
+      ;;
+  esac
   i=0
   until connected "$1"; do
     i=$((i + 1))
-    [ $i -lt 120 ] || die "$1 is running again but herdr-core hasn't reconnected (hc machine ls)"
+    # On a different machine size its herdr-core is a new one, which hc
+    # won't take for the old: added again, same name.
+    if [ $i = 20 ] && hc machine ls --json 2>/dev/null | grep -q "different core answers"; then
+      say "$1 came back with a new herdr-core: adding it again"
+      hc machine rm "$1" >/dev/null 2>&1 || true
+      hc machine add --via "boat ssh $_id" --name "$1" --temp --install --json >/dev/null 2>&1 || die "hc machine add $1 failed"
+    fi
+    [ $i -lt 180 ] || die "$1 is running again but herdr-core hasn't reconnected (hc machine ls)"
     sleep 1
   done
   echo "$1"
