@@ -35,8 +35,6 @@ struct MoveButton: View {
             Text("Reflex resumes claude, pi and codex, not \(a.kind)")
         case .noSession:
             Text("Reflex doesn't know this session's id yet")
-        case .notHere:
-            Text("Only this Mac's sessions move to another machine")
         default:
             if Boat.hasBoat {
                 Section("boat.dev") {
@@ -50,14 +48,16 @@ struct MoveButton: View {
                 }
             }
             let others = machines.filter { $0.state == "connected" && $0.name != a.machine }
-            if !others.isEmpty {
+            if a.remote || !others.isEmpty {
                 Section("Machines") {
+                    // From another machine: here, through herdr-core's line.
+                    if a.remote { Button("Move to This Mac") { move.prepare(a, to: Boat.here) } }
                     ForEach(others, id: \.name) { m in
                         Button("Move to \(m.name)") { move.prepare(a, to: m.name) }
                     }
                 }
             }
-            if !Boat.hasBoat && others.isEmpty {
+            if !Boat.hasBoat && others.isEmpty && !a.remote {
                 Text("No other machine: install the boat CLI, or add one in Settings → Machines")
             }
             if move.readiness(a, to: Boat.key) == .busy {
@@ -74,24 +74,37 @@ struct MoveBanner: View {
     var pane: String
     var tint: Color
     @ObservedObject private var requests = MoveRequests.shared
+    @ObservedObject private var files = FileRequests.shared
     @ObservedObject private var move = HerdrMove.shared
 
     var body: some View {
-        if let r = requests.request(for: pane) {
+        if let r = files.request(for: pane) {
+            HStack(spacing: 8) {
+                Image(systemName: "tray.and.arrow.down").font(.system(size: 11, weight: .semibold))
+                Text(r.op == "ls" ? "Show it \(r.what) on \(r.origin == Boat.here ? "this Mac" : r.origin)?" : "Send \(r.what) from \(r.origin == Boat.here ? "this Mac" : r.origin)?")
+                    .font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                Button("Not Now") { files.decline(r) }.controlSize(.small)
+                Button(r.op == "ls" ? "Show" : "Send") { files.approve(r) }.buttonStyle(.glassProminent).controlSize(.small)
+            }
+            .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 5)
+            .raySurface(Capsule())
+            .frame(maxWidth: 560)
+            .help(r.paths.joined(separator: "\n") + "\n\nThe session asked with reflex home. It goes to the same ~ path on its machine. Settings → Machines can allow these for you.")
+        } else if let r = requests.request(for: pane) {
             HStack(spacing: 8) {
                 Image(systemName: "sailboat").font(.system(size: 11, weight: .semibold))
-                Text("Move to \(r.to)?").font(.system(size: 12, weight: .semibold))
+                Text("Move to \(r.to == Boat.here ? "this Mac" : r.to)\(r.paths.isEmpty ? "" : " with \(r.paths.count) more")?").font(.system(size: 12, weight: .semibold))
                 Button("Not Now") { requests.decline(r) }.controlSize(.small)
                 Button("Move") { requests.approve(r) }.buttonStyle(.glassProminent).controlSize(.small)
             }
             .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 5)
             .raySurface(Capsule())
             .help("The agent asked to move this session to \(r.to). It moves once its turn ends. Settings → Machines can approve these for you.")
-        } else if let note = move.notes[pane] {
+        } else if let note = move.notes[pane] ?? files.notes[pane] {
             HStack(spacing: 8) {
                 if move.moving.contains(pane) || note.hasSuffix("…") { ProgressView().controlSize(.mini) }
                 Text(note).font(.system(size: 12, weight: .medium)).lineLimit(2)
-                Button { move.dismissNote(pane) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
+                Button { move.dismissNote(pane); files.dismissNote(pane) } label: { Image(systemName: "xmark").font(.system(size: 9, weight: .bold)) }
                     .buttonStyle(.borderless)
             }
             .padding(.horizontal, 12).padding(.vertical, 6)

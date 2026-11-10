@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         SessionArchive.shared.start()
         // Agents asking to move (`reflex move self`), and the skill they
         // follow kept at this version once you've used it.
-        MoveRequests.shared.start()
+        Bus.shared.start()
         BoatLifetime.shared.start()
         Boat.updateInstalled()
         hotkey = DoubleOption { [weak self] in

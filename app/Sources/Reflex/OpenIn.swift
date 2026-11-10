@@ -56,8 +56,12 @@ enum OpenIn {
 
     static func open(_ t: OpenTarget, agent: AgentInfo?, pane: String, remember: Bool = false) {
         if remember { Settings.shared.openIn = t.id }
-        // Another Mac's folder isn't on this one: herdr is the way in.
-        guard t.kind != .herdr, agent?.remote != true, let cwd = agent?.cwd, !cwd.isEmpty else {
+        // Another machine's folder: a shell there in a terminal here, or an
+        // editor over ssh.
+        if t.kind != .herdr, let a = agent, a.remote, !a.cwd.isEmpty {
+            return openRemote(t, a)
+        }
+        guard t.kind != .herdr, let cwd = agent?.cwd, !cwd.isEmpty else {
             HerdrWindow.reveal(pane: pane)
             return
         }
@@ -79,6 +83,61 @@ enum OpenIn {
     }
 }
 
+extension OpenIn {
+    /// Editors that open a folder over ssh (`<scheme>://vscode-remote/ssh-remote+host/path`).
+    static let sshEditors: [String: String] = [
+        "com.microsoft.VSCode": "vscode", "com.todesktop.230313mzl4w4u92": "cursor", "com.exafunction.windsurf": "windsurf",
+    ]
+
+    /// The machine's ssh host, when herdr-core reaches it with plain ssh
+    /// (not a command like `boat ssh`).
+    static func sshHost(_ machine: String) -> String? {
+        guard let m = CoreMachines.known.first(where: { $0.name == machine }), !m.target.contains(" ") else { return nil }
+        return m.target
+    }
+
+    /// What opens another machine's folder: terminals always (a shell there,
+    /// through herdr-core), editors that speak ssh when it's an ssh host.
+    static func remoteTargets(_ machine: String) -> [OpenTarget] {
+        installed.filter { $0.kind == .terminal || ($0.kind == .editor && sshEditors[$0.id] != nil && sshHost(machine) != nil) }
+    }
+
+    static func openRemote(_ t: OpenTarget, _ a: AgentInfo) {
+        if t.kind == .editor, let scheme = sshEditors[t.id], let host = sshHost(a.machine) {
+            let path = a.cwd.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? a.cwd
+            if let url = URL(string: "\(scheme)://vscode-remote/ssh-remote+\(host)\(path)") { NSWorkspace.shared.open(url) }
+            return
+        }
+        guard t.kind == .terminal, let app = t.app else { return HerdrWindow.reveal(pane: a.pane) }
+        let env = HerdrCore.environment()
+        guard let hc = HerdrCore.binary(env) else { return HerdrWindow.reveal(pane: a.pane) }
+        Task.detached {
+            // A login shell in its folder there, gone when it exits…
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: hc)
+            p.arguments = ["run", "--bg", "--no-parent", "--rm", "--on", a.machine, "--cwd", a.cwd, "--json", "--",
+                           "sh", "-c", "exec \"${SHELL:-/bin/sh}\" -l"]
+            p.environment = env
+            let out = Pipe()
+            p.standardOutput = out
+            p.standardError = Pipe()
+            guard (try? p.run()) != nil else { return }
+            p.waitUntilExit()
+            let data = out.fileHandleForReading.readDataToEndOfFile()
+            guard let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any], let address = j["address"] as? String else { return }
+            // …and the terminal app on it.
+            let script = FileManager.default.temporaryDirectory.appendingPathComponent("reflex-\(address.replacingOccurrences(of: "/", with: "-")).command")
+            let session = env["HC_SESSION"].map { "export HC_SESSION='\($0)'\n" } ?? ""
+            try? "#!/bin/sh\n\(session)exec '\(hc)' attach '\(address)'\n".write(to: script, atomically: true, encoding: .utf8)
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: script.path)
+            let open = Process()
+            open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            open.arguments = t.id == "com.mitchellh.ghostty" ? ["-na", app.path, "--args", "-e", script.path] : ["-a", app.path, script.path]
+            try? open.run()
+        }
+    }
+}
+
 /// The menu's items: the session in herdr, then its folder everywhere else.
 struct OpenInItems: View {
     var agent: AgentInfo?
@@ -88,7 +147,15 @@ struct OpenInItems: View {
         Button { OpenIn.open(OpenIn.herdr, agent: agent, pane: pane, remember: true) } label: {
             Label { Text(HerdrCore.isCore(pane) ? "Open Terminal" : "Show in herdr") } icon: { Image(systemName: "arrow.up.forward.app") }
         }
-        if agent?.cwd.isEmpty == false, agent?.remote != true {
+        if let a = agent, a.remote, !a.cwd.isEmpty {
+            Section("Open \(a.folder) on \(a.machine) in") {
+                ForEach(OpenIn.remoteTargets(a.machine)) { t in
+                    Button { OpenIn.open(t, agent: agent, pane: pane, remember: true) } label: {
+                        Label { Text(t.name) } icon: { Image(nsImage: OpenIn.icon(t)) }
+                    }
+                }
+            }
+        } else if agent?.cwd.isEmpty == false {
             Section(agent.map { "Open \($0.folder) in" } ?? "Open in") {
                 ForEach(OpenIn.installed.filter { $0.kind != .herdr }) { t in
                     Button { OpenIn.open(t, agent: agent, pane: pane, remember: true) } label: {
@@ -108,7 +175,8 @@ struct OpenInButton: View {
     @ObservedObject private var settings = Settings.shared
 
     var body: some View {
-        let t = agent?.remote == true ? OpenIn.herdr : OpenIn.preferred
+        // (On another machine: the preferred one when it can open there.)
+        let t = agent.map { a in a.remote && !OpenIn.remoteTargets(a.machine).contains(OpenIn.preferred) ? OpenIn.herdr : OpenIn.preferred } ?? OpenIn.preferred
         Menu {
             OpenInItems(agent: agent, pane: pane)
         } label: {

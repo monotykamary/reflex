@@ -969,6 +969,7 @@ private struct MachinesPane: View {
             }
             BoatSection()
             CoreMachinesSection()
+            MoveAllSection()
             Section("Add a Mac") {
                 MachineSteps()
                 AddMachineView()
@@ -1022,6 +1023,13 @@ private struct BoatSection: View {
                 Text("Always approve").tag("always")
             } label: {
                 RowLabel("When an agent asks to move", "It asks with `reflex move self`; its window shows Move and Not Now. The ⛵ button is your OK by itself.")
+            }
+            Picker(selection: $s.fileApproval) {
+                Text("Ask every time").tag("ask")
+                Text("Allow for boat machines").tag("made")
+                Text("Always allow").tag("always")
+            } label: {
+                RowLabel("When a session elsewhere asks for files", "A session Reflex moved asks this Mac with `reflex home fetch` (a file it finds missing) or `reflex home ls`; its window shows Send and Not Now. They go to the same ~ path there.")
             }
             Picker(selection: $s.defaultMachine) {
                 Text("This Mac").tag("")
@@ -1585,5 +1593,49 @@ enum Remote {
         let ns = NSImage(size: rep.size)
         ns.addRepresentation(rep)
         return ns
+    }
+}
+
+/// Every session from one machine to another: retiring a Mac, or bringing
+/// another Mac's work here. Each goes between turns (a busy one when its
+/// turn ends), its project and conversation copied through this Mac.
+private struct MoveAllSection: View {
+    @ObservedObject private var store = Store.shared
+    @ObservedObject private var move = HerdrMove.shared
+    @State private var from = Boat.here
+    @State private var to = ""
+    @State private var machines: [String] = []
+
+    private func label(_ m: String) -> String { m == Boat.here ? "This Mac" : m }
+
+    private var sessions: [AgentInfo] {
+        store.state.agents.filter { Boat.name($0.machine) == from && HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
+    }
+
+    var body: some View {
+        Section {
+            let places = [Boat.here] + machines
+            Picker("From", selection: $from) { ForEach(places, id: \.self) { Text(label($0)).tag($0) } }
+            Picker("To", selection: $to) {
+                Text("Choose…").tag("")
+                ForEach(places.filter { $0 != from }, id: \.self) { Text(label($0)).tag($0) }
+            }
+            LabeledContent {
+                Button(sessions.isEmpty ? "No Sessions" : "Move \(sessions.count) Session\(sessions.count == 1 ? "" : "s")") {
+                    move.move(sessions, to: to)
+                }
+                .disabled(sessions.isEmpty || to.isEmpty || to == from)
+            } label: {
+                RowLabel("Move every session", "claude, pi and codex sessions on \(label(from)), each with its project and conversation, copied through this Mac. A busy one goes when its turn ends; its window shows how it's going.")
+            }
+        } header: {
+            Text("Move between machines")
+        }
+        .task {
+            while !Task.isCancelled {
+                machines = await CoreMachines.list().filter { $0.state == "connected" }.map(\.name)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
     }
 }

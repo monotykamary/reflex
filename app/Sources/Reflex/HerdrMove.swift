@@ -28,8 +28,8 @@ final class HerdrMove: ObservableObject {
     /// Where each queued or moving agent goes: another machine's name, or
     /// absent for herdr → herdr-core on its own Mac.
     private var targets: [String: String] = [:]
-    /// Moves the agent asked for: it copied what its work needs.
-    private var prepared: Set<String> = []
+    /// What each agent said its work needs besides its project.
+    private var bring: [String: [String]] = [:]
 
     enum Readiness: Equatable {
         case ready
@@ -41,8 +41,7 @@ final class HerdrMove: ObservableObject {
         case kind
         /// Its Mac has no connected herdr-core.
         case machine
-        /// To another machine: only this Mac's agents (their session files
-        /// are here).
+        /// (No longer used: agents move from any machine.)
         case notHere
     }
 
@@ -54,8 +53,8 @@ final class HerdrMove: ObservableObject {
     func readiness(_ a: AgentInfo, to target: String? = nil) -> Readiness {
         if !Self.kinds.contains(a.kind) { return .kind }
         if a.session.isEmpty { return .noSession }
-        if let target, target != a.machine {
-            if a.remote { return .notHere }
+        if let target, target != Boat.name(a.machine) {
+            // To another machine, from wherever it is: through this Mac.
         } else if a.remote && !reachable.contains(a.machine) {
             return .machine
         }
@@ -73,13 +72,14 @@ final class HerdrMove: ObservableObject {
 
     /// Moves `agents`, one at a time: those between turns now, the busy ones
     /// as each finishes its turn. `to`: another machine herdr-core reaches.
-    func move(_ agents: [AgentInfo], to machine: String? = nil, prepared ready: Bool = false) {
+    func move(_ agents: [AgentInfo], to machine: String? = nil, with paths: [String] = []) {
         problem = nil
         for a in agents {
             targets[a.pane] = machine
             notes[a.pane] = nil
-            if ready { prepared.insert(a.pane) } else { prepared.remove(a.pane) }
+            bring[a.pane] = paths
         }
+        for a in agents { NSLog("Reflex: move %@ (%@, %@) to %@: %@", a.pane, a.kind, a.status, machine ?? "herdr-core", String(describing: readiness(a, to: machine))) }
         let busy = agents.filter { readiness($0, to: machine) == .busy }
         queued.formUnion(busy.map(\.pane))
         for a in busy where machine != nil { notes[a.pane] = "Moves to \(machine!) once this turn ends" }
@@ -175,12 +175,13 @@ final class HerdrMove: ObservableObject {
             defer { running = false }
             for a in ready {
                 // (A move that has to wait again sets its target again.)
-                if let m = targets.removeValue(forKey: a.pane), m != a.machine { await move(a, to: m) } else { await move(a) }
+                if let m = targets.removeValue(forKey: a.pane), m != Boat.name(a.machine) { await move(a, to: m) } else { await move(a) }
             }
         }
     }
 
     private func fail(_ pane: String, _ why: String) {
+        NSLog("Reflex: move of %@ stopped: %@", pane, why)
         problem = why
         notes[pane] = why
     }
@@ -211,23 +212,31 @@ final class HerdrMove: ObservableObject {
         }
     }
 
-    /// To another machine. While it's still here: the project, logins and
-    /// its conversation (minutes, for a long one). Then the close, the lines
-    /// it wrote since, and the resume there. Its window says what's going on
-    /// throughout and becomes the one there.
+    /// To another machine (`m`, "." for this Mac), from wherever it is. While
+    /// it's still there: its project, what it said its work needs, logins (to
+    /// a machine Reflex made) and its conversation (minutes, for a long one),
+    /// all through this Mac. Then the close, the lines it wrote since, and
+    /// the resume there. Its window says what's going on throughout and
+    /// becomes the one there.
     private func move(_ a: AgentInfo, to m: String) async {
         defer { moving.remove(a.pane) }
         let name = "\(a.kind) in \(a.folder)"
-        let ready = prepared.remove(a.pane) != nil
+        let src = Boat.name(a.machine)
+        let place = m == Boat.here ? "this Mac" : m
+        let paths = bring.removeValue(forKey: a.pane) ?? []
         do {
-            notes[a.pane] = ready ? "Checking \(a.folder) is on \(m)…" : "Copying \(a.folder) to \(m)…"
-            _ = try await Boat.sync(m, a.cwd, ifMissing: ready)
+            notes[a.pane] = "Copying \(a.folder) to \(place)…"
+            _ = try await Boat.sync(m, a.cwd, from: src)
+            if !paths.isEmpty {
+                notes[a.pane] = "Copying what it needs to \(place) (\(paths.count == 1 ? (paths[0] as NSString).lastPathComponent : "\(paths.count) items"))…"
+                try await Boat.bring(m, paths, from: src)
+            }
             if Boat.made(m) {
-                notes[a.pane] = "Copying your logins to \(m)…"
+                notes[a.pane] = "Copying your logins to \(place)…"
                 try await Boat.creds(m)
             }
-            notes[a.pane] = "Copying this conversation to \(m)…"
-            _ = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd)
+            notes[a.pane] = "Copying this conversation to \(place)…"
+            _ = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd, from: src)
         } catch {
             return fail(a.pane, "Not moved: \(error.localizedDescription)")
         }
@@ -235,36 +244,36 @@ final class HerdrMove: ObservableObject {
         // (what's copied stays; the next copy is what it adds).
         guard let now = Store.shared.state.agents.first(where: { $0.pane == a.pane }), readiness(now, to: m) == .ready else {
             targets[a.pane] = m
-            if ready { prepared.insert(a.pane) }
             queued.insert(a.pane)
-            notes[a.pane] = "Moves to \(m) once this turn ends"
+            notes[a.pane] = "Moves to \(place) once this turn ends"
             return
         }
-        notes[a.pane] = "Moving \(a.kind) to \(m)…"
+        notes[a.pane] = "Moving \(a.kind) to \(place)…"
         await Client.local.close(a.pane)
         guard await until(seconds: 10, { !Store.shared.state.agents.contains { $0.pane == a.pane } }) else {
-            return fail(a.pane, "\(name) didn't close: it's still here, unmoved.")
+            return fail(a.pane, "\(name) didn't close: it's still there, unmoved.")
         }
         let there: (cwd: String, session: String)
         do {
-            there = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd)
+            there = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd, from: src)
         } catch {
-            await back(a, "Not moved (\(error.localizedDescription)): \(a.kind) is back here.")
+            await back(a, "Not moved (\(error.localizedDescription)): \(a.kind) is back where it was.")
             return
         }
-        notes[a.pane] = "Starting \(a.kind) on \(m)…"
+        notes[a.pane] = "Starting \(a.kind) on \(place)…"
         do {
-            _ = try await Client.local.resume(cwd: Place.on(m, there.cwd), kind: a.kind, session: there.session,
-                                              label: "move \(a.kind) · \(a.folder) → \(m)")
+            _ = try await Client.local.resume(cwd: m == Boat.here ? there.cwd : Place.on(m, there.cwd), kind: a.kind, session: there.session,
+                                              label: "move \(a.kind) · \(a.folder) → \(place)")
         } catch {
-            await back(a, "reflexd didn't start it on \(m): \(a.kind) is back here.")
+            await back(a, "reflexd didn't start it on \(place): \(a.kind) is back where it was.")
             return
         }
-        guard await until(seconds: 60, { Store.shared.state.agents.contains { $0.machine == m && $0.session == there.session } }) else {
-            return fail(a.pane, "\(name) didn't come up on \(m): resume it from Recent sessions.")
+        let arrived = { Store.shared.state.agents.first { Boat.name($0.machine) == m && $0.session == there.session } }
+        guard await until(seconds: 60, { arrived() != nil }) else {
+            return fail(a.pane, "\(name) didn't come up on \(place): resume it from Recent sessions.")
         }
         notes[a.pane] = nil
-        if let moved = Store.shared.state.agents.first(where: { $0.machine == m && $0.session == there.session }) {
+        if let moved = arrived() {
             // Its window is the one there now.
             AppDelegate.current?.closedSession(a.pane)
             AppDelegate.current?.showPane(moved.pane)
@@ -275,8 +284,8 @@ final class HerdrMove: ObservableObject {
     /// window, which says why.
     private func back(_ a: AgentInfo, _ why: String) async {
         fail(a.pane, why)
-        _ = try? await Client.local.resume(cwd: a.cwd, kind: a.kind, session: a.session, label: "resume \(a.kind) · \(a.folder)")
-        let here = { Store.shared.state.agents.first { !$0.remote && $0.session == a.session && $0.pane != a.pane } }
+        _ = try? await Client.local.resume(cwd: a.remote ? Place.on(a.machine, a.cwd) : a.cwd, kind: a.kind, session: a.session, label: "resume \(a.kind) · \(a.folder)")
+        let here = { Store.shared.state.agents.first { $0.machine == a.machine && $0.session == a.session && $0.pane != a.pane } }
         guard await until(seconds: 30, { here() != nil }), let b = here() else { return }
         notes[a.pane] = nil
         notes[b.pane] = why

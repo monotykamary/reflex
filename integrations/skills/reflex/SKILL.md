@@ -1,15 +1,17 @@
 ---
 name: reflex
-description: Move this agent session to another machine (a boat.dev sandbox, or a machine herdr-core has added) with Reflex, keeping the conversation. Use when the user asks to move, send or continue this session on boat, a sandbox, a VM or another machine, or when Reflex asks you to build the user's boat template.
+description: Move this agent session between machines (this Mac, the user's other Macs, a boat.dev sandbox) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on boat, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's boat template, or when a file or folder you need is on the Mac this session came from.
 ---
 
 # Moving a session with Reflex
 
-Reflex (the Mac app that runs your terminal) moves a session between turns:
-it closes you here and resumes the same conversation on the other machine, in
-the same project at the same `~` path. You can't move yourself mid-turn, so you
-prepare the machine, ask Reflex, and end your turn. The user approves every
-move in Reflex unless they set auto-approve in Settings.
+Reflex (the Mac app that runs your terminal, on this Mac or the one that
+moved you here) moves a session between turns: it closes you where you are
+and resumes the same conversation on the other machine, in the same project
+at the same `~` path. You can't move yourself mid-turn, so you say where and
+what the work needs, and end your turn. The user approves every move in
+Reflex unless they set auto-approve in Settings. From another machine,
+`reflex home` reaches that Reflex over herdr-core's line.
 
 Everything goes through the `reflex` command (`reflex --help`). If it isn't on
 PATH, it's at `/Applications/Reflex.app/Contents/Resources/scripts/reflex.sh`.
@@ -71,6 +73,9 @@ list of every file you read to decide (the manifest's `inputs`).
   `~/.runpod/ssh/` (GPU jobs), and the files in `~/.local/share/supercomputer/live/keys/`
   (each file or folder by name; no globs). Check it there with a one-line job in a project
   that has an image (`supercomputer run --jobs ... --class interactive`).
+- **cswap** (claude-swap): leave it out of the template. `reflex creds`
+  installs it on each machine Reflex makes, imports the accounts and
+  activates the one active here.
 - **The CLIs the user's instructions rely on** (`gh`, `bun`, `uv`, a linter):
   install those that are missing.
 - `reflex skill install --on $NAME`, so the agent there has this skill too.
@@ -114,21 +119,20 @@ reflex snapshot $NAME --manifest /path/to/manifest.json
 
 ## 4. Move
 
-On the machine you built (it's set up already), on a new one from the
-template, or on the machine Reflex named when it asked you to move:
+Wherever you are (this Mac, another Mac, a boat sandbox), Reflex does the
+copying, through the Mac it runs on: you say where to and what the work
+needs. The machine is one Reflex named when it asked you to move, `here`
+(the Mac Reflex runs on), one from `reflex home machines`, or a new boat
+machine from the template (`reflex machine new --template`, on a Mac with
+Reflex, when you have no machine yet).
 
-```sh
-NAME=$(reflex machine new --template)   # only when you have no machine yet
-reflex creds $NAME                      # the user's logins, mcporter, the manifest's secrets
-```
-
-### Bring everything the work needs
+### Say everything the work needs
 
 The session should carry on there as if nothing moved. Only you know what
 this work stands on, so before asking, go back over the conversation and
 list every path it used: what you read, wrote, ran or were given.
 
-- **This project**, and **every other repository** you worked in. A
+- **Every other repository** you worked in (this project goes anyway). A
   worktree needs its repository too (the history lives there).
 - **Files the user gave you**: a document in `~/Downloads`, a screenshot on
   the Desktop, a spec in `~/Documents`, a data set.
@@ -136,53 +140,46 @@ list every path it used: what you read, wrote, ran or were given.
   folders (in `/tmp` too), generated data the next step reads, a local
   config the project needs.
 - **Gitignored files the work needs** (a handoff note in `private/`, a
-  `.env` the tests read).
-- **Tools** the next steps run that the template lacks: install them there.
+  `.env` the tests read): name each, since the project goes as git sees it.
 
-Then copy them, each to the same path there (`~/x` is `~/x`, `/tmp/x` is
-`/tmp/x`):
-
-```sh
-reflex sync $NAME                                   # this project (git's view, plus .git)
-reflex sync $NAME ~/code/other-repo                 # each other repository or worktree
-reflex sync $NAME --include private/handoff.md      # an ignored file the work needs
-reflex copy $NAME ~/Downloads/spec.pdf ~/notes/run-3   # anything else, as it is
-```
-
-`reflex sync` copies a repository as git sees it: tracked and untracked
-files and `.git`, not ignored ones (name those with `--include`). Worktrees
-in `/tmp` keep their paths, and Reflex points their `.git` files at the
-copies. `reflex copy` takes files and folders as they are. Leave out what
-can be rebuilt there (`node_modules`, build output, caches), and say what's
-too big to copy rather than waiting an hour. On a machine Reflex made, a
-file with a key the work needs may go (the machine holds the user's logins
-already); never into the template.
-
-Check it there: `hc exec --on $NAME -- sh -lc 'cd ~/... && git status'`,
-and that a file the next step needs is where it reads it.
+Leave out what can be rebuilt there (`node_modules`, build output, caches),
+and say what's too big to copy rather than waiting an hour. Then ask:
 
 ```sh
-reflex move self --to $NAME
+reflex move self --to NAME ~/code/other-repo ~/Downloads/spec.pdf private/handoff.md
 ```
 
-Then tell the user in a line or two where you're going, what you copied and
-what you left behind, and **end your turn**. Reflex copies this conversation
-(its subagents' transcripts and Claude's memory for this project too) while
-you're still here, closes you once you're idle, and resumes this conversation
-there. If the user pressed the move button, the move is approved already;
-otherwise they approve it in Reflex. Commit nothing just for the move.
-
-To a machine Reflex didn't make (`hc machine ls`): copying and
-`reflex move self` work the same. Run `reflex creds NAME --any` only after the
-user says to copy their logins there.
+Reflex answers at once (or says it doesn't know NAME). It copies this
+project as git sees it (tracked and untracked files and `.git`), each path
+you named (a repository as git sees it, anything else as it is), your
+logins to a machine Reflex made, and this conversation (its subagents'
+transcripts and Claude's memory for the project too), each to the same
+path there: `~/x` is `~/x`, `/tmp/x` is `/tmp/x`, and worktrees' `.git`
+files point at the copies. Tell the user in a line or two where you're
+going, what you named and what you left behind, and **end your turn**: it
+closes you once you're idle and resumes this conversation there. If the
+user pressed the move button, the move is approved already; otherwise
+they approve it in Reflex. Commit nothing just for the move.
 
 ## After a move
 
-On the other machine `$HOME` differs (`/home/user` on boat), but what you
-copied is at the same `~` path and the conversation is the one you had. Paths in earlier
-messages that start with the old home are now under the new one. A tool
-that's missing: install it there. A file you left behind is still on the Mac:
-tell the user what it is. Don't move back on your own.
+On the other machine `$HOME` may differ (`/home/user` on boat), but what was
+copied is at the same `~` path and the conversation is the one you had.
+Paths in earlier messages that start with the old home are now under the
+new one. A tool that's missing: install it there.
+
+### Something missing? Ask the Reflex that moved you
+
+The Mac that moved this session is still there, a line away:
+
+```sh
+reflex home ls ~/Downloads             # what's in a folder where you came from
+reflex home fetch ~/Downloads/spec.pdf ~/code/notes   # copy them here, same ~ path
+reflex home machines                   # the machines that Reflex reaches
+```
+
+The user allows each (or Settings allows them); `fetch` waits until the
+files are here, then prints where they went. Don't move back on your own.
 
 ## When it fails
 

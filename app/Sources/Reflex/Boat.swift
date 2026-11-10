@@ -25,13 +25,18 @@ enum Boat {
     static func rebuildPrompt(_ changed: [String]) -> String {
         "Use the reflex skill to rebuild my boat template (changed here: \(changed.joined(separator: ", "))), then move this session to boat, with everything this work needs."
     }
-    /// The window's button, to a machine that's ready: only the agent knows
-    /// what its work needs (other repositories, worktrees, files from
-    /// Downloads), so it copies them and asks; the button was the OK.
+    /// The window's button: only the agent knows what its work needs (other
+    /// repositories, worktrees, files from Downloads), so it says, and Reflex
+    /// copies them from wherever the agent is. The button was the OK.
     static func movePrompt(_ machine: String, made: Bool) -> String {
-        let what = made ? "a new boat machine made from my template" : "my machine \(machine)"
-        return "Move this session to \(machine) (\(what)) with the reflex skill: copy everything this work needs there, then reflex move self --to \(machine)."
+        let what = machine == here ? "this Mac, where Reflex runs" : made ? "a new boat machine made from my template" : "my machine \(machine)"
+        return "Move this session to \(machine == here ? "here" : machine) (\(what)) with the reflex skill: work out everything this work needs besides this project, then reflex move self --to \(machine == here ? "here" : machine) PATH..."
     }
+
+    /// This Mac, as a place to move to (reflex's ".").
+    nonisolated static let here = "."
+    /// A machine as reflex names it: "." for this Mac ("" in AgentInfo).
+    static func name(_ machine: String) -> String { machine.isEmpty ? here : machine }
 
     private nonisolated(unsafe) static var boatFound: (at: Date, yes: Bool) = (.distantPast, false)
     /// The boat CLI is on the login PATH (looked for at most every 30 s).
@@ -70,10 +75,30 @@ enum Boat {
         try await reflex(["machine", "new"] + (template ? ["--template"] : []), timeout: 300)
     }
 
-    /// The project around `dir`, at the same ~ path there: that path.
-    /// `ifMissing`: only when it isn't there yet (the agent copied it).
-    static func sync(_ machine: String, _ dir: String, ifMissing: Bool = false) async throws -> String {
-        try await reflex(["sync", machine, dir] + (ifMissing ? ["--if-missing"] : []), timeout: 3600)
+    /// The project around `dir` (on `from`), at the same ~ path there: that path.
+    static func sync(_ machine: String, _ dir: String, from: String = here) async throws -> String {
+        try await reflex(["sync", machine, dir, "--from", from], timeout: 3600)
+    }
+
+    /// What an agent said its work needs, from where it is.
+    static func bring(_ machine: String, _ paths: [String], from: String) async throws {
+        guard !paths.isEmpty else { return }
+        _ = try await reflex(["bring", machine] + paths + ["--from", from], timeout: 3600)
+    }
+
+    static func copy(_ machine: String, _ paths: [String], from: String) async throws -> String {
+        try await reflex(["copy", machine] + paths + ["--from", from], timeout: 3600)
+    }
+
+    static func list(_ path: String, from: String) async throws -> String {
+        try await reflex(["list", path, "--from", from], timeout: 60)
+    }
+
+    /// The answer to a request asked on `machine` (reflex home).
+    static func reply(_ machine: String, _ id: String, ok: Bool, message: String, output: String = "") async {
+        let body: [String: Any] = ["ok": ok ? 1 : 0, "message": message, "output": output]
+        guard let data = try? JSONSerialization.data(withJSONObject: body), let json = String(data: data, encoding: .utf8) else { return }
+        _ = try? await reflex(["bus", "reply", machine, id, json], timeout: 60)
     }
 
     static func creds(_ machine: String) async throws { _ = try await reflex(["creds", machine]) }
@@ -82,8 +107,8 @@ enum Boat {
     /// session to resume there. Again later: only what it wrote since (a
     /// long session is copied while the agent is still here; after its
     /// close, the last lines).
-    static func session(_ machine: String, kind: String, session: String, cwd: String) async throws -> (cwd: String, session: String) {
-        let out = try await reflex(["session", machine, kind, session, cwd], timeout: 3600)
+    static func session(_ machine: String, kind: String, session: String, cwd: String, from: String = here) async throws -> (cwd: String, session: String) {
+        let out = try await reflex(["session", machine, kind, session, cwd, "--from", from], timeout: 3600)
         let parts = out.split(separator: "\t", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { throw Failure(message: "reflex session said \(out)") }
         return (parts[0], parts[1])
@@ -114,8 +139,10 @@ enum Boat {
         return !targets.isEmpty && targets.allSatisfy { (try? Data(contentsOf: $0)) == want }
     }
 
-    /// After an update: the skill again where you have it, and the link.
+    /// After an update: the skill again where you have it, and the link
+    /// (`reflex` on PATH always: other machines' sessions reach it).
     static func updateInstalled() {
+        linkCommand()
         guard skillTargets.contains(where: { FileManager.default.fileExists(atPath: $0.path) }), !skillInstalled else { return }
         install()
     }
@@ -130,14 +157,19 @@ enum Boat {
             try? fm.removeItem(at: t)
             if (try? fm.copyItem(at: skill, to: t)) == nil { ok = false }
         }
+        return linkCommand() && ok
+    }
+
+    /// ~/.local/bin/reflex, this version's.
+    @discardableResult
+    static func linkCommand() -> Bool {
+        let fm = FileManager.default
         let bin = URL(fileURLWithPath: NSHomeDirectory()).appendingPathComponent(".local/bin")
         try? fm.createDirectory(at: bin, withIntermediateDirectories: true)
         let link = bin.appendingPathComponent("reflex")
-        if (try? fm.destinationOfSymbolicLink(atPath: link.path)) != script {
-            try? fm.removeItem(at: link)
-            if (try? fm.createSymbolicLink(atPath: link.path, withDestinationPath: script)) == nil { ok = false }
-        }
-        return ok
+        guard (try? fm.destinationOfSymbolicLink(atPath: link.path)) != script else { return true }
+        try? fm.removeItem(at: link)
+        return (try? fm.createSymbolicLink(atPath: link.path, withDestinationPath: script)) != nil
     }
 }
 
@@ -197,9 +229,12 @@ final class MoveRequests: ObservableObject {
     struct Request: Identifiable, Equatable {
         let id: String
         let pane: String
+        /// Where to, as this Reflex names it ("." for this Mac).
         let to: String
         /// To a machine Reflex made (a boat sandbox).
         let made: Bool
+        /// What the agent said its work needs besides its project.
+        var paths: [String] = []
     }
 
     @Published private(set) var pending: [Request] = []
@@ -211,48 +246,33 @@ final class MoveRequests: ObservableObject {
     func expect(_ pane: String, to machine: String?) { expected[pane] = (machine, Date()) }
     func forget(_ pane: String) { expected[pane] = nil }
 
-    private var dir: URL { Settings.supportDir.appendingPathComponent("boat/requests", isDirectory: true) }
-    private var timer: Timer?
-
-    func start() {
-        guard timer == nil else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            MainActor.assumeIsolated { MoveRequests.shared.scan() }
+    /// A move an agent asked for (through the bus): this Reflex's to serve
+    /// when it knows the machine. "here" / "home" is this Mac.
+    func add(pane: String, id: String, to raw: String, paths: [String]) -> Bool {
+        let to = ["here", "home", ".", "this mac"].contains(raw.lowercased()) ? Boat.here : raw
+        guard to == Boat.here || CoreMachines.known.contains(where: { $0.name == to && $0.state == "connected" }) else { return false }
+        guard Store.shared.state.agents.contains(where: { $0.pane == pane }) else {
+            NSLog("Reflex: move request from %@ to %@: no such agent here", pane, to)
+            return true
         }
+        let r = Request(id: id, pane: pane, to: to, made: Boat.made(to), paths: paths)
+        NSLog("Reflex: %@ asks to move to %@ (%d paths)", pane, to, paths.count)
+        if autoApproved(r) {
+            approve(r)
+        } else {
+            pending.removeAll { $0.pane == pane }
+            pending.append(r)
+            // Seen where it's asked: its terminal, in front.
+            AppDelegate.current?.showPane(r.pane)
+            NSApp.requestUserAttention(.informationalRequest)
+        }
+        return true
     }
 
-    private struct File: Decodable {
-        let pane: String
-        let to: String
-        let made: Bool?
-    }
-
-    private func scan() {
-        let fm = FileManager.default
-        guard let names = try? fm.contentsOfDirectory(atPath: dir.path) else { return }
-        for name in names where name.hasSuffix(".json") && !pending.contains(where: { $0.id == name }) {
-            let url = dir.appendingPathComponent(name)
-            guard let data = try? Data(contentsOf: url), let f = try? JSONDecoder().decode(File.self, from: data) else {
-                try? fm.removeItem(at: url)
-                continue
-            }
-            let r = Request(id: name, pane: f.pane, to: f.to, made: f.made ?? Boat.made(f.to))
-            guard Store.shared.state.agents.contains(where: { $0.pane == r.pane }) else {
-                try? fm.removeItem(at: url)
-                continue
-            }
-            if autoApproved(r) {
-                approve(r, file: url)
-            } else {
-                pending.append(r)
-                // Seen where it's asked: its terminal, in front.
-                AppDelegate.current?.showPane(r.pane)
-                NSApp.requestUserAttention(.informationalRequest)
-            }
-        }
-        // An agent that went away takes its question with it.
+    /// An agent that went away takes its question with it.
+    func prune() {
         let live = Set(Store.shared.state.agents.map(\.pane))
-        for r in pending where !live.contains(r.pane) { drop(r) }
+        pending.removeAll { !live.contains($0.pane) }
     }
 
     private func autoApproved(_ r: Request) -> Bool {
@@ -269,22 +289,13 @@ final class MoveRequests: ObservableObject {
 
     func request(for pane: String) -> Request? { pending.first { $0.pane == pane } }
 
-    func approve(_ r: Request) { approve(r, file: dir.appendingPathComponent(r.id)) }
-
-    private func approve(_ r: Request, file: URL) {
-        drop(r)
-        try? FileManager.default.removeItem(at: file)
-        guard let a = Store.shared.state.agents.first(where: { $0.pane == r.pane }) else { return }
-        // The agent asked: it copied what the work needs.
-        HerdrMove.shared.move([a], to: r.to, prepared: true)
-    }
-
-    func decline(_ r: Request) { drop(r) }
-
-    private func drop(_ r: Request) {
+    func approve(_ r: Request) {
         pending.removeAll { $0.id == r.id }
-        try? FileManager.default.removeItem(at: dir.appendingPathComponent(r.id))
+        guard let a = Store.shared.state.agents.first(where: { $0.pane == r.pane }) else { return }
+        HerdrMove.shared.move([a], to: r.to, with: r.paths)
     }
+
+    func decline(_ r: Request) { pending.removeAll { $0.id == r.id } }
 }
 
 /// How long Reflex's boat machines stay up. Each starts with an hour; while

@@ -265,7 +265,9 @@ enum CoreMachines {
 
     /// A boat machine Reflex made (scripts/reflex.sh keeps a record of each).
     static func madeByReflex(_ name: String) -> Bool {
-        !name.contains("/") && FileManager.default.fileExists(atPath: Settings.supportDir.appendingPathComponent("boat/machines/\(name)").path)
+        guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else { return false }
+        var dir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: Settings.supportDir.appendingPathComponent("boat/machines/\(name)").path, isDirectory: &dir) && !dir.boolValue
     }
 
     /// Forget the saved connection, not the terminals running on that Mac.
