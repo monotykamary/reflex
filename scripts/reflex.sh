@@ -46,6 +46,8 @@
 # sandbox and adds it as a temporary one. Nothing here prints a secret.
 set -eu
 
+# (boat's installer, and Reflex giving a Mac your login, put it here.)
+[ -d "$HOME/.ascii/bin" ] && case ":$PATH:" in *":$HOME/.ascii/bin:"*) ;; *) PATH="$PATH:$HOME/.ascii/bin" ;; esac
 DATA=${REFLEX_DATA:-"$HOME/Library/Application Support/Reflex"}
 DIR="$DATA/boat"
 TEMPLATE=${REFLEX_TEMPLATE:-reflex-template}
@@ -78,6 +80,20 @@ jget() {
 record() { echo "$DIR/machines/$1"; }
 boat_id() { [ -f "$(record "$1")" ] && sed -n 1p "$(record "$1")"; }
 ours() { [ -f "$(record "$1")" ]; }
+# How herdr-core here reaches a machine (its --via command).
+target_of() { # target_of NAME
+  hc machine ls --json 2>/dev/null | NAME=$1 perl -MJSON::PP -0777 -ne '
+    for (@{ JSON::PP->new->decode($_)->{machines} // [] }) { if ($_->{name} eq $ENV{NAME}) { print $_->{target} // ""; exit 0 } }
+    exit 1'
+}
+# A boat sandbox this Mac looks after: one it made, or one another Mac shared
+# (so it stays up, and comes back, with that Mac off). Its boat id.
+sandbox_id() { # sandbox_id NAME
+  if ours "$1"; then boat_id "$1"; return; fi
+  [ -f "$DIR/shared/$1" ] || return 1
+  _st=$(target_of "$1") || return 1
+  printf '%s' "$_st" | perl -ne 'print $1 if /boat ssh (bx_\w+)/' | grep . || return 1
+}
 
 # Run a shell line there, stdin passed through, its exit code back. "."
 # is this Mac. (Helpers keep to their own _names: sh has no locals.)
@@ -205,18 +221,19 @@ machine_rm() {
 
 # Its boat sandbox: how long it stays up, its state, and back up again.
 machine_extend() { # machine_extend NAME SECONDS
-  ours "$1" || die "$1 isn't a machine Reflex made"
-  boat extend "$(boat_id "$1")" --ttl "$2" --json --no-update >/dev/null 2>&1 || die "boat extend $(boat_id "$1") failed"
+  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
+  boat extend "$_id" --ttl "$2" --json --no-update >/dev/null 2>&1 || die "boat extend $_id failed"
 }
 machine_state() { # machine_state NAME: boat's word for it (running, idle, stopped...)
-  ours "$1" || die "$1 isn't a machine Reflex made"
-  boat info "$(boat_id "$1")" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $(boat_id "$1") failed"
+  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
+  boat info "$_id" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $_id failed"
   echo
 }
 machine_resume() { # machine_resume NAME [--type T]: running (at that size) and connected again
-  ours "$1" || die "$1 isn't a machine Reflex made"
+  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
   _rt=""; [ "${2:-}" = --type ] && _rt=${3:-}
-  _id=$(boat_id "$1")
+  # (Added again the way it was reached, should its herdr-core be a new one.)
+  _via=$(target_of "$1" 2>/dev/null || true); [ -n "$_via" ] || _via="boat ssh $_id"
   # (Already running, after all: nothing to resume.)
   _st=$(machine_state "$1" 2>/dev/null || true)
   if [ "$_st" = stopping ]; then
@@ -243,7 +260,7 @@ machine_resume() { # machine_resume NAME [--type T]: running (at that size) and 
     if [ $i = 20 ] && hc machine ls --json 2>/dev/null | grep -q "different core answers"; then
       say "$1 came back with a new herdr-core: adding it again"
       hc machine rm "$1" >/dev/null 2>&1 || true
-      hc machine add --via "boat ssh $_id" --name "$1" --temp --install --json >/dev/null 2>&1 || die "hc machine add $1 failed"
+      hc machine add --via "$_via" --name "$1" --temp --install --json >/dev/null 2>&1 || die "hc machine add $1 failed"
     fi
     [ $i -lt 180 ] || die "$1 is running again but herdr-core hasn't reconnected (hc machine ls)"
     sleep 1
@@ -260,6 +277,25 @@ peers() {
     for (@{$j->{machines}}) { print "$_->{name}\n" if $_->{state} eq "connected" && !$_->{temporary} }'
 }
 SHARED='$HOME/Library/Application Support/Reflex/boat/shared'
+BOAT_LOGIN="$HOME/Library/Application Support/ascii/boat/config.json"
+
+# The boat CLI on PEER when it's logged in there (its path), else nothing.
+peer_boat() { # peer_boat PEER
+  rsh "$1" 'b=$(PATH="$HOME/.ascii/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH" command -v boat) && PATH="$(dirname "$b"):$PATH" boat status --check --no-update >/dev/null 2>&1 && printf %s "$b"' 2>/dev/null || true
+}
+
+# Your boat login (and the CLI, if it's missing) on another of your Macs
+# that has none: it reaches your sandboxes itself, and keeps them up and
+# resumes them while this Mac is off. A login of its own is left alone.
+give_boat() { # give_boat PEER BOAT
+  [ -f "$BOAT_LOGIN" ] || return 1
+  rsh "$1" '[ ! -f "$HOME/Library/Application Support/ascii/boat/config.json" ]' >/dev/null 2>&1 || return 1
+  if ! rsh "$1" 'PATH="$HOME/.ascii/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH" command -v boat' >/dev/null 2>&1; then
+    put "$1" "$2" .ascii/bin/boat && rsh "$1" 'chmod 700 "$HOME/.ascii/bin/boat"' >/dev/null 2>&1 || return 1
+  fi
+  put "$1" "$BOAT_LOGIN" "Library/Application Support/ascii/boat/config.json" || return 1
+  say "$1 has your boat login now"
+}
 
 # The mesh: every machine this Mac's herdr-core reaches, in each other Mac's
 # too (each Reflex shares its own, so they all converge). A boat sandbox
@@ -275,7 +311,10 @@ mesh_sync() {
     rsh "$p" "[ -d \"\$HOME/Library/Application Support/Reflex\" ]" >/dev/null 2>&1 || continue
     rsh "$p" 'export PATH="$HOME/.local/bin:$PATH"; hc machine ls --json' > "$T/theirs.json" 2>/dev/null || continue
     _from=$(rsh "$p" "cd \"$SHARED\" 2>/dev/null && grep -lx $(q "$_me") * 2>/dev/null; true" 2>/dev/null || true)
-    _pb=$(rsh "$p" 'b=$(PATH="$HOME/.ascii/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH" command -v boat) && PATH="$(dirname "$b"):$PATH" boat status --check --no-update >/dev/null 2>&1 && printf %s "$b"' 2>/dev/null || true)
+    _pb=$(peer_boat "$p")
+    if [ -z "$_pb" ] && [ -n "$_boat" ] && boat status --check --no-update >/dev/null 2>&1; then
+      give_boat "$p" "$_boat" && _pb=$(peer_boat "$p")
+    fi
     ME="$_me" PEER="$p" PB="$_pb" BOAT="$_boat" FROM="$_from" perl -MJSON::PP -e '
       sub load { local $/; open my $f, "<", shift or return []; JSON::PP->new->decode(<$f>)->{machines} // [] }
       my @mine = @{ load($ARGV[0]) }; my @theirs = @{ load($ARGV[1]) };
@@ -291,14 +330,19 @@ mesh_sync() {
         # (Shared with this Mac by another: that one shares it.)
         next if -e "$ENV{HOME}/Library/Application Support/Reflex/boat/shared/$m->{name}";
         my $t = $theirs{$m->{name}};
-        # Reached there already, short-lived and not yet marked: its Reflex
-        # shows it once marked shared.
-        if ($t && $t->{state} eq "connected" && $m->{temporary} && !$from{$m->{name}}) { print "mark\t$m->{name}\n"; next }
-        next if $t && ($t->{state} eq "connected" || !$from{$m->{name}});
-        next if !$t && $hosts{lc($m->{host} // "")};
+        my ($id) = ($m->{target} // "") =~ /^\S*boat ssh (bx_\w+)$/;
+        # A sandbox it reaches through this Mac, now that it has a boat
+        # login: directly (it stays reachable with this Mac off).
+        my $redo = $t && $id && length $ENV{PB} && $from{$m->{name}} && ($t->{target} // "") =~ /\srelay$/;
+        unless ($redo) {
+          # Reached there already, short-lived and not yet marked: its Reflex
+          # shows it once marked shared.
+          if ($t && $t->{state} eq "connected" && $m->{temporary} && !$from{$m->{name}}) { print "mark\t$m->{name}\n"; next }
+          next if $t && ($t->{state} eq "connected" || !$from{$m->{name}});
+          next if !$t && $hosts{lc($m->{host} // "")};
+        }
         my $via;
-        if (($m->{target} // "") =~ /^\S*boat ssh (bx_\w+)$/) {
-          my $id = $1;
+        if ($id) {
           if (length $ENV{PB}) { $via = "$ENV{PB} ssh $id" }
           elsif ($back && length $ENV{BOAT}) { $via = qq{sh -c '"'"'exec ssh -T -o BatchMode=yes $back->{name} $ENV{BOAT} ssh $id "\$(printf %q "\$1")"'"'"' relay} }
         } elsif ($back && !$m->{via}) {

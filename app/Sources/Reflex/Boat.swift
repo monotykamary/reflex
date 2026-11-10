@@ -388,16 +388,33 @@ final class BoatLifetime: ObservableObject {
         tick()
     }
 
-    /// The machines Reflex made (their records).
+    /// The machines Reflex made here (their records).
     private var made: [String] {
         let dir = Settings.supportDir.appendingPathComponent("boat/machines")
         return ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") }
     }
 
+    /// The boat sandboxes another Mac shared with this one. Looked after
+    /// here too, so they stay up and come back with that Mac off (it takes
+    /// a boat login here, which the mesh gives a Mac that has none).
+    /// Renewing sets the hour again: two Macs doing it are the same as one.
+    private var shared: [String] {
+        let dir = Settings.supportDir.appendingPathComponent("boat/shared")
+        let names = Set(((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") })
+        return CoreMachines.known.filter { names.contains($0.name) && $0.target.contains("boat ssh bx_") }.map(\.name)
+    }
+
+    /// Whether the Mac that shared `m` is reachable (it says when it stops).
+    private func ownerAround(_ m: String) -> Bool {
+        func base(_ s: String) -> String { s.lowercased().replacingOccurrences(of: ".local", with: "") }
+        guard let owner = CoreMachines.sharedFrom(m), !owner.isEmpty else { return false }
+        return CoreMachines.known.contains { $0.state == "connected" && !$0.host.isEmpty && base($0.host) == base(owner) }
+    }
+
     static func isWorking(_ a: AgentInfo) -> Bool { ["working", "blocked", "busy"].contains(a.status) }
 
     private func tick() {
-        let machines = made
+        let machines = made + shared.filter { !made.contains($0) }
         let agents = Store.shared.state.agents
         let up = Set(CoreMachines.known.filter { $0.state == "connected" }.map(\.name))
         for m in machines where down[m] == nil && !resuming.contains(m) && up.contains(m) {
@@ -440,9 +457,11 @@ final class BoatLifetime: ObservableObject {
             if ["stopped", "stopping", "archived", "suspended"].contains(s), down[m] == nil {
                 down[m] = seen[m] ?? []
                 working[m] = nil
+                NSLog("Reflex: boat stopped %@ (%@), %d agents there", m, s, down[m]?.count ?? 0)
+                // (One Mac says so: the one that made it, else any that sees it.)
+                guard made.contains(m) || !ownerAround(m) else { continue }
                 MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped",
                                   body: "boat stops a sandbox after an hour idle. Its disk is kept 14 days: Resume in its window or Settings → Machines brings it back with its agents.")
-                NSLog("Reflex: boat stopped %@ (%@), %d agents there", m, s, down[m]?.count ?? 0)
                 if !(seen[m] ?? []).isEmpty { NSApp.requestUserAttention(.informationalRequest) }
             }
         }
