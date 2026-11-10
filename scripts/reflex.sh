@@ -739,8 +739,10 @@ list() { # list PATH [--from SRC]
 }
 
 # Reflex's side: wait (up to SECONDS) for requests on MACHINE, take them and
-# print each as a JSON line. Its own, or any nobody took in 20 s.
+# print each as a JSON line. Its own, one that names no Reflex (the
+# machine's own Reflex first: others wait 5 s), or any nobody took in 20 s.
 bus_listen() { # bus_listen MACHINE [SECONDS]
+  _wait=5; [ "$1" = . ] && _wait=0
   rsh "$1" "d=$BUS; mkdir -p \"\$d/out\" \"\$d/in\" \"\$d/taken\"; me=$(q "$(self_id)"); i=0
     age() { echo \$(( \$(date +%s) - \$(stat -c %Y \"\$1\" 2>/dev/null || stat -f %m \"\$1\") )); }
     # (Taken by a Reflex that went away before answering: again.)
@@ -749,7 +751,7 @@ bus_listen() { # bus_listen MACHINE [SECONDS]
       got=''
       for f in \"\$d\"/out/*.json; do
         [ -f \"\$f\" ] || continue
-        if grep -q \"\\\"home\\\":\\\"\$me\\\"\" \"\$f\" || grep -q '\"home\":\"\"' \"\$f\" || [ \$(age \"\$f\") -gt 20 ]; then
+        if grep -q \"\\\"home\\\":\\\"\$me\\\"\" \"\$f\" || { grep -q '\"home\":\"\"' \"\$f\" && [ \$(age \"\$f\") -ge $_wait ]; } || [ \$(age \"\$f\") -gt 20 ]; then
           n=\$(basename \"\$f\")
           mv \"\$f\" \"\$d/taken/\$n\" 2>/dev/null && { cat \"\$d/taken/\$n\"; got=1; }
         fi
