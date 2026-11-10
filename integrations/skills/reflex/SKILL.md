@@ -168,6 +168,11 @@ copied is at the same `~` path and the conversation is the one you had.
 Paths in earlier messages that start with the old home are now under the
 new one. A tool that's missing: install it there.
 
+A boat machine's lifetime is Reflex's to keep: it renews it while you work
+or wait on the user, and lets it stop an hour after you go idle (the disk is
+kept; the user resumes it, with you in the same terminal). Don't extend it
+with `boat extend`, and don't ask the user to.
+
 ### Something missing? Ask the Reflex that moved you
 
 The Mac that moved this session is still there, a line away, and through
