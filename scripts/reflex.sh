@@ -183,10 +183,21 @@ $2"; shift 2 ;;
     tar -C "$top" --no-mac-metadata --no-xattrs --exclude node_modules --exclude .DS_Store -cf "$T/tree.tar" . 2>/dev/null
   fi
   unpack "$m" "$T/tree.tar" "$dest"
-  # A worktree's .git, and a repository's list of its worktrees, name
-  # folders by path: the paths there.
-  rsh "$m" "cd $(q "$dest") && for f in .git .git/worktrees/*/gitdir; do [ -f \"\$f\" ] && sed -i $(q "$(repath "$m")") \"\$f\"; done; true" >/dev/null
+  fixgit "$m" "$dest"
   echo "$dest"
+}
+
+# Git names folders by path in a few small files: a worktree's .git, the
+# repository's list of its worktrees, a submodule's alternates (where its
+# objects are) and remotes, in the project and any repository inside it.
+# Those paths there.
+fixgit() { # fixgit MACHINE DEST
+  rsh "$1" "cd $(q "$2") || exit 0
+    find . -name node_modules -prune -o -name .git -print | while IFS= read -r g; do
+      if [ -f \"\$g\" ]; then echo \"\$g\"
+      else find \"\$g\" \\( -name gitdir -o -name alternates -o -name config -o -name commondir \\) -type f -size -64k; fi
+    done |
+      while IFS= read -r f; do grep -qE $(q "$HOME/|/private/tmp/") \"\$f\" && sed -i $(q "$(repath "$1")") \"\$f\"; done; true" >/dev/null
 }
 
 # Anything, as it is: each file or folder to the same path there.
@@ -509,6 +520,7 @@ case $cmd in
     case $sub in new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;; *) die "machine new|rm|ls" ;; esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;
+  fixgit) fixgit "$1" "$(where "$1" "$(cd "${2:-$PWD}" && pwd -P)")" ;;
   copy) copy "$@" ;;
   creds) creds "$@" ;;
   session) session "$@" ;;

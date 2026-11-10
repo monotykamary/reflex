@@ -61,7 +61,16 @@ list of every file you read to decide (the manifest's `inputs`).
   `reflex creds` copies both on every move, with `~` mapped.
 - **supercomputer.** If `supercomputer` is on PATH here, install it there:
   `curl -LsSf https://astral.sh/uv/install.sh | sh`, then
-  `uv tool install git+https://github.com/monotykamary/supercomputer`.
+  `uv tool install git+https://github.com/monotykamary/supercomputer`. Copy
+  its per-project settings, `~/.local/share/supercomputer/repos/` (each
+  project's image, caches and hooks), to the same path there. Not
+  `live/`: that's this Mac's pool state and policy (its treadmill), and a
+  copy would start a second treadmill there. Its logins go in the
+  manifest's `secrets`: `~/.modal.toml` (it falls back to Modal and opens
+  it before some runs), `~/.runpod/config.toml` and the key files in
+  `~/.runpod/ssh/` (GPU jobs), and the files in `~/.local/share/supercomputer/live/keys/`
+  (each file by name; no folders or globs). Check it there with a one-line job in a project
+  that has an image (`supercomputer run --jobs ... --class interactive`).
 - **The CLIs the user's instructions rely on** (`gh`, `bun`, `uv`, a linter):
   install those that are missing.
 - `reflex skill install --on $NAME`, so the agent there has this skill too.
