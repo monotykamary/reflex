@@ -76,8 +76,8 @@ final class Settings: ObservableObject {
     /// "always".
     @Published var fileApproval: String { didSet { d.set(fileApproval, forKey: "fileApproval") } }
     /// A session elsewhere asking to run a command on this Mac (`reflex home
-    /// run`): "ask", or "macs" (allowed for your other Macs; a boat sandbox
-    /// always asks).
+    /// run`): "ask", "macs" (allowed for your other Macs), or "always"
+    /// (boat sandboxes too).
     @Published var runApproval: String { didSet { d.set(runApproval, forKey: "runApproval") } }
     /// The size of boat machines Reflex makes or resumes: "" (boat's
     /// default, 4 CPUs), "small", "large" or "xlarge".

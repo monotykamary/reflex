@@ -1288,14 +1288,16 @@ private struct TrustSection: View {
             Picker(selection: $s.runApproval) {
                 Text("Ask every time").tag("ask")
                 Text("Allow from my Macs").tag("macs")
+                Text("Always allow").tag("always")
             } label: {
                 Label("Run commands on this Mac", systemImage: "terminal")
             }
-            .help("reflex home run: its window shows the command with Run and Not Now; its output and exit code go back. A boat sandbox always asks: what it read could have been written by anyone.")
+            .help("reflex home run: its window shows the command with Run and Not Now; its output and exit code go back. Always allow includes boat sandboxes: an agent there runs commands here without asking, so what it read (a web page, a repo) could steer what runs on this Mac.")
         } header: {
             Text("What sessions elsewhere may do")
         } footer: {
-            Text("A boat sandbox's commands always ask.").font(Type.meta).foregroundStyle(.secondary)
+            Text(s.runApproval == "always" ? "Commands from boat sandboxes run here without asking." : "Commands from boat sandboxes ask, unless you choose Always allow.")
+                .font(Type.meta).foregroundStyle(.secondary)
         }
     }
 }

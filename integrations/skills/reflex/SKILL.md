@@ -195,8 +195,9 @@ reflex on mini fetch ~/notes/plan.md   # any machine that Reflex reaches, by nam
 reflex on here run 'sw_vers'           # "here": the Mac that Reflex runs on
 ```
 
-The user allows each (or Settings allows them; a boat sandbox's commands
-always ask, so ask for what you need in one command rather than many);
+The user allows each (or Settings allows them; commands from a boat sandbox
+ask unless the user chose Always allow, so ask for what you need in one
+command rather than many);
 `fetch` waits until the files are here, then prints where they went, and
 `run` exits with the command's exit code. Prefer `fetch` for files and
 reading them here. Don't move back on your own.

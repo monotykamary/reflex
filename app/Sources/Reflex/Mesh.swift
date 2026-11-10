@@ -163,9 +163,14 @@ final class HomeRequests: ObservableObject {
 
     private func allowed(_ r: Request) -> Bool {
         if r.op == "run" {
-            // Your other Macs, when Settings says so; a sandbox never.
-            return Settings.shared.runApproval == "macs" && r.machine != Boat.here && !Boat.made(r.machine)
+            switch Settings.shared.runApproval {
+            // Everything, sandboxes too: your choice in Settings.
+            case "always": return true
+            // Your other Macs only.
+            case "macs": return r.machine != Boat.here && !Boat.made(r.machine)
                 && CoreMachines.known.first(where: { $0.name == r.machine })?.temporary == false
+            default: return false
+            }
         }
         switch Settings.shared.fileApproval {
         case "always": return true
