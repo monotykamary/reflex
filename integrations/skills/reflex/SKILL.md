@@ -170,7 +170,9 @@ new one. A tool that's missing: install it there.
 
 ### Something missing? Ask the Reflex that moved you
 
-The Mac that moved this session is still there, a line away:
+The Mac that moved this session is still there, a line away, and through
+it every machine it reaches (`reflex home machines`; `reflex on NAME …` asks
+about one of them):
 
 ```sh
 reflex home ls ~/Downloads             # what's in a folder where you came from
@@ -178,6 +180,8 @@ reflex home fetch ~/Downloads/spec.pdf ~/code/notes   # copy them here, same ~ p
 reflex home machines                   # the machines that Reflex reaches
 reflex home run 'brew list | grep foo' # a command there: its output and exit code come back
 reflex home run --cwd ~/code/app --timeout 300 'git log --oneline -5'
+reflex on mini fetch ~/notes/plan.md   # any machine that Reflex reaches, by name
+reflex on here run 'sw_vers'           # "here": the Mac that Reflex runs on
 ```
 
 The user allows each (or Settings allows them; a boat sandbox's commands

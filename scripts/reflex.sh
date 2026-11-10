@@ -32,6 +32,7 @@
 #                                   repositories (sync) and anything else (copy)
 #   reflex home fetch PATH... | home ls PATH | home machines
 #   reflex home run [--cwd DIR] [--timeout S] COMMAND
+#   reflex on NAME fetch|ls|run ...  the same, on another machine (home --on NAME)
 #                                   from a session Reflex moved: ask the Reflex
 #                                   that moved it, over herdr-core's line
 #   reflex bus listen MACHINE | bus reply MACHINE ID   (Reflex's side)
@@ -681,7 +682,10 @@ ask_home() { # ask_home OP WAIT_SECONDS KEY=VALUE... [-- LIST...]
 }
 
 home() {
-  _hp=""
+  # (--on NAME: that machine instead of the one this session came from, as
+  # the answering Reflex names it; "here" is the Mac it runs on.)
+  _on=""
+  if [ "${1:-}" = --on ]; then [ $# -ge 2 ] || die "home --on NAME ..."; _on=$2; shift 2; fi
   case ${1:-} in
     fetch)
       shift; [ $# -gt 0 ] || die "home fetch PATH..."
@@ -693,11 +697,11 @@ home() {
       done
       shift "$_n"
       say "Asking Reflex for $*... (the user approves it there)"
-      ask_home fetch 1800 -- "$@" ;;
+      ask_home fetch 1800 on="$_on" -- "$@" ;;
     ls)
       shift; p=${1:-~}
       case $p in "$HOME"/*) p="~/${p#"$HOME"/}" ;; esac
-      ask_home ls 600 -- "$p" ;;
+      ask_home ls 600 on="$_on" -- "$p" ;;
     machines) ask_home machines 60 ;;
     run)
       # A shell line on the Mac this session came from (the user allows each
@@ -714,8 +718,8 @@ home() {
       [ $# -gt 0 ] || die "home run [--cwd DIR] [--timeout SECONDS] COMMAND..."
       case $_rc in "$HOME") _rc="~" ;; "$HOME"/*) _rc="~/${_rc#"$HOME"/}" ;; esac
       say "Asking Reflex to run that... (the user allows it there)"
-      ask_home run $((1800 + _rt)) command="$*" dir="$_rc" timeout="$_rt" ;;
-    *) die "home fetch PATH... | home ls PATH | home run COMMAND | home machines" ;;
+      ask_home run $((1800 + _rt)) on="$_on" command="$*" dir="$_rc" timeout="$_rt" ;;
+    *) die "home [--on NAME] fetch PATH... | ls PATH | run COMMAND | machines" ;;
   esac
 }
 
@@ -886,6 +890,7 @@ case $cmd in
   template) template "$@" ;;
   move) move "$@" ;;
   home) home "$@" ;;
+  on) [ $# -ge 2 ] || die "on NAME fetch PATH... | ls PATH | run COMMAND"; _n=$1; shift; home --on "$_n" "$@" ;;
   bus) bus "$@" ;;
   id) self_id ;;
   skill) skill "$@" ;;

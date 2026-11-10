@@ -46,6 +46,8 @@ final class Bus {
         let command: String?
         let dir: String?
         let timeout: String?
+        /// `reflex on NAME …`: that machine, not the session's origin.
+        let on: String?
     }
 
     private func listen(_ m: String) async {
@@ -64,7 +66,17 @@ final class Bus {
     private func handle(_ m: String, _ r: Request) async {
         let local = r.pane ?? ""
         let pane = local.isEmpty ? "" : m == Boat.here ? local : "\(m)/\(local)"
-        let origin = (r.origin ?? "").isEmpty ? Boat.here : r.origin!
+        var origin = (r.origin ?? "").isEmpty ? Boat.here : r.origin!
+        if let on = r.on, !on.isEmpty {
+            if ["here", "home", ".", "this mac"].contains(on.lowercased()) {
+                origin = Boat.here
+            } else if CoreMachines.known.contains(where: { $0.name == on && $0.state == "connected" }) {
+                origin = on
+            } else {
+                await Boat.reply(m, r.id, ok: false, message: "No machine called \(on) here (reflex home machines lists them; \"here\" is the Mac Reflex runs on).")
+                return
+            }
+        }
         switch r.op {
         case "move":
             let to = r.to ?? ""
