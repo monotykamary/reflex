@@ -24,8 +24,11 @@ final class Bus {
         refresh()
     }
 
-    /// One listener per machine that's up (and this Mac).
+    /// One listener per machine that's up (and this Mac), from a list read
+    /// now and then (not one only other screens refresh: just launched, it's
+    /// empty).
     private func refresh() {
+        Task { _ = await CoreMachines.list(fresh: 20) }
         let up = [Boat.here] + CoreMachines.known.filter { $0.state == "connected" }.map(\.name)
         for m in up where listening[m] == nil {
             listening[m] = Task { [weak self] in await self?.listen(m) }
