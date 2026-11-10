@@ -252,7 +252,7 @@ enum CoreMachines {
         let ms = (r["machines"] as? [[String: Any]] ?? []).compactMap { m -> Machine? in
             // Short-lived ones only when Reflex made them (a boat machine):
             // other tools' task sandboxes stay theirs.
-            guard let name = m["name"] as? String, (m["temporary"] as? Bool) != true || madeByReflex(name) else { return nil }
+            guard let name = m["name"] as? String, (m["temporary"] as? Bool) != true || madeByReflex(name) || sharedByReflex(name) else { return nil }
             return Machine(name: name, target: m["target"] as? String ?? m["host"] as? String ?? "",
                            state: m["state"] as? String ?? "", why: m["why"] as? String ?? "",
                            version: m["version"] as? String ?? "", temporary: m["temporary"] as? Bool == true,
@@ -267,6 +267,17 @@ enum CoreMachines {
     }
 
     /// A boat machine Reflex made (scripts/reflex.sh keeps a record of each).
+    /// A sandbox another of your Macs' Reflex made and shared with this one
+    /// (`reflex machine share`): shown here, its lifetime kept there.
+    static func sharedByReflex(_ name: String) -> Bool { sharedFrom(name) != nil }
+
+    /// The Mac that shared it (its name), when another Reflex did.
+    static func sharedFrom(_ name: String) -> String? {
+        guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else { return nil }
+        let url = Settings.supportDir.appendingPathComponent("boat/shared/\(name)")
+        return (try? String(contentsOf: url, encoding: .utf8)).map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+    }
+
     static func madeByReflex(_ name: String) -> Bool {
         guard !name.isEmpty, !name.contains("/"), !name.hasPrefix(".") else { return false }
         var dir: ObjCBool = false

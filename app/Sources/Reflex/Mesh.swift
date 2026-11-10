@@ -315,3 +315,30 @@ enum MachineNotes {
         }
     }
 }
+
+/// The mesh, kept: every minute this Reflex shares the machines its
+/// herdr-core reaches with your other Macs' (`reflex mesh sync`), as theirs
+/// do with it, so a sandbox made on one shows on all.
+@MainActor
+enum MeshSync {
+    private static var timer: Timer?
+    private static var running = false
+
+    static func start() {
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            MainActor.assumeIsolated { MeshSync.run() }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 20) { run() }
+    }
+
+    static func run() {
+        guard !running else { return }
+        running = true
+        Task {
+            if let out = try? await Boat.reflex(["mesh", "sync"], timeout: 600), !out.isEmpty { NSLog("Reflex: mesh: %@", out) }
+            running = false
+            _ = await CoreMachines.list(fresh: 0)
+        }
+    }
+}

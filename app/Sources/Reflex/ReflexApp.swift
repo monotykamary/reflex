@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Agents asking to move (`reflex move self`), and the skill they
         // follow kept at this version once you've used it.
         Bus.shared.start()
+        MeshSync.start()
         EventLog.start()
         StallWatch.shared.start()
         DaemonWatch.shared.start()

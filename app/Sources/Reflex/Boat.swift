@@ -232,11 +232,41 @@ final class BoatTemplate: ObservableObject {
         let exe = Boat.script
         let r = await Blocking.run { MachineSetup.run(env, "/bin/sh", [exe, "template", "--json"], timeout: 10) }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(r.out.utf8)) else { return }
+        apply(reply)
+    }
+
+    private func apply(_ reply: Reply) {
         let built = reply.at ?? ""
         switch reply.state {
         case "current": state = .current(built: built)
         case "stale": state = .stale(built: built, changed: reply.changed ?? [])
         default: state = .none
+        }
+    }
+
+    /// What changed here doesn't matter to the template: it's current.
+    func keep() {
+        let env = ["REFLEX_DATA": Settings.supportDir.path, "HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
+        let exe = Boat.script
+        Task {
+            _ = await Blocking.run { MachineSetup.run(env, "/bin/sh", [exe, "template", "--keep"], timeout: 10) }
+            at = .distantPast
+            await refresh(fresh: 0)
+        }
+    }
+
+    /// An agent rebuilds it, in a new session of its own (no session moves),
+    /// its window open to watch.
+    func rebuild() {
+        let changed: [String]
+        if case .stale(_, let c) = state { changed = c } else { changed = [] }
+        let home = NSHomeDirectory()
+        let prompt = "Use the reflex skill to rebuild my boat template" + (changed.isEmpty ? "" : " (changed here since it was built: \(changed.joined(separator: ", ")))")
+            + ". Don't move this session afterwards; tell me when the new template is saved."
+        Boat.install()
+        Task {
+            guard let p = try? await Client.local.spawn(cwd: home, kind: Settings.shared.harness, text: prompt) else { return }
+            Sessions.watchStart(p.id, cwd: home, open: true)
         }
     }
 }

@@ -6,6 +6,7 @@
 #   reflex machine new [--template | --from SNAPSHOT] [--type T] [--name N]
 #   reflex machine rm NAME          reflex machine ls
 #   reflex machine extend NAME SECONDS | state NAME | resume NAME
+#   reflex mesh sync                every machine here, in your other Macs' too
 #                                   its sandbox's lifetime, state, restart
 #   reflex where MACHINE PATH       the path there (~/x here is ~/x there,
 #                                   /tmp/x is /tmp/x)
@@ -22,7 +23,8 @@
 #   reflex session MACHINE KIND SESSION CWD [--from SRC]
 #                                   again: only what's new since the last time
 #   reflex snapshot MACHINE --manifest FILE
-#   reflex template [--json]        exit 0 current, 1 stale, 2 none
+#   reflex template [--json|--keep] exit 0 current, 1 changed, 2 none
+#                                   (--keep: what's here now is current)
 #   reflex move self --to MACHINE [PATH...]
 #                                   asks Reflex to move this session, and what
 #                                   its work needs; you approve it in the app
@@ -184,6 +186,8 @@ machine_new() {
   done
   # This version of the skill (a template keeps the one it was built with).
   skill install --on "$name" >/dev/null 2>&1 || say "the reflex skill isn't on $name: reflex skill install --on $name"
+  # (Your other Macs see its sessions too.)
+  ( mesh_sync ) >/dev/null 2>&1 || true
   echo "$name"
 }
 
@@ -192,6 +196,7 @@ machine_rm() {
   ours "$name" || die "$name isn't a machine Reflex made: remove it with hc machine rm"
   id=$(boat_id "$name")
   hc machine rm "$name" >/dev/null 2>&1 || true
+  ( machine_unshare "$name" ) >/dev/null 2>&1 || true
   boat delete --yes --no-update "$id" >/dev/null 2>&1 || say "boat delete $id failed: delete it with boat delete"
   rm -f "$(record "$name")"
   rm -rf "$DIR/sent/$name"
@@ -243,7 +248,88 @@ machine_resume() { # machine_resume NAME [--type T]: running (at that size) and 
     [ $i -lt 180 ] || die "$1 is running again but herdr-core hasn't reconnected (hc machine ls)"
     sleep 1
   done
+  # (Another size is another herdr-core there: your other Macs again too.)
+  [ -n "$_rt" ] && { ( mesh_sync ) >/dev/null 2>&1 || true; }
   echo "$1"
+}
+
+# Your other Macs with Reflex (herdr-core's machines that stay, connected).
+peers() {
+  hc machine ls --json 2>/dev/null | perl -MJSON::PP -0777 -e '
+    my $j = JSON::PP->new->decode(<STDIN>);
+    for (@{$j->{machines}}) { print "$_->{name}\n" if $_->{state} eq "connected" && !$_->{temporary} }'
+}
+SHARED='$HOME/Library/Application Support/Reflex/boat/shared'
+
+# The mesh: every machine this Mac's herdr-core reaches, in each other Mac's
+# too (each Reflex shares its own, so they all converge). A boat sandbox
+# goes through that Mac's own boat login when it has one; anything else is
+# relayed through this Mac, the shell line quoted so all of it runs there.
+# One that stopped connecting there (a sandbox resumed at another size is a
+# new herdr-core) is added again; one this Mac no longer has goes.
+mesh_sync() {
+  _me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+  _boat=$(command -v boat 2>/dev/null || true)
+  hc machine ls --json > "$T/mine.json" 2>/dev/null || die "herdr-core isn't answering"
+  for p in $(peers); do
+    rsh "$p" "[ -d \"\$HOME/Library/Application Support/Reflex\" ]" >/dev/null 2>&1 || continue
+    rsh "$p" 'export PATH="$HOME/.local/bin:$PATH"; hc machine ls --json' > "$T/theirs.json" 2>/dev/null || continue
+    _from=$(rsh "$p" "cd \"$SHARED\" 2>/dev/null && grep -lx $(q "$_me") * 2>/dev/null; true" 2>/dev/null || true)
+    _pb=$(rsh "$p" 'b=$(PATH="$HOME/.ascii/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH" command -v boat) && PATH="$(dirname "$b"):$PATH" boat status --check --no-update >/dev/null 2>&1 && printf %s "$b"' 2>/dev/null || true)
+    ME="$_me" PEER="$p" PB="$_pb" BOAT="$_boat" FROM="$_from" perl -MJSON::PP -e '
+      sub load { local $/; open my $f, "<", shift or return []; JSON::PP->new->decode(<$f>)->{machines} // [] }
+      my @mine = @{ load($ARGV[0]) }; my @theirs = @{ load($ARGV[1]) };
+      my %from = map { $_ => 1 } grep { length } split /\n/, $ENV{FROM};
+      my ($peer) = grep { $_->{name} eq $ENV{PEER} } @mine;
+      my ($back) = grep { lc($_->{host} // "") eq lc($ENV{ME}) && !$_->{temporary} } @theirs;
+      my %theirs = map { $_->{name} => $_ } @theirs;
+      my %hosts = map { (lc($_->{host} // "") => 1) } grep { $_->{state} eq "connected" } @theirs;
+      my %mine = map { $_->{name} => 1 } @mine;
+      for my $m (@mine) {
+        next unless $m->{state} eq "connected";
+        next if $m->{name} eq $ENV{PEER} || lc($m->{host} // "") eq lc($peer->{host} // "-");
+        # (Shared with this Mac by another: that one shares it.)
+        next if -e "$ENV{HOME}/Library/Application Support/Reflex/boat/shared/$m->{name}";
+        my $t = $theirs{$m->{name}};
+        # Reached there already, short-lived and not yet marked: its Reflex
+        # shows it once marked shared.
+        if ($t && $t->{state} eq "connected" && $m->{temporary} && !$from{$m->{name}}) { print "mark\t$m->{name}\n"; next }
+        next if $t && ($t->{state} eq "connected" || !$from{$m->{name}});
+        next if !$t && $hosts{lc($m->{host} // "")};
+        my $via;
+        if (($m->{target} // "") =~ /^\S*boat ssh (bx_\w+)$/) {
+          my $id = $1;
+          if (length $ENV{PB}) { $via = "$ENV{PB} ssh $id" }
+          elsif ($back && length $ENV{BOAT}) { $via = qq{sh -c '"'"'exec ssh -T -o BatchMode=yes $back->{name} $ENV{BOAT} ssh $id "\$(printf %q "\$1")"'"'"' relay} }
+        } elsif ($back && !$m->{via}) {
+          $via = qq{sh -c '"'"'exec ssh -T -o BatchMode=yes $back->{name} "ssh -T -o BatchMode=yes $m->{target} \$(printf %q "\$(printf %q "\$1")")"'"'"' relay};
+        }
+        next unless $via;
+        print join("\t", "add", $m->{name}, $via, $m->{temporary} ? "--temp" : ""), "\n";
+      }
+      for my $n (sort keys %from) { print "drop\t$n\n" unless $mine{$n} }
+    ' "$T/mine.json" "$T/theirs.json" > "$T/plan"
+    while IFS="$(printf '\t')" read -r _do _n _via _temp; do
+      case $_do in
+        add)
+          rsh "$p" "export PATH=\"\$HOME/.local/bin:\$PATH\"; hc machine rm $(q "$_n") >/dev/null 2>&1; hc machine add --via $(q "$_via") --name $(q "$_n") $_temp --install --json >/dev/null 2>&1 && mkdir -p \"$SHARED\" && echo $(q "$_me") > \"$SHARED/\"$(q "$_n")" >/dev/null 2>&1 \
+            && say "$p reaches $_n now" || say "couldn't share $_n with $p" ;;
+        mark)
+          rsh "$p" "mkdir -p \"$SHARED\" && echo $(q "$_me") > \"$SHARED/\"$(q "$_n")" >/dev/null 2>&1 && say "$p shows $_n now" || true ;;
+        drop)
+          rsh "$p" "export PATH=\"\$HOME/.local/bin:\$PATH\"; hc machine rm $(q "$_n") >/dev/null 2>&1; rm -f \"$SHARED/\"$(q "$_n")" >/dev/null 2>&1 \
+            && say "$p no longer has $_n" || true ;;
+      esac
+    done < "$T/plan"
+  done
+}
+
+# A machine gone from here (removed): gone from the Macs it was shared with.
+machine_unshare() { # machine_unshare NAME
+  _me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
+  for p in $(peers); do
+    rsh "$p" "export PATH=\"\$HOME/.local/bin:\$PATH\"; [ \"\$(cat \"$SHARED/\"$(q "$1") 2>/dev/null)\" = $(q "$_me") ] || exit 0; hc machine rm $(q "$1") >/dev/null 2>&1; rm -f \"$SHARED/\"$(q "$1")" >/dev/null 2>&1 || true
+  done
 }
 
 machine_ls() {
@@ -602,10 +688,26 @@ template_field() {
   jget "$@" < "$DIR/template.json"
 }
 
+# What a template input amounts to, hashed. A JSON file without what changes
+# by itself (the model last picked, changelog and last-used markers, a
+# device id, anything about tokens, logins or sessions); anything else as
+# it is. (Version 2 of this; templates built before get a fresh baseline.)
+DIGEST='
+  use JSON::PP; use Digest::SHA qw(sha256_hex);
+  my $volatile = qr/(token|secret|auth|login|session|device|changelog|^last|updated|^recent|history|^default(model|provider|thinking))/i;
+  sub strip { my $v = shift;
+    if (ref $v eq "HASH") { return { map { ($_ => strip($v->{$_})) } grep { $_ !~ $volatile } keys %$v } }
+    if (ref $v eq "ARRAY") { return [ map { strip($_) } @$v ] }
+    return $v }
+  sub digest { my $p = shift; (my $f = $p) =~ s/^~/$ENV{HOME}/;
+    open my $fh, "<", $f or return ""; local $/; binmode $fh; my $raw = <$fh>;
+    if ($f =~ /\.json$/) { my $j = eval { JSON::PP->new->decode($raw) };
+      return "j:" . sha256_hex(JSON::PP->new->canonical->encode(strip($j))) if ref $j eq "HASH" }
+    return sha256_hex($raw) }'
+
 hashes() { # the inputs' hashes, as JSON
-  perl -MJSON::PP -MDigest::SHA=sha256_hex -e '
-    my %h; for my $p (@ARGV) { (my $f = $p) =~ s/^~/$ENV{HOME}/;
-      if (open my $fh, "<", $f) { local $/; binmode $fh; $h{$p} = sha256_hex(<$fh>) } else { $h{$p} = "" } }
+  perl -e "$DIGEST"'
+    my %h; $h{$_} = digest($_) for @ARGV;
     print JSON::PP->new->canonical->encode(\%h)' "$@"
 }
 
@@ -624,7 +726,7 @@ snapshot() {
   out=$(perl -MJSON::PP -0777 -e '
     my $m = JSON::PP->new->decode(do { local $/; open my $f, "<", $ARGV[0] or die; <$f> });
     print JSON::PP->new->canonical->pretty->encode({ snapshot => $ARGV[1], sandbox => $ARGV[2],
-      at => $ARGV[3], hashes => JSON::PP->new->decode($ARGV[4]), manifest => $m })' \
+      at => $ARGV[3], hashes => JSON::PP->new->decode($ARGV[4]), manifest => $m, hashing => 2 })' \
     "$manifest" "$TEMPLATE" "$id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$h")
   printf '%s\n' "$out" | rsh_in "$m" 'mkdir -p "$HOME/.reflex" && cat > "$HOME/.reflex/template.json"'
   say "Saving $id as $TEMPLATE..."
@@ -634,16 +736,26 @@ snapshot() {
   echo "$TEMPLATE"
 }
 
+# `--keep`: what's here now is what the template stands for (a change that
+# doesn't matter to it).
 template() {
   [ -f "$DIR/template.json" ] || { [ "${1:-}" = --json ] && echo '{"state":"none"}' || echo "no template"; exit 2; }
-  perl -MJSON::PP -MDigest::SHA=sha256_hex -0777 -e '
-    my $t = JSON::PP->new->decode(do { local $/; open my $f, "<", $ARGV[0] or die; <$f> });
+  perl -e "$DIGEST"'
+    my ($file, $arg) = @ARGV;
+    my $t = JSON::PP->new->decode(do { local $/; open my $f, "<", $file or die; <$f> });
+    my $keep = $arg eq "--keep";
+    # Built before digests ignored what changes by itself: this is its baseline.
+    $keep = 1 unless ($t->{hashing} // 1) >= 2;
     my @changed;
-    for my $p (sort keys %{$t->{hashes}}) { (my $f = $p) =~ s/^~/$ENV{HOME}/;
-      my $now = ""; if (open my $fh, "<", $f) { local $/; binmode $fh; $now = sha256_hex(<$fh>) }
-      push @changed, $p if $now ne $t->{hashes}{$p} }
+    for my $p (sort keys %{$t->{hashes}}) {
+      my $now = digest($p);
+      if ($keep) { $t->{hashes}{$p} = $now } elsif ($now ne $t->{hashes}{$p}) { push @changed, $p } }
+    if ($keep) {
+      $t->{hashing} = 2;
+      open my $o, ">", "$file.tmp" or die; print $o JSON::PP->new->canonical->pretty->encode($t); close $o; rename "$file.tmp", $file;
+    }
     my $state = @changed ? "stale" : "current";
-    if ($ARGV[1] eq "--json") {
+    if ($arg eq "--json") {
       print JSON::PP->new->canonical->encode({ state => $state, snapshot => $t->{snapshot}, at => $t->{at}, changed => \@changed }), "\n";
     } else {
       print "$t->{snapshot}: $state (built $t->{at})\n"; print "  changed: $_\n" for @changed;
@@ -928,6 +1040,7 @@ case $cmd in
     sub=${1:-}; [ $# -gt 0 ] && shift
     case $sub in
       new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;;
+      unshare) machine_unshare "$@" ;;
       extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;;
       *) die "machine new|rm|ls|extend|state|resume" ;;
     esac ;;
@@ -948,6 +1061,7 @@ case $cmd in
   bus) bus "$@" ;;
   id) self_id ;;
   skill) skill "$@" ;;
+  mesh) [ "${1:-}" = sync ] || die "mesh sync"; mesh_sync ;;
   install) install ;;
   ""|-h|--help|help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
   *) die "unknown command $cmd (reflex --help)" ;;

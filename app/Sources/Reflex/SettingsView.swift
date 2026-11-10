@@ -1190,12 +1190,13 @@ private struct MachineCardsSection: View {
 
     private func subtitle(_ m: CoreMachines.Machine) -> String {
         if Boat.made(m.name) { return "boat sandbox" }
+        if let from = CoreMachines.sharedFrom(m.name) { return (m.target.contains("boat ssh") ? "boat sandbox" : "ssh \(m.target)") + " · shared from \(from)" }
         if let model = kinds.models[m.name] { return "\(model) · \(m.host.isEmpty ? m.target : m.host)" }
         return m.temporary ? "temporary · \(m.target)" : "ssh \(m.target)"
     }
 
     private func card(_ m: CoreMachines.Machine) -> some View {
-        let boat = Boat.made(m.name)
+        let boat = Boat.made(m.name) || (CoreMachines.sharedByReflex(m.name) && m.target.contains("boat ssh"))
         let agents = store.state.agents.filter { $0.machine == m.name }
         let movable = agents.filter { HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
         let hint = "\(boat ? "boat ssh" : "ssh") \(m.target)" + (m.version.isEmpty ? "" : " · hc \(m.version)")
@@ -1310,7 +1311,7 @@ private struct BoatSection: View {
         case .unknown: return ("Checking…", .secondary, "")
         case .none: return ("No template yet", Tone.working, "The first move to boat asks the agent to build one with the reflex skill: this Mac's tools and settings, saved as a private snapshot in your boat account. Your logins never go in it.")
         case .current(let built): return ("Up to date", Tone.done, "Built \(Self.day(built)). New boat machines start from it in seconds.")
-        case .stale(let built, let changed): return ("Out of date", Tone.blocked, "Built \(Self.day(built)); changed here since: \(changed.joined(separator: ", ")). ⛵ → Rebuild Template asks an agent to build it again.")
+        case .stale(let built, let changed): return ("Changed here", Tone.blocked, "Built \(Self.day(built)); changed here since: \(changed.joined(separator: ", ")). Keep if it doesn't matter to your sandboxes; Rebuild… has an agent build it again.")
         }
     }
 
@@ -1326,10 +1327,27 @@ private struct BoatSection: View {
                             .padding(.horizontal, 8).padding(.vertical, 3)
                             .background(templateText.tone.opacity(0.16), in: Capsule())
                             .foregroundStyle(templateText.tone)
-                        Button("Check") { Task { await template.refresh(fresh: 0) } }.controlSize(.small)
+                        switch template.state {
+                        case .stale:
+                            Button("Keep") { template.keep() }.controlSize(.small)
+                                .help("What changed doesn't matter to your sandboxes: the template is current as it is.")
+                            Button("Rebuild…") { template.rebuild() }.controlSize(.small)
+                                .help("Starts a session in which an agent rebuilds the template from this Mac's setup (no session of yours moves).")
+                        case .none:
+                            Button("Build…") { template.rebuild() }.controlSize(.small)
+                                .help("Starts a session in which an agent builds the template from this Mac's setup.")
+                        default:
+                            Button("Check") { Task { await template.refresh(fresh: 0) } }.controlSize(.small)
+                        }
                     }
                 } label: {
-                    Label("Template", systemImage: "square.stack.3d.up")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Label("Template", systemImage: "square.stack.3d.up")
+                        if case .stale(_, let changed) = template.state {
+                            Text("Changed: " + changed.map { $0.replacingOccurrences(of: NSHomeDirectory(), with: "~") }.joined(separator: ", "))
+                                .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                    }
                 }
                 .help(templateText.detail)
             }
