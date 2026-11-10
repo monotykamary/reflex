@@ -57,6 +57,7 @@ final class EdgeReveal {
     /// Screens a full-screen app covers, looked at twice a second.
     private var covered: [NSScreen] = []
     private var coveredAt: TimeInterval = 0
+    private var coveredAsking = false
 
     private var timer: Timer?
     private var dwellStart: NSPoint?
@@ -93,12 +94,13 @@ final class EdgeReveal {
             return
         }
         let p = NSEvent.mouseLocation
-        if now - coveredAt > 0.5 {
+        if now - coveredAt > 0.5, !coveredAsking {
             coveredAt = now
-            covered = FullScreen.covered()
-            for w in windows() {
-                let hidden = covered.contains { $0.frame.intersects(w.frame) }
-                if (w.alphaValue == 0) != hidden { w.alphaValue = hidden ? 0 : 1 }
+            coveredAsking = true
+            let frames = NSScreen.screens.map(\.frame), me = ProcessInfo.processInfo.processIdentifier
+            Task.detached(priority: .utility) { [weak self] in
+                let full = FullScreen.covered(frames, me: me)
+                await self?.cover(full)
             }
         }
         if let s = screen(at: p), covered.contains(where: { $0 === s }) {
@@ -176,6 +178,16 @@ final class EdgeReveal {
 
     private var ours: [NSWindow] { [panel(), side(), keys()].compactMap { $0 } }
 
+    /// What the full-screen check found (screen frames): their edge windows hidden.
+    private func cover(_ full: [CGRect]) {
+        coveredAsking = false
+        covered = NSScreen.screens.filter { full.contains($0.frame) }
+        for w in windows() {
+            let hidden = covered.contains { $0.frame.intersects(w.frame) }
+            if (w.alphaValue == 0) != hidden { w.alphaValue = hidden ? 0 : 1 }
+        }
+    }
+
     private func returnKeys() {
         guard let w = ours.first(where: \.isKeyWindow) else { return }
         if let app = lent { app.activate() } else { w.resignKey() }
@@ -231,18 +243,20 @@ final class EdgeReveal {
 /// (borderless ones, a game's). Window bounds need no screen-recording
 /// permission.
 enum FullScreen {
-    static func covered() -> [NSScreen] {
-        var screens = bounds()
-        if let s = frontmost(), !screens.contains(where: { $0 === s }) { screens.append(s) }
-        return screens
+    /// Of `screens` (frames, the primary first), the ones a full-screen app
+    /// has. Off the main thread: window lists and Accessibility can take
+    /// tens of milliseconds, and the edge asks twice a second.
+    nonisolated static func covered(_ screens: [CGRect], me: pid_t) -> [CGRect] {
+        var out = bounds(screens, me: me)
+        if let s = frontmost(screens, me: me), !out.contains(s) { out.append(s) }
+        return out
     }
 
     /// The screen of the frontmost app's focused window, when it's full screen.
-    private static func frontmost() -> NSScreen? {
-        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication,
-              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+    nonisolated private static func frontmost(_ screens: [CGRect], me: pid_t) -> CGRect? {
+        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication, app.processIdentifier != me else { return nil }
         let ax = AXUIElementCreateApplication(app.processIdentifier)
-        // (An app that's hung mustn't hang the edge.)
+        // (An app that's hung mustn't hold this up.)
         AXUIElementSetMessagingTimeout(ax, 0.2)
         var win: CFTypeRef?
         guard AXUIElementCopyAttributeValue(ax, kAXFocusedWindowAttribute as CFString, &win) == .success,
@@ -256,24 +270,23 @@ enum FullScreen {
             AXValueGetValue(v as! AXValue, .cgPoint, &p)
         }
         // (Accessibility measures from the top of the primary screen.)
-        let primary = NSScreen.screens.first?.frame.height ?? 0
-        let point = NSPoint(x: p.x + 1, y: primary - p.y - 1)
-        return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main
+        let primary = screens.first?.height ?? 0
+        let point = CGPoint(x: p.x + 1, y: primary - p.y - 1)
+        return screens.first { $0.contains(point) } ?? screens.first
     }
 
-    private static func bounds() -> [NSScreen] {
+    nonisolated private static func bounds(_ screens: [CGRect], me: pid_t) -> [CGRect] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
-        let me = ProcessInfo.processInfo.processIdentifier
-        let primary = NSScreen.screens.first?.frame.height ?? 0
+        let primary = screens.first?.height ?? 0
         let rects: [CGRect] = list.compactMap { w in
             guard (w[kCGWindowLayer as String] as? Int) == 0, (w[kCGWindowOwnerPID as String] as? pid_t) != me,
                   (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
                   let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
             return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
         }
-        return NSScreen.screens.filter { s in
+        return screens.filter { s in
             // (CoreGraphics measures from the top of the primary screen.)
-            let f = CGRect(x: s.frame.minX, y: primary - s.frame.maxY, width: s.frame.width, height: s.frame.height)
+            let f = CGRect(x: s.minX, y: primary - s.maxY, width: s.width, height: s.height)
             return rects.contains { $0.minX <= f.minX + 1 && $0.minY <= f.minY + 1 && $0.maxX >= f.maxX - 1 && $0.maxY >= f.maxY - 1 }
         }
     }
