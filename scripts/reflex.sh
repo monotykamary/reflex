@@ -44,7 +44,13 @@ set -eu
 DATA=${REFLEX_DATA:-"$HOME/Library/Application Support/Reflex"}
 DIR="$DATA/boat"
 TEMPLATE=${REFLEX_TEMPLATE:-reflex-template}
-HERE=$(cd "$(dirname "$0")" && pwd -P)
+# (Where this script really is: ~/.local/bin/reflex is a link to it.)
+_self=$0
+while [ -L "$_self" ]; do
+  _l=$(readlink "$_self")
+  case $_l in /*) _self=$_l ;; *) _self=$(dirname "$_self")/$_l ;; esac
+done
+HERE=$(cd "$(dirname "$_self")" && pwd -P)
 T=$(mktemp -d "${TMPDIR:-/tmp}/reflex.XXXXXX")
 trap 'rm -rf "$T"' EXIT
 

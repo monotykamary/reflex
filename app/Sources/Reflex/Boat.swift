@@ -139,11 +139,13 @@ enum Boat {
         return !targets.isEmpty && targets.allSatisfy { (try? Data(contentsOf: $0)) == want }
     }
 
-    /// After an update: the skill again where you have it, and the link
-    /// (`reflex` on PATH always: other machines' sessions reach it).
+    /// At launch: the skill in each harness here, and the link (`reflex` on
+    /// PATH always: other machines' sessions reach it).
     static func updateInstalled() {
         linkCommand()
-        guard skillTargets.contains(where: { FileManager.default.fileExists(atPath: $0.path) }), !skillInstalled else { return }
+        // Every harness here (claude, codex, pi) has this version: a session
+        // here may move, or be asked to.
+        guard !skillTargets.isEmpty, !skillInstalled else { return }
         install()
     }
 
