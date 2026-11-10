@@ -29,12 +29,17 @@ AGENTS = {
     "asks": R + "r state=blocked:kind=question:app=claude-code; sleep 300",
     # A turn that ended in an error.
     "broke": R + "r state=error:app=pi; sleep 300",
+    # Claude whose 7501 probe went unanswered (`claude --resume` on 2.1.321): no
+    # report, its state in its window title's glyph — turning while it works, ✳ at rest.
+    "titled": "printf '\033]0;◐ Busy with it\007'; exec sleep 300",
+    "rested": "printf '\033]0;✳ Had a rest\007'; exec sleep 300",
     # A plain program: not an agent.
     "plain": "sleep 300",
     # Started by Reflex as Claude, which has since quit to its shell: not an agent now.
     "quit": "exec sh -i",
 }
-LABELS = {"echo": ["reflex.session=s-echo"], "slow": ["reflex.kind=claude"], "quit": ["reflex.kind=claude"]}
+LABELS = {"echo": ["reflex.session=s-echo"], "slow": ["reflex.kind=claude"], "quit": ["reflex.kind=claude"],
+          "titled": ["reflex.kind=claude"], "rested": ["reflex.kind=claude"]}
 NOT = ["agent plain ", "agent quit "]
 
 # What a core restart leaves, and what Reflex shows of it as stopped (/api/stopped).
@@ -68,6 +73,9 @@ EXPECT = [
     "agent asks kind=claude status=blocked session=",
     "agent broke kind=pi status=done session=",
     "agent cx kind=codex status=unknown session=",
+    "agent titled kind=claude status=working session= title=Busy with it",
+    "agent rested kind=claude status=idle session= title=Had a rest",
+    "agent slow kind=claude status=unknown session= title=",
     "echo status idle",
     "prompt ok",
     "prompt before ready fail agent_not_ready: it has not said it is ready yet",

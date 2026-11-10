@@ -62,7 +62,10 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
   there by default. Agents report their own status to it (OSC 7501, the
   Program Status Protocol): Claude Code and pi do; Codex doesn't yet, so it
   shows without a status (working, done, its questions) until it does — the
-  core never guesses from the screen. Reflex starts Claude and pi with a
+  core never guesses from the screen. (Claude Code 2.1.321 first asks the
+  terminal whether it listens, and after `claude --resume` that goes
+  unanswered, so it says nothing through 7501 and turns a glyph in its
+  window title instead; Reflex reads working and idle off that glyph.) Reflex starts Claude and pi with a
   session id it chose (`--session-id`), so their question cards and earlier
   sessions line up from the first moment; a Claude you start yourself is
   matched through `~/.claude/sessions/<pid>.json` once it has a session.

@@ -12,8 +12,10 @@ import ./vendor/strict-json/json.bend as J
 # The core runs terminals, not agents: a terminal is an agent here when its
 # program reports itself through OSC 7501 (`status.app`), when Reflex
 # started it (label reflex.kind) or when it runs a coding agent we know by
-# name (Codex says nothing through 7501 yet). Its status is only what the
-# program reported: one that never did is Unknown, never guessed.
+# name (Codex says nothing through 7501 yet). Its status is what the
+# program reported — or, for a Claude whose 7501 never got going, the glyph
+# its window title turns while it works (`glyph_status`); one that said
+# neither is Unknown, never guessed from the screen.
 #
 # Terminals are addressed "t7" here and "box/t7" on a machine this core
 # added; the local core answers for both, so every call goes to one socket.
@@ -152,8 +154,24 @@ def kind_of(+t: J.JSON) -> String:
 def status_word(+s: String) -> String:
   when(String.eq(s, "error"), "done", s)
 
+# Claude Code (2.1.321) asks the terminal whether it listens to 7501 and,
+# unanswered (as it is after `claude --resume`, though not on a fresh start),
+# says nothing through it; its window title carries its state instead:
+# "◐ "/"◑ " (turning) while it works, "✳ " at rest, and no glyph at all once
+# 7501 is in use. So the glyph is Claude's status when nothing was reported,
+# and leaves the title.
+def glyph_status(+title: String) -> String:
+  when(String.starts_with(title, "◐ ") || String.starts_with(title, "◑ ") || String.starts_with(title, "◓ ") || String.starts_with(title, "◒ "), "working",
+    when(String.starts_with(title, "✳ "), "idle", ""))
+
+def untitle(+title: String) -> String:
+  when(String.is_empty(glyph_status(title)), title, String.drop(title, 2n))
+
+def title_status(+t: J.JSON) -> String:
+  when(String.eq(kind_of.any(t), "claude"), glyph_status(Js.text_at(t, "title")), "")
+
 def status_of(+t: J.JSON) -> M.Status:
-  M.Status.read(status_word(Js.as_text(Js.path(["status", "state"], Some{t}))))
+  M.Status.read(Js.or_else(status_word(Js.as_text(Js.path(["status", "state"], Some{t}))), title_status(t)))
 
 # Reflex's seq only has to change when the status does: the low digits of
 # the time it last changed (ms since the epoch) do, and fit a U32.
@@ -173,7 +191,7 @@ def agent_of(+t: J.JSON) -> M.Agent:
     kind_of(t),
     status_of(t),
     cwd_of(t),
-    Js.text_at(t, "title"),
+    untitle(Js.text_at(t, "title")),
     seq_of(t),
     label(t, "reflex.session"),
     "",

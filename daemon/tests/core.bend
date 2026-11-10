@@ -21,7 +21,7 @@ def agents(xs: List<&2, M.Agent>) -> String:
     case Nil{}:
       ""
     case Con{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, t}:
-      "agent " ++ name ++ " kind=" ++ kind ++ " status=" ++ M.Status.show(status) ++ " session=" ++ session ++ "\n" ++ agents(t)
+      "agent " ++ name ++ " kind=" ++ kind ++ " status=" ++ M.Status.show(status) ++ " session=" ++ session ++ " title=" ++ title ++ "\n" ++ agents(t)
 
 def listed(r: Result<&1, &1, U32 & String, Hc.Listed>) -> String:
   match r:

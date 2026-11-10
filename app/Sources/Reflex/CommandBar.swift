@@ -876,11 +876,13 @@ final class CommandModel: ObservableObject {
         guard phase == .typing || isFailed else { return }
         if selected?.kind == .command, let c = selected?.command { apply(c); return }
         if selected?.kind == .chooseFolder { chooseFolder(); return }
-        if mode == .search {
+        // A lookup — or a slash command (/claude) with nothing typed yet, which
+        // asks but has nothing to send: ⏎ opens the row. A folder: a fresh
+        // session there, nothing sent, its terminal open.
+        if mode == .search || (request.isEmpty && attachments.isEmpty) {
             if selected?.kind == .resume, let c = selected { send(to: c, open: true); return }
-            // A folder: a fresh session there, nothing sent, its terminal open.
             if selected?.kind == .folder, let p = selected?.path {
-                return spawn(in: p, kind: Settings.shared.harness, text: "", open: true)
+                return spawn(in: p, kind: harness ?? Settings.shared.harness, text: "", open: true)
             }
             if let a = selected?.agent { openPane(a.pane); close() }
             return
