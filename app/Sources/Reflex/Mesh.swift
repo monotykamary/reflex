@@ -58,6 +58,9 @@ final class Bus {
             }
             for line in out.split(separator: "\n") {
                 guard let r = try? JSONDecoder().decode(Request.self, from: Data(line.utf8)) else { continue }
+                // Ours to answer only once claimed: another Reflex (or this
+                // one, a moment ago) may have taken it.
+                guard (try? await Boat.reflex(["bus", "claim", m, r.id], timeout: 30)) != nil else { continue }
                 await handle(m, r)
             }
         }

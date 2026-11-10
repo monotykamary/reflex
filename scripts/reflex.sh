@@ -792,8 +792,9 @@ list() { # list PATH [--from SRC]
   rsh "$SRC" "ls -lAh $(q "$p")"
 }
 
-# Reflex's side: wait (up to SECONDS) for requests on MACHINE, take them and
-# print each as a JSON line. Its own, one that names no Reflex (the
+# Reflex's side: wait (up to SECONDS) for requests on MACHINE and print
+# each as a JSON line, leaving it there: Reflex claims one (bus claim) before
+# it answers, so a listener whose Reflex quit takes nothing with it. Its own, one that names no Reflex (the
 # machine's own Reflex first: others wait 5 s), or any nobody took in 20 s.
 bus_listen() { # bus_listen MACHINE [SECONDS]
   _wait=5; [ "$1" = . ] && _wait=0
@@ -806,13 +807,17 @@ bus_listen() { # bus_listen MACHINE [SECONDS]
       for f in \"\$d\"/out/*.json; do
         [ -f \"\$f\" ] || continue
         if grep -q \"\\\"home\\\":\\\"\$me\\\"\" \"\$f\" || { grep -q '\"home\":\"\"' \"\$f\" && [ \$(age \"\$f\") -ge $_wait ]; } || [ \$(age \"\$f\") -gt 20 ]; then
-          n=\$(basename \"\$f\")
-          mv \"\$f\" \"\$d/taken/\$n\" 2>/dev/null && { cat \"\$d/taken/\$n\"; got=1; }
+          cat \"\$f\" && got=1
         fi
       done
       [ -n \"\$got\" ] && exit 0
       sleep 1; i=\$((i + 1))
     done; exit 0"
+}
+
+# Request ID is this Reflex's to answer (exit 1: another took it).
+bus_claim() { # bus_claim MACHINE ID
+  rsh "$1" "d=$BUS; mkdir -p \"\$d/taken\" && mv \"\$d/out/$2.json\" \"\$d/taken/$2.json\" 2>/dev/null" >/dev/null
 }
 
 # The answer to request ID (JSON, as an argument or on stdin), where it was asked.
@@ -825,6 +830,7 @@ bus() {
   case ${1:-} in
     listen) shift; bus_listen "$@" ;;
     reply) shift; bus_reply "$@" ;;
+    claim) shift; bus_claim "$@" ;;
     *) die "bus listen MACHINE [SECONDS] | bus reply MACHINE ID" ;;
   esac
 }
