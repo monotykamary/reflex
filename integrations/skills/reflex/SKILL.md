@@ -69,7 +69,7 @@ list of every file you read to decide (the manifest's `inputs`).
   manifest's `secrets`: `~/.modal.toml` (it falls back to Modal and opens
   it before some runs), `~/.runpod/config.toml` and the key files in
   `~/.runpod/ssh/` (GPU jobs), and the files in `~/.local/share/supercomputer/live/keys/`
-  (each file by name; no folders or globs). Check it there with a one-line job in a project
+  (each file or folder by name; no globs). Check it there with a one-line job in a project
   that has an image (`supercomputer run --jobs ... --class interactive`).
 - **The CLIs the user's instructions rely on** (`gh`, `bun`, `uv`, a linter):
   install those that are missing.

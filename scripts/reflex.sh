@@ -255,10 +255,27 @@ creds() {
   # secret (an extension's key file): never in the template, copied to each.
   extra=$(template_field manifest secrets 2>/dev/null | perl -MJSON::PP -0777 -ne 'print join "\n", @{decode_json($_)}' 2>/dev/null || true)
   for rel in .pi/agent/auth.json .codex/auth.json .mcporter/credentials.json $(printf '%s\n' "$extra" | sed -n 's#^~/##p'); do
-    [ -f "$HOME/$rel" ] || continue
-    put "$m" "$HOME/$rel" "$rel"
+    if [ -f "$HOME/$rel" ]; then
+      put "$m" "$HOME/$rel" "$rel"
+    elif [ -d "$HOME/$rel" ]; then   # a folder: as it is, yours alone there
+      COPYFILE_DISABLE=1 tar -C "$(dirname "$HOME/$rel")" --no-mac-metadata --no-xattrs -cf "$T/secret.tar" "$(basename "$rel")"
+      _sd="$rh/$(dirname "$rel")"
+      _sr=$(send "$m" "$T/secret.tar")
+      rsh "$m" "umask 077; mkdir -p $(q "$_sd") && gunzip -c $(q "$_sr") | tar -xf - -C $(q "$_sd"); s=\$?; rm -f $(q "$_sr"); exit \$s" >/dev/null || die "copying ~/$rel to $m failed"
+    else
+      continue
+    fi
     copied="$copied $rel"
   done
+  # boat's own login, the account's (the sandbox's token sees only that
+  # sandbox): supercomputer and boat there reach your images and machines.
+  # The sandbox's token stays beside it.
+  bc="$HOME/Library/Application Support/ascii/boat/config.json"
+  if [ -f "$bc" ] && ours "$m"; then
+    rsh "$m" 'c="$HOME/.config/ascii/boat"; [ -f "$c/config.json" ] && [ ! -f "$c/sandbox.json" ] && cp -p "$c/config.json" "$c/sandbox.json"; true' >/dev/null
+    put "$m" "$bc" .config/ascii/boat/config.json
+    copied="$copied .config/ascii/boat/config.json"
+  fi
   # mcporter's servers name their commands by path: ~ here is ~ there.
   if [ -f "$HOME/.mcporter/mcporter.json" ]; then
     sed "s#$HOME/#$rh/#g" "$HOME/.mcporter/mcporter.json" > "$T/mcporter.json"
