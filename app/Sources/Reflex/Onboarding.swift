@@ -717,6 +717,8 @@ struct OnboardingView: View {
             }
             .padding(.top, 52)
             .padding(.bottom, 92)
+            // Sized to the window whatever a step holds: the footer never moves.
+            .frame(width: 920, height: 600)
             VStack { Spacer(); footer }
         }
         .frame(width: 920, height: 600)
@@ -749,7 +751,8 @@ struct OnboardingView: View {
                 .foregroundStyle(.primary.opacity(0.72))
                 .lineSpacing(4)
                 .fixedSize(horizontal: false, vertical: true)
-            checks.padding(.top, 8)
+            ScrollView(.vertical) { checks.padding(.top, 8) }
+                .scrollBounceBehavior(.basedOnSize)
             Spacer(minLength: 0)
         }
         .id(model.step)
@@ -914,12 +917,9 @@ struct OnboardingView: View {
                     Check(ok: m.link == .connected, title: m.label,
                           detail: m.link == .connected ? "connected · ssh \(m.target)" : (m.link == .off ? "disabled in herdr" : "connecting to \(m.target)…")) { EmptyView() }
                 }
-                VStack(alignment: .leading, spacing: 12) {
-                    MachineSteps()
-                    AddMachineView()
-                }
-                .padding(14)
-                .pane(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                AddMachineView()
+                    .padding(14)
+                    .pane(RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
         case .keys:
             VStack(alignment: .leading, spacing: 10) {
@@ -961,7 +961,14 @@ struct OnboardingView: View {
             case .herdr: PanesIllustration(agents: store.state.agents)
             case .jev: TryReflex(model: model)
             case .projects: FoldersIllustration(folders: model.folders)
-            case .machines: MachinesIllustration(rows: machines.rows, agents: store.state.agents)
+            case .machines:
+                VStack(spacing: 18) {
+                    MachinesIllustration(rows: machines.rows, agents: store.state.agents)
+                    MachineSteps()
+                        .padding(14)
+                        .frame(width: 340)
+                        .pane(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                }
             case .keys: KeysIllustration(hotkey: model.triedHotkey, edge: model.triedEdge)
             case .done: MemberCard(repos: store.state.folders, agents: store.state.agents.count,
                                    harness: settings.harness, ping: model.ping)
@@ -1170,7 +1177,8 @@ private struct FoldersIllustration: View {
     }
 }
 
-/// This Mac, and the others its agents come from.
+/// This Mac, and the others its agents come from: one curve from it to each,
+/// so the picture reads the same with one other Mac or three.
 private struct MachinesIllustration: View {
     var rows: [MachinesModel.Row]
     var agents: [AgentInfo]
@@ -1181,33 +1189,68 @@ private struct MachinesIllustration: View {
     }
 
     var body: some View {
-        HStack(spacing: 18) {
+        HStack(spacing: 56) {
             computer("laptopcomputer", "this Mac", agents.filter { !$0.remote }.count, tint: Tone.working)
-            VStack(spacing: 14) {
+                .anchorPreference(key: MachineAnchors.self, value: .bounds) { [-1: $0] }
+            VStack(alignment: .leading, spacing: 10) {
                 ForEach(Array(others.enumerated()), id: \.offset) { i, o in
-                    HStack(spacing: 12) {
-                        Capsule().fill(Tone.remote.opacity(o.2 ? 0.7 : 0.25)).frame(width: 46, height: 2)
-                        computer("desktopcomputer", o.0, o.1, tint: Tone.remote)
-                    }
-                    .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.06)))
+                    computer("desktopcomputer", o.0, o.1, tint: Tone.remote)
+                        .anchorPreference(key: MachineAnchors.self, value: .bounds) { [i: $0] }
+                        .transition(.surface().animation(Motion.enter.delay(Double(i) * 0.06)))
                 }
             }
         }
-        .frame(width: 340)
+        .backgroundPreferenceValue(MachineAnchors.self) { anchors in
+            GeometryReader { g in
+                if let laptop = anchors[-1] {
+                    let from = g[laptop]
+                    ForEach(Array(others.enumerated()), id: \.offset) { i, o in
+                        if let a = anchors[i] {
+                            let to = g[a]
+                            MachineLink(from: CGPoint(x: from.maxX, y: from.midY), to: CGPoint(x: to.minX, y: to.midY))
+                                .stroke(Tone.remote.opacity(o.2 ? 0.7 : 0.25), style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                        }
+                    }
+                }
+            }
+        }
+        .animation(Motion.enter, value: others.map(\.0))
     }
 
     private func computer(_ symbol: String, _ name: String, _ n: Int, tint: Color) -> some View {
         VStack(spacing: 6) {
-            Image(systemName: symbol).font(.system(size: 34, weight: .light)).foregroundStyle(tint)
-            Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+            Image(systemName: symbol).font(.system(size: 30, weight: .light)).foregroundStyle(tint)
+            Text(name).font(.system(size: 12, weight: .semibold)).lineLimit(1).truncationMode(.middle)
             HStack(spacing: 3) {
                 ForEach(0..<min(n, 5), id: \.self) { _ in Circle().fill(tint.opacity(0.8)).frame(width: 6, height: 6) }
                 if n == 0 { Text("no agents").font(.system(size: 10)).foregroundStyle(.primary.opacity(0.45)) }
             }
             .frame(height: 8)
         }
-        .padding(.horizontal, 14).padding(.vertical, 12)
+        .frame(width: 84)
+        .padding(.horizontal, 14).padding(.vertical, 10)
         .pane(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+}
+
+/// Where each Mac's pane is, for the links: -1 is this Mac.
+private struct MachineAnchors: PreferenceKey {
+    static let defaultValue: [Int: Anchor<CGRect>] = [:]
+    static func reduce(value: inout [Int: Anchor<CGRect>], nextValue: () -> [Int: Anchor<CGRect>]) {
+        value.merge(nextValue()) { $1 }
+    }
+}
+
+/// An S-curve between two Macs, leaving and arriving level.
+private struct MachineLink: Shape {
+    var from: CGPoint
+    var to: CGPoint
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let dx = (to.x - from.x) / 2
+        p.move(to: from)
+        p.addCurve(to: to, control1: CGPoint(x: from.x + dx, y: from.y), control2: CGPoint(x: to.x - dx, y: to.y))
+        return p
     }
 }
 
