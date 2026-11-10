@@ -10,6 +10,10 @@ import AppKit
 //
 // While the pointer is over the open rail it takes the keyboard (1–3 answer
 // the card); when the pointer leaves, focus goes back to the app you were in.
+//
+// A screen showing a full-screen app (native full screen, or a window that
+// covers the whole screen, menu bar too: Parsec, a game, a video) is left
+// alone: no tab, no edge to hover, no rail.
 
 @MainActor
 final class EdgeReveal {
@@ -46,6 +50,13 @@ final class EdgeReveal {
     var onReveal: () -> Void = {}
     /// Off while the rail lives in the menu bar.
     var enabled: () -> Bool = { true }
+    /// The edge's windows (tab, sliver, column, side): hidden on a screen a
+    /// full-screen app has.
+    var windows: () -> [NSWindow] = { [] }
+
+    /// Screens a full-screen app covers, looked at twice a second.
+    private var covered: [NSScreen] = []
+    private var coveredAt: TimeInterval = 0
 
     private var timer: Timer?
     private var dwellStart: NSPoint?
@@ -82,6 +93,20 @@ final class EdgeReveal {
             return
         }
         let p = NSEvent.mouseLocation
+        if now - coveredAt > 0.5 {
+            coveredAt = now
+            covered = FullScreen.covered()
+            for w in windows() {
+                let hidden = covered.contains { $0.frame.intersects(w.frame) }
+                if (w.alphaValue == 0) != hidden { w.alphaValue = hidden ? 0 : 1 }
+            }
+        }
+        if let s = screen(at: p), covered.contains(where: { $0 === s }) {
+            if rail.visible, !keepOpen() { hide() }
+            if dwellStart != nil || rail.dwell != 0 { dwellStart = nil; rail.dwell = 0 }
+            tabHoverAt = nil
+            return
+        }
         if Settings.shared.railAlways {
             if !rail.visible, let (s, y) = fallbackAnchor() { show(on: s, y: y) }
             return
@@ -194,7 +219,30 @@ final class EdgeReveal {
 
     /// A new question: open the rail where it is anchored, like a notification.
     func surface() {
-        guard enabled(), !RailModel.shared.visible, let (s, y) = fallbackAnchor() else { return }
+        guard enabled(), !RailModel.shared.visible, let (s, y) = fallbackAnchor(), !covered.contains(where: { $0 === s }) else { return }
         show(on: s, y: y, hold: 6)
+    }
+}
+
+/// Which screens a full-screen app has: one of another app's ordinary
+/// windows covers the whole screen, menu bar included (a zoomed window stops
+/// at the menu bar). Native full screen, and borderless ones like Parsec's or
+/// a game's. Window bounds need no screen-recording permission.
+enum FullScreen {
+    static func covered() -> [NSScreen] {
+        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
+        let me = ProcessInfo.processInfo.processIdentifier
+        let primary = NSScreen.screens.first?.frame.height ?? 0
+        let rects: [CGRect] = list.compactMap { w in
+            guard (w[kCGWindowLayer as String] as? Int) == 0, (w[kCGWindowOwnerPID as String] as? pid_t) != me,
+                  (w[kCGWindowAlpha as String] as? Double ?? 1) > 0,
+                  let b = w[kCGWindowBounds as String] as? [String: CGFloat] else { return nil }
+            return CGRect(x: b["X"] ?? 0, y: b["Y"] ?? 0, width: b["Width"] ?? 0, height: b["Height"] ?? 0)
+        }
+        return NSScreen.screens.filter { s in
+            // (CoreGraphics measures from the top of the primary screen.)
+            let f = CGRect(x: s.frame.minX, y: primary - s.frame.maxY, width: s.frame.width, height: s.frame.height)
+            return rects.contains { $0.minX <= f.minX + 1 && $0.minY <= f.minY + 1 && $0.maxX >= f.maxX - 1 && $0.maxY >= f.maxY - 1 }
+        }
     }
 }

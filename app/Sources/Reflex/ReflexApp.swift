@@ -600,6 +600,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         edge.onReveal = { Onboarding.shared.noteEdgeReveal() }
         edge.enabled = { !Settings.shared.menuBar }
+        edge.windows = { [weak self] in [self?.tabWindow, self?.sliver, self?.strip, self?.side].compactMap { $0 } }
         edge.start()
         // A pairing code never outlives the app that made it.
         Pairing.shared.stop()
