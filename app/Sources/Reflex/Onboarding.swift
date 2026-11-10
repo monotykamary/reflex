@@ -272,11 +272,32 @@ final class Onboarding: ObservableObject {
         let before = coreVersion
         let bin = HerdrCore.binary(Daemon.shared.childEnvironment()) ?? "hc"
         let session = HerdrCore.session.replacingOccurrences(of: "'", with: "")
-        run(Tool.core.rawValue, "HC_SESSION='\(session)' '\(bin)' update --json") {
+        run(Tool.core.rawValue, Self.coreUpdate(bin: bin, session: session)) {
             guard let path = HerdrCore.binary(Daemon.shared.childEnvironment()) else { return "It ran, but herdr-core isn't in ~/.local/bin." }
             if let before, Onboarding.version(of: path, ["--version"]) == before, before != self.coreLatest { return "It ran, but herdr-core is still \(before)." }
             return nil
         }
+    }
+
+    /// `hc update`, and when it's refused, again from inside herdr-core. macOS's
+    /// App Management only lets Herdr Core.app's own team (or apps you allow)
+    /// replace it once it has run, and a process Reflex starts counts as
+    /// Reflex; a terminal herdr-core runs counts as herdr-core, and it keeps
+    /// running through the restart the update does. Its answer comes back in
+    /// a file.
+    nonisolated static func coreUpdate(bin: String, session: String) -> String {
+        """
+        export HC_SESSION='\(session)'
+        out=$('\(bin)' update --json 2>&1); s=$?
+        case "$out" in *'"refused"'*)
+          f=$(mktemp) || exit 1
+          '\(bin)' run --bg --no-parent --rm -- sh -c "export HC_SESSION='\(session)'; '\(bin)' update --json >'$f' 2>&1; echo \\$? >'$f.done'" >/dev/null 2>&1 || { echo "$out" >&2; exit 1; }
+          i=0; while [ ! -e "$f.done" ] && [ $i -lt 170 ]; do sleep 1; i=$((i+1)); done
+          [ -e "$f.done" ] || { rm -f "$f"; echo "herdr-core's own update didn't finish in time." >&2; exit 1; }
+          s=$(cat "$f.done"); out=$(cat "$f"); rm -f "$f" "$f.done";;
+        esac
+        [ "$s" = 0 ] || { echo "$out" >&2; exit "$s"; }
+        """
     }
 
     /// Start the core now (it detaches by itself).
