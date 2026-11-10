@@ -36,6 +36,14 @@ struct Client {
     }
 
     func state() async throws -> StateInfo { try await get("/api/state", as: StateInfo.self) }
+    /// Whether reflexd hands over its state within `seconds` (its actor
+    /// answers, not just its socket).
+    func answers(within seconds: TimeInterval) async -> Bool {
+        var r = request("/api/state")
+        r.timeoutInterval = seconds
+        guard let (data, _) = try? await URLSession.shared.data(for: r) else { return false }
+        return (try? JSONDecoder().decode(StateInfo.self, from: data)) != nil
+    }
     /// The agents herdr-core lost (a restart): shown to bring back.
     func stopped() async throws -> [StoppedInfo] { try await get("/api/stopped", as: StoppedResponse.self).stopped }
 
@@ -121,6 +129,8 @@ final class Store: ObservableObject {
 
     @Published private(set) var state = StateInfo.empty
     @Published private(set) var connected = false
+    /// When reflexd last answered (DaemonWatch restarts one that stops).
+    private(set) var lastOK = Date()
     /// Agents herdr-core lost (a restart), asked for every few seconds.
     @Published private(set) var stopped: [StoppedInfo] = []
     private var stoppedAt = Date.distantPast
@@ -159,6 +169,7 @@ final class Store: ObservableObject {
             next.inbox.removeAll { clearing.contains($0.id) }
             observe(next)
             state = next
+            lastOK = Date()
             if Date().timeIntervalSince(stoppedAt) > 3 { await refreshStopped() }
             // `herdr`: whether your agents can be reached (herdr-core, or herdr).
             // Without herdr-core installed, sessions start in herdr: keep it up.

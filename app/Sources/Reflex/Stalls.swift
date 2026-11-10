@@ -69,3 +69,84 @@ final class StallWatch: @unchecked Sendable {
         if (try? p.run()) == nil { lock.withLock { sampling = false } }
     }
 }
+
+/// reflexd stuck: not answering (the app then shows its empty first state,
+/// "herdr-core and herdr unreachable"), or saying herdr-core is unreachable
+/// while it answers the app. It used to take a force quit; now, at most every
+/// two minutes, the stuck daemon is sampled (~/Library/Logs/Reflex/
+/// reflexd-stuck-<time>.txt, with its open files) and restarted.
+@MainActor
+final class DaemonWatch {
+    static let shared = DaemonWatch()
+    private var timer: Timer?
+    private var herdrOffSince: Date?
+    private var recoveredAt = Date.distantPast
+    private var recovering = false
+    private let born = Date()
+
+    func start() {
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { _ in
+            MainActor.assumeIsolated { DaemonWatch.shared.check() }
+        }
+    }
+
+    private func check() {
+        // (A daemon just started has a moment to come up.)
+        guard Daemon.shared.running, !recovering, Date().timeIntervalSince(born) > 30 else { return }
+        let silent = Date().timeIntervalSince(Store.shared.lastOK)
+        if silent > 20 {
+            // (Asked again first: after sleep, or a throttled poll, it answers.)
+            recovering = true
+            Task {
+                let ok = await Client.local.answers(within: 8)
+                recovering = false
+                if !ok { recover("reflexd hasn't answered for \(Int(Date().timeIntervalSince(Store.shared.lastOK))) s") }
+            }
+            return
+        }
+        guard Settings.shared.usesCore, !Store.shared.state.herdr else { herdrOffSince = nil; return }
+        guard let since = herdrOffSince else { herdrOffSince = Date(); return }
+        guard Date().timeIntervalSince(since) > 30 else { return }
+        Task {
+            // Only when herdr-core answers us: then it's reflexd that's wrong.
+            if (try? await HerdrCore.call("terminal.list", [:], timeout: 3)) != nil {
+                recover("reflexd has said herdr-core is unreachable for \(Int(Date().timeIntervalSince(since))) s, but it answers")
+            }
+        }
+    }
+
+    private func recover(_ why: String) {
+        guard Date().timeIntervalSince(recoveredAt) > 120, let pid = Daemon.shared.pid else { return }
+        recoveredAt = Date()
+        recovering = true
+        herdrOffSince = nil
+        let folder = StallWatch.folder
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let file = folder.appendingPathComponent("reflexd-stuck-\(stamp).txt")
+        Task.detached {
+            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let files = Self.run("/usr/sbin/lsof", ["-p", String(pid)]).split(separator: "\n").count
+            _ = Self.run("/usr/bin/sample", [String(pid), "3", "-mayDie", "-file", file.path])
+            await MainActor.run {
+                Diag.log("\(why): restarted it (pid \(pid), \(files) open files; sampled to \(file.lastPathComponent))")
+                NSLog("Reflex: %@: restarting reflexd", why)
+                Daemon.shared.restart()
+                DaemonWatch.shared.recovering = false
+            }
+        }
+    }
+
+    nonisolated private static func run(_ exe: String, _ args: [String]) -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: exe)
+        p.arguments = args
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return "" }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        return String(decoding: data, as: UTF8.self)
+    }
+}

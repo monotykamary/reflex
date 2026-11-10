@@ -81,6 +81,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // follow kept at this version once you've used it.
         Bus.shared.start()
         StallWatch.shared.start()
+        DaemonWatch.shared.start()
         BoatLifetime.shared.start()
         Boat.updateInstalled()
         hotkey = DoubleOption { [weak self] in

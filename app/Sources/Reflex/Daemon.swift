@@ -182,10 +182,18 @@ final class Daemon: ObservableObject {
         running = false
     }
 
+    /// The running reflexd's process id.
+    var pid: Int32? { process?.processIdentifier }
+
     func restart() {
+        let old = process
         stop()
         restarts = 0
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { [weak self] in self?.start() }
+        // (One that's stuck may not heed SIGTERM: it would keep the port.)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) { [weak self] in
+            if let old, old.isRunning { kill(old.processIdentifier, SIGKILL) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { self?.start() }
+        }
     }
 }
 
@@ -194,6 +202,16 @@ final class Daemon: ObservableObject {
 /// "Sending" says where it waited.
 @MainActor
 enum Diag {
+    /// A line in ~/Library/Logs/Reflex/app.log, timestamped.
+    static func log(_ line: String) {
+        let url = Daemon.logURL.deletingLastPathComponent().appendingPathComponent("app.log")
+        if !FileManager.default.fileExists(atPath: url.path) { FileManager.default.createFile(atPath: url.path, contents: nil) }
+        guard let h = try? FileHandle(forWritingTo: url) else { return }
+        h.seekToEndOfFile()
+        h.write(Data("\(ISO8601DateFormatter().string(from: Date())) \(line)\n".utf8))
+        try? h.close()
+    }
+
     static func slow(_ what: String, since started: Date, over limit: TimeInterval = 2) {
         let took = Date().timeIntervalSince(started)
         guard took >= limit else { return }
