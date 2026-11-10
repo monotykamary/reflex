@@ -121,6 +121,8 @@ machine_new() {
     [ $i -lt 90 ] || die "$name didn't connect (hc machine ls)"
     sleep 1
   done
+  # This version of the skill (a template keeps the one it was built with).
+  skill install --on "$name" >/dev/null 2>&1 || say "the reflex skill isn't on $name: reflex skill install --on $name"
   echo "$name"
 }
 
