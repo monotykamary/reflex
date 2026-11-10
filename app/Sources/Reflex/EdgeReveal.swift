@@ -224,12 +224,44 @@ final class EdgeReveal {
     }
 }
 
-/// Which screens a full-screen app has: one of another app's ordinary
-/// windows covers the whole screen, menu bar included (a zoomed window stops
-/// at the menu bar). Native full screen, and borderless ones like Parsec's or
-/// a game's. Window bounds need no screen-recording permission.
+/// Which screens a full-screen app has: the frontmost app's window says it's
+/// full screen (Accessibility: on a notched MacBook a native full-screen
+/// window stops below the notch, the same shape as a zoomed one), or one of
+/// another app's ordinary windows covers the whole screen, menu bar included
+/// (borderless ones, a game's). Window bounds need no screen-recording
+/// permission.
 enum FullScreen {
     static func covered() -> [NSScreen] {
+        var screens = bounds()
+        if let s = frontmost(), !screens.contains(where: { $0 === s }) { screens.append(s) }
+        return screens
+    }
+
+    /// The screen of the frontmost app's focused window, when it's full screen.
+    private static func frontmost() -> NSScreen? {
+        guard AXIsProcessTrusted(), let app = NSWorkspace.shared.frontmostApplication,
+              app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
+        let ax = AXUIElementCreateApplication(app.processIdentifier)
+        // (An app that's hung mustn't hang the edge.)
+        AXUIElementSetMessagingTimeout(ax, 0.2)
+        var win: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(ax, kAXFocusedWindowAttribute as CFString, &win) == .success,
+              let w = win, CFGetTypeID(w) == AXUIElementGetTypeID() else { return nil }
+        let window = w as! AXUIElement
+        var full: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(window, "AXFullScreen" as CFString, &full) == .success, (full as? Bool) == true else { return nil }
+        var pos: CFTypeRef?
+        var p = CGPoint.zero
+        if AXUIElementCopyAttributeValue(window, kAXPositionAttribute as CFString, &pos) == .success, let v = pos, CFGetTypeID(v) == AXValueGetTypeID() {
+            AXValueGetValue(v as! AXValue, .cgPoint, &p)
+        }
+        // (Accessibility measures from the top of the primary screen.)
+        let primary = NSScreen.screens.first?.frame.height ?? 0
+        let point = NSPoint(x: p.x + 1, y: primary - p.y - 1)
+        return NSScreen.screens.first { NSMouseInRect(point, $0.frame, false) } ?? NSScreen.main
+    }
+
+    private static func bounds() -> [NSScreen] {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return [] }
         let me = ProcessInfo.processInfo.processIdentifier
         let primary = NSScreen.screens.first?.frame.height ?? 0
