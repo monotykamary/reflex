@@ -105,32 +105,75 @@ reflex snapshot $NAME --manifest /path/to/manifest.json
 
 ## 4. Move
 
-On the machine you built (it's set up already) or on a new one from the
-template:
+On the machine you built (it's set up already), on a new one from the
+template, or on the machine Reflex named when it asked you to move:
 
 ```sh
-NAME=$(reflex machine new --template)   # only when you didn't just build one
-reflex sync $NAME                       # this project, at the same ~ path there
+NAME=$(reflex machine new --template)   # only when you have no machine yet
 reflex creds $NAME                      # the user's logins, mcporter, the manifest's secrets
+```
+
+### Bring everything the work needs
+
+The session should carry on there as if nothing moved. Only you know what
+this work stands on, so before asking, go back over the conversation and
+list every path it used: what you read, wrote, ran or were given.
+
+- **This project**, and **every other repository** you worked in. A
+  worktree needs its repository too (the history lives there).
+- **Files the user gave you**: a document in `~/Downloads`, a screenshot on
+  the Desktop, a spec in `~/Documents`, a data set.
+- **Work in progress outside git**: notes, handoff files, drafts, scratch
+  folders (in `/tmp` too), generated data the next step reads, a local
+  config the project needs.
+- **Gitignored files the work needs** (a handoff note in `private/`, a
+  `.env` the tests read).
+- **Tools** the next steps run that the template lacks: install them there.
+
+Then copy them, each to the same path there (`~/x` is `~/x`, `/tmp/x` is
+`/tmp/x`):
+
+```sh
+reflex sync $NAME                                   # this project (git's view, plus .git)
+reflex sync $NAME ~/code/other-repo                 # each other repository or worktree
+reflex sync $NAME --include private/handoff.md      # an ignored file the work needs
+reflex copy $NAME ~/Downloads/spec.pdf ~/notes/run-3   # anything else, as it is
+```
+
+`reflex sync` copies a repository as git sees it: tracked and untracked
+files and `.git`, not ignored ones (name those with `--include`). Worktrees
+in `/tmp` keep their paths, and Reflex points their `.git` files at the
+copies. `reflex copy` takes files and folders as they are. Leave out what
+can be rebuilt there (`node_modules`, build output, caches), and say what's
+too big to copy rather than waiting an hour. On a machine Reflex made, a
+file with a key the work needs may go (the machine holds the user's logins
+already); never into the template.
+
+Check it there: `hc exec --on $NAME -- sh -lc 'cd ~/... && git status'`,
+and that a file the next step needs is where it reads it.
+
+```sh
 reflex move self --to $NAME
 ```
 
-Then tell the user in one line where you're going, and **end your turn**.
-Reflex asks them, closes you here once you're idle, and resumes this
-conversation there. Commit nothing just for the move: uncommitted and untracked
-files go with `reflex sync`.
+Then tell the user in a line or two where you're going, what you copied and
+what you left behind, and **end your turn**. Reflex copies this conversation
+(its subagents' transcripts and Claude's memory for this project too) while
+you're still here, closes you once you're idle, and resumes this conversation
+there. If the user pressed the move button, the move is approved already;
+otherwise they approve it in Reflex. Commit nothing just for the move.
 
-To a machine Reflex didn't make (`hc machine ls`): `reflex sync` and
+To a machine Reflex didn't make (`hc machine ls`): copying and
 `reflex move self` work the same. Run `reflex creds NAME --any` only after the
 user says to copy their logins there.
 
 ## After a move
 
-On the other machine `$HOME` differs (`/home/user` on boat), but the project is
-at the same `~` path and the conversation is the one you had. Paths in earlier
-messages that start with the old home are now under the new one. If something
-from the old Mac is missing, install it there and tell the user. Don't move
-back on your own.
+On the other machine `$HOME` differs (`/home/user` on boat), but what you
+copied is at the same `~` path and the conversation is the one you had. Paths in earlier
+messages that start with the old home are now under the new one. A tool
+that's missing: install it there. A file you left behind is still on the Mac:
+tell the user what it is. Don't move back on your own.
 
 ## When it fails
 

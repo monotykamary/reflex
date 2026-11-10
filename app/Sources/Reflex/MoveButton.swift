@@ -53,7 +53,7 @@ struct MoveButton: View {
             if !others.isEmpty {
                 Section("Machines") {
                     ForEach(others, id: \.name) { m in
-                        Button("Move to \(m.name)") { move.move([a], to: m.name) }
+                        Button("Move to \(m.name)") { move.prepare(a, to: m.name) }
                     }
                 }
             }
@@ -63,6 +63,7 @@ struct MoveButton: View {
             if move.readiness(a, to: Boat.key) == .busy {
                 Text("It moves once this turn ends")
             }
+            Text("\(a.kind) copies what its work needs, then moves")
         }
     }
 }

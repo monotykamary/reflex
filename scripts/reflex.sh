@@ -5,11 +5,17 @@
 #
 #   reflex machine new [--template | --from SNAPSHOT] [--type T] [--name N]
 #   reflex machine rm NAME          reflex machine ls
-#   reflex where MACHINE PATH       the path there (~/x here is ~/x there)
-#   reflex sync MACHINE [DIR]       the project's files (git's view: tracked
-#                                   and untracked but not ignored, plus .git)
+#   reflex where MACHINE PATH       the path there (~/x here is ~/x there,
+#                                   /tmp/x is /tmp/x)
+#   reflex sync MACHINE [DIR] [--include PATH]...
+#                                   the project's files (git's view: tracked
+#                                   and untracked but not ignored, plus .git),
+#                                   and any ignored PATH you name
+#   reflex copy MACHINE PATH...     files or folders as they are (Downloads,
+#                                   notes, data): each to the same path there
 #   reflex creds MACHINE [--claude] [--any]
 #   reflex session MACHINE KIND SESSION CWD
+#                                   again: only what's new since the last time
 #   reflex snapshot MACHINE --manifest FILE
 #   reflex template [--json]        exit 0 current, 1 stale, 2 none
 #   reflex move self --to MACHINE   asks Reflex; you approve it in the app
@@ -58,13 +64,21 @@ remote_home() {
   printf '%s' "$_h"
 }
 
-# ~/x here is ~/x there; nothing outside your home moves.
+# ~/x here is ~/x there, and a temporary folder (a worktree in /tmp, say)
+# is the same one there; nothing else outside your home moves.
 where() {
   case $2 in
     "$HOME") remote_home "$1" ;;
     "$HOME"/*) printf '%s%s' "$(remote_home "$1")" "${2#"$HOME"}" ;;
-    *) die "$2 is outside your home folder: only folders under ~ move" ;;
+    /private/tmp/*) printf '/tmp/%s' "${2#/private/tmp/}" ;;
+    /tmp/*) printf '%s' "$2" ;;
+    *) die "$2 is outside your home folder: only folders under ~ (and /tmp) move" ;;
   esac
+}
+
+# The same mapping inside files that name paths here (a worktree's .git).
+repath() { # repath MACHINE: a sed program
+  printf 's#%s/#%s/#g; s#/private/tmp/#/tmp/#g' "$HOME" "$(remote_home "$1")"
 }
 
 connected() {
@@ -117,6 +131,7 @@ machine_rm() {
   hc machine rm "$name" >/dev/null 2>&1 || true
   boat delete --yes --no-update "$id" >/dev/null 2>&1 || say "boat delete $id failed: delete it with boat delete"
   rm -f "$(record "$name")"
+  rm -rf "$DIR/sent/$name"
   echo "removed $name ($id)"
 }
 
@@ -132,21 +147,60 @@ machine_ls() {
 # -----
 
 sync() {
-  m=$1 d=${2:-$PWD}
+  m=$1; shift
+  d=$PWD includes="" missing=0
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --include) [ $# -ge 2 ] || die "sync: --include needs a path"; includes="$includes
+$2"; shift 2 ;;
+      --if-missing) missing=1; shift ;;
+      -*) die "sync: unknown $1" ;;
+      *) d=$1; shift ;;
+    esac
+  done
   d=$(cd "$d" && pwd -P)
   top=$(git -C "$d" rev-parse --show-toplevel 2>/dev/null || printf '%s' "$d")
   dest=$(where "$m" "$top")
+  if [ $missing = 1 ] && rsh "$m" "[ -d $(q "$dest") ]" >/dev/null; then echo "$dest"; return 0; fi
   say "Copying $top to $m:$dest..."
   # macOS's tar would add ._ files and xattrs Linux warns about.
   export COPYFILE_DISABLE=1
+  # Ignored files you named: relative to the project, or a path in it.
+  extra=$(printf '%s\n' "$includes" | while IFS= read -r i; do
+    [ -n "$i" ] || continue
+    case $i in (/*) a=$i ;; (*) a=$d/$i ;; esac
+    [ -e "$a" ] || die "sync: no $i"
+    a=$(cd "$(dirname "$a")" && pwd -P)/$(basename "$a")
+    case $a in ("$top"/*) printf '%s\n' "${a#"$top"/}" ;; (*) die "sync: $i isn't in $top" ;; esac
+  done) || exit 1
   if git -C "$top" rev-parse --git-dir >/dev/null 2>&1; then
-    { git -C "$top" ls-files -co --exclude-standard -z; printf '.git\0'; } \
+    { git -C "$top" ls-files -co --exclude-standard -z; printf '.git\0'
+      [ -z "$extra" ] || printf '%s\n' "$extra" | tr '\n' '\0'; } \
       | tar -C "$top" --no-mac-metadata --no-xattrs --null -T - -cf "$T/tree.tar" 2>/dev/null
   else
     tar -C "$top" --no-mac-metadata --no-xattrs --exclude node_modules --exclude .DS_Store -cf "$T/tree.tar" . 2>/dev/null
   fi
   unpack "$m" "$T/tree.tar" "$dest"
+  # A worktree's .git, and a repository's list of its worktrees, name
+  # folders by path: the paths there.
+  rsh "$m" "cd $(q "$dest") && for f in .git .git/worktrees/*/gitdir; do [ -f \"\$f\" ] && sed -i $(q "$(repath "$m")") \"\$f\"; done; true" >/dev/null
   echo "$dest"
+}
+
+# Anything, as it is: each file or folder to the same path there.
+copy() {
+  m=$1; shift
+  [ $# -gt 0 ] || die "copy MACHINE PATH..."
+  export COPYFILE_DISABLE=1
+  for p in "$@"; do
+    [ -e "$p" ] || die "copy: no $p"
+    a=$(cd "$(dirname "$p")" && pwd -P)/$(basename "$p")
+    dest=$(where "$m" "$a")
+    say "Copying $a to $m:$dest..."
+    tar -C "$(dirname "$a")" --no-mac-metadata --no-xattrs --exclude .DS_Store -cf "$T/copy.tar" "$(basename "$a")"
+    unpack "$m" "$T/copy.tar" "$(dirname "$dest")"
+    echo "$dest"
+  done
 }
 
 # A local file to a new temp file there, gzipped; its path there. In
@@ -223,23 +277,87 @@ pi_dir() { printf -- '--%s--' "$(printf '%s' "$1" | sed -e 's#^/##' -e 's#/#-#g'
 # Every cwd under ~ (the agent may have worked in other folders too).
 recwd() { OLD=$1 NEW=$2 perl -pe 's/"cwd":"\Q$ENV{OLD}\E(?=["\/])/"cwd":"$ENV{NEW}/g'; }
 
+# What a session sent to a machine already: Reflex copies a session while
+# the agent is still here (which can take minutes) and again once it's closed,
+# when only what it wrote since goes.
+sent() { printf '%s/sent/%s/%s' "$DIR" "$1" "$(printf '%s' "$2" | tr '/' '_')"; }
+
+# Where the last whole line of FILE ends, in bytes.
+line_end() {
+  perl -e 'open F, "<", $ARGV[0] or die; my $s = -s F; my $b = $s < 65536 ? $s : 65536;
+    seek F, $s - $b, 0; read F, my $t, $b; my $i = rindex($t, "\n"); print $i < 0 ? 0 : $s - $b + $i + 1' "$1"
+}
+# The 4 KB of FILE before OFFSET, hashed: the part sent is unchanged.
+before() {
+  perl -MDigest::SHA=sha256_hex -e 'open F, "<", $ARGV[0] or die; my $o = $ARGV[1]; my $b = $o < 4096 ? $o : 4096;
+    seek F, $o - $b, 0; read F, my $t, $b; print sha256_hex($t)' "$1" "$2"
+}
+
+# A transcript (it only grows) as ~/REL there, cwd fields mapped: whole the
+# first time, then the lines added since.
+send_log() { # send_log MACHINE FILE REL
+  _ls=$(sent "$1" "$3")
+  _le=$(line_end "$2")
+  _lf=0 _lz=0
+  if [ -f "$_ls" ]; then
+    _lo=$(sed -n 1p "$_ls")
+    [ "$_lo" -le "$_le" ] && [ "$(before "$2" "$_lo")" = "$(sed -n 2p "$_ls")" ] && _lf=$_lo _lz=$(sed -n 3p "$_ls")
+  fi
+  _lh=$(remote_home "$1")
+  if [ "$_lf" -gt 0 ]; then
+    tail -c +"$((_lf + 1))" "$2" | head -c "$((_le - _lf))" | recwd "$HOME" "$_lh" > "$T/log"
+    _ln=$(wc -c < "$T/log" | tr -d ' ')
+    _lr=$(send "$1" "$T/log")
+    # Only onto the copy as it was left: one gone or written to there since
+    # (the session went on there) gets the whole of it, below.
+    if rsh "$1" "f=\"\$HOME\"/$(q "$3"); [ -f \"\$f\" ] && [ \"\$(wc -c < \"\$f\")\" -eq $_lz ] || { rm -f $(q "$_lr"); exit 3; }; gunzip -c $(q "$_lr") >> \"\$f\"; s=\$?; rm -f $(q "$_lr"); exit \$s" >/dev/null; then
+      _lz=$((_lz + _ln))
+    else
+      _lf=0
+    fi
+  fi
+  if [ "$_lf" = 0 ]; then
+    head -c "$_le" "$2" | recwd "$HOME" "$_lh" > "$T/log"
+    _lz=$(wc -c < "$T/log" | tr -d ' ')
+    put "$1" "$T/log" "$3"
+  fi
+  mkdir -p "$(dirname "$_ls")"
+  printf '%s\n%s\n%s\n' "$_le" "$(before "$2" "$_le")" "$_lz" > "$_ls"
+}
+
+# A folder (PARENT/NAME) into DEST there: whole the first time, then the
+# files changed since.
+send_dir() { # send_dir MACHINE PARENT NAME DEST
+  [ -d "$2/$3" ] || return 0
+  _ds=$(sent "$1" "$2/$3")
+  : > "$T/stamp"   # before the copy: what changes during it goes next time
+  if [ -f "$_ds" ]; then
+    (cd "$2" && find "$3" -type f -newer "$_ds" -print0) > "$T/list"
+  else
+    printf '%s\0' "$3" > "$T/list"
+  fi
+  if [ -s "$T/list" ]; then
+    COPYFILE_DISABLE=1 tar -C "$2" --no-mac-metadata --no-xattrs --null -T "$T/list" -cf "$T/dir.tar"
+    unpack "$1" "$T/dir.tar" "$4"
+  fi
+  mkdir -p "$(dirname "$_ds")"
+  mv "$T/stamp" "$_ds"
+}
+
 session() {
   m=$1 kind=$2 id=$3 cwd=$4
   rcwd=$(where "$m" "$cwd")
   rsh "$m" "mkdir -p $(q "$rcwd")" >/dev/null
-  tmp="$T/session.jsonl"
   case $kind in
     claude)
       f="$HOME/.claude/projects/$(claude_dir "$cwd")/$id.jsonl"
       [ -f "$f" ] || die "no claude session $id for $cwd"
       rel=".claude/projects/$(claude_dir "$rcwd")"
-      recwd "$HOME" "$(remote_home "$m")" < "$f" > "$tmp"
-      put "$m" "$tmp" "$rel/$id.jsonl"
-      # Its subagents' transcripts, when it has any.
-      if [ -d "${f%.jsonl}" ]; then
-        COPYFILE_DISABLE=1 tar -C "$(dirname "$f")" --no-mac-metadata --no-xattrs -cf "$T/sub.tar" "$id"
-        unpack "$m" "$T/sub.tar" "$(remote_home "$m")/$rel"
-      fi
+      send_log "$m" "$f" "$rel/$id.jsonl"
+      # Its subagents' transcripts and saved tool output, and Claude's
+      # memory for the project.
+      send_dir "$m" "$(dirname "$f")" "$id" "$(remote_home "$m")/$rel"
+      send_dir "$m" "$(dirname "$f")" memory "$(remote_home "$m")/$rel"
       # Trusted there as it is here: no folder-trust question on resume.
       rsh "$m" "command -v node >/dev/null && node -e '
         const fs = require(\"fs\"), p = process.env.HOME + \"/.claude.json\";
@@ -256,8 +374,7 @@ session() {
       fi
       [ -n "$f" ] && [ -f "$f" ] || die "no pi session $id for $cwd"
       rel=".pi/agent/sessions/$(pi_dir "$rcwd")/$(basename "$f")"
-      recwd "$HOME" "$(remote_home "$m")" < "$f" > "$tmp"
-      put "$m" "$tmp" "$rel"
+      send_log "$m" "$f" "$rel"
       # A path names the file there; an id is the same id.
       if [ -f "$id" ]; then out="$(remote_home "$m")/$rel"; else out=$id; fi
       ;;
@@ -265,8 +382,7 @@ session() {
       f=$(find "$HOME/.codex/sessions" -name "*$id*.jsonl" 2>/dev/null | head -n 1)
       [ -n "$f" ] || die "no codex session $id"
       rel=".codex/sessions/${f#"$HOME/.codex/sessions/"}"
-      recwd "$HOME" "$(remote_home "$m")" < "$f" > "$tmp"
-      put "$m" "$tmp" "$rel"
+      send_log "$m" "$f" "$rel"
       out=$id
       ;;
     *) die "Reflex can't move a $kind session (claude, pi and codex only)" ;;
@@ -391,6 +507,7 @@ case $cmd in
     case $sub in new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;; *) die "machine new|rm|ls" ;; esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;
+  copy) copy "$@" ;;
   creds) creds "$@" ;;
   session) session "$@" ;;
   snapshot) snapshot "$@" ;;
@@ -398,6 +515,6 @@ case $cmd in
   move) move "$@" ;;
   skill) skill "$@" ;;
   install) install ;;
-  ""|-h|--help|help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//' ;;
+  ""|-h|--help|help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
   *) die "unknown command $cmd (reflex --help)" ;;
 esac

@@ -21,9 +21,16 @@ enum Boat {
     static var skill: URL { Daemon.resources.appendingPathComponent("integrations/skills/reflex/SKILL.md") }
 
     /// What the button says to an agent when there's no template yet.
-    static let buildPrompt = "Use the reflex skill to build my boat template, then move this session to boat."
+    static let buildPrompt = "Use the reflex skill to build my boat template, then move this session to boat, with everything this work needs."
     static func rebuildPrompt(_ changed: [String]) -> String {
-        "Use the reflex skill to rebuild my boat template (changed here: \(changed.joined(separator: ", "))), then move this session to boat."
+        "Use the reflex skill to rebuild my boat template (changed here: \(changed.joined(separator: ", "))), then move this session to boat, with everything this work needs."
+    }
+    /// The window's button, to a machine that's ready: only the agent knows
+    /// what its work needs (other repositories, worktrees, files from
+    /// Downloads), so it copies them and asks; the button was the OK.
+    static func movePrompt(_ machine: String, made: Bool) -> String {
+        let what = made ? "a new boat machine made from my template" : "my machine \(machine)"
+        return "Move this session to \(machine) (\(what)) with the reflex skill: copy everything this work needs there, then reflex move self --to \(machine)."
     }
 
     private nonisolated(unsafe) static var boatFound: (at: Date, yes: Bool) = (.distantPast, false)
@@ -64,14 +71,19 @@ enum Boat {
     }
 
     /// The project around `dir`, at the same ~ path there: that path.
-    static func sync(_ machine: String, _ dir: String) async throws -> String { try await reflex(["sync", machine, dir]) }
+    /// `ifMissing`: only when it isn't there yet (the agent copied it).
+    static func sync(_ machine: String, _ dir: String, ifMissing: Bool = false) async throws -> String {
+        try await reflex(["sync", machine, dir] + (ifMissing ? ["--if-missing"] : []), timeout: 3600)
+    }
 
     static func creds(_ machine: String) async throws { _ = try await reflex(["creds", machine]) }
 
     /// The session file there, its cwd fields mapped: the folder and the
-    /// session to resume there.
+    /// session to resume there. Again later: only what it wrote since (a
+    /// long session is copied while the agent is still here; after its
+    /// close, the last lines).
     static func session(_ machine: String, kind: String, session: String, cwd: String) async throws -> (cwd: String, session: String) {
-        let out = try await reflex(["session", machine, kind, session, cwd])
+        let out = try await reflex(["session", machine, kind, session, cwd], timeout: 3600)
         let parts = out.split(separator: "\t", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { throw Failure(message: "reflex session said \(out)") }
         return (parts[0], parts[1])
@@ -191,6 +203,13 @@ final class MoveRequests: ObservableObject {
     }
 
     @Published private(set) var pending: [Request] = []
+    /// Agents asked to move by the window's button: their request is
+    /// already approved. To that machine, or (nil) to the boat machine it
+    /// makes while building the template.
+    private var expected: [String: (to: String?, at: Date)] = [:]
+
+    func expect(_ pane: String, to machine: String?) { expected[pane] = (machine, Date()) }
+    func forget(_ pane: String) { expected[pane] = nil }
 
     private var dir: URL { Settings.supportDir.appendingPathComponent("boat/requests", isDirectory: true) }
     private var timer: Timer?
@@ -237,6 +256,10 @@ final class MoveRequests: ObservableObject {
     }
 
     private func autoApproved(_ r: Request) -> Bool {
+        if let e = expected[r.pane], Date().timeIntervalSince(e.at) < 3 * 3600, e.to == r.to || (e.to == nil && r.made) {
+            expected[r.pane] = nil
+            return true
+        }
         switch Settings.shared.moveApproval {
         case "always": return true
         case "made": return r.made
@@ -252,7 +275,8 @@ final class MoveRequests: ObservableObject {
         drop(r)
         try? FileManager.default.removeItem(at: file)
         guard let a = Store.shared.state.agents.first(where: { $0.pane == r.pane }) else { return }
-        HerdrMove.shared.move([a], to: r.to)
+        // The agent asked: it copied what the work needs.
+        HerdrMove.shared.move([a], to: r.to, prepared: true)
     }
 
     func decline(_ r: Request) { drop(r) }

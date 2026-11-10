@@ -997,6 +997,7 @@ struct AgentPopout: View {
     var titlebar: CGFloat = 28
     @ObservedObject var store = Store.shared
     @ObservedObject var themes = Themes.shared
+    @ObservedObject private var move = HerdrMove.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var hintSize = CGSize.zero
 
@@ -1060,7 +1061,8 @@ struct AgentPopout: View {
                     Spacer()
                 }
                 .animation(Motion.micro, value: MoveRequests.shared.pending)
-                if session.ended {
+                // (Closed to move: the banner says where it's going.)
+                if session.ended && !move.moving.contains(session.pane) && move.notes[session.pane] == nil {
                     VStack(spacing: 10) {
                         if session.elsewhere {
                             Text("Open in another window").font(Type.title)
