@@ -60,7 +60,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "Font and colours for agent terminals."
         case .routing: return "Jev decides where each request goes. Pick its provider; it learns from your choices."
         case .projects: return "The folders Reflex can start new sessions in."
-        case .machines: return "Your other Macs, from herdr's saved machines: their agents show up here with this Mac's."
+        case .machines: return "Your Macs and boat sandboxes, one mesh: their sessions show up here with this Mac's, and move between them."
         case .phone: return "Answer your agents from your phone."
         case .setup: return "Everything Reflex needs, checked live."
         case .about: return "Reflex, herdr and Jev."
@@ -75,7 +75,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
-        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale remove forget delete"
+        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale remove forget delete boat sandbox template skill move sessions retire approve files commands run trust resume"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
         case .about: return "version"
@@ -948,161 +948,177 @@ private struct ProjectsPane: View {
 private struct MachinesPane: View {
     @ObservedObject var machines = MachinesModel.shared
     @ObservedObject var store = Store.shared
+    @State private var addOpen = false
+    @State private var herdrOpen = !Settings.shared.usesCore
 
     var body: some View {
         Form {
             Section { PaneHeader(pane: .machines) }
                 .onAppear { Machines.shared.refresh() }
-            Section {
-                if machines.rows.isEmpty {
-                    RowLabel(machines.loaded ? "No machines yet" : "Asking herdr…",
-                             "Add one below, or in a terminal with `herdr machine add <ssh-host>`.")
-                }
-                ForEach(machines.rows) { m in
-                    MachineRow(machine: m, agents: store.state.agents.filter { $0.machine == m.key }.count)
-                }
-            } header: {
-                Text("From herdr")
-            } footer: {
-                Text("Reflex keeps one SSH tunnel to each enabled machine, with your own ssh config, keys and agent, and reconnects when it drops. Their agents wear the machine's name (and a \(Image(systemName: "circle.fill")) badge) in the rail, the inbox and the ⌥⌥ bar. `herdr machine disable`, `enable` and `remove` change this list.")
-                    .font(Type.meta).foregroundStyle(.secondary)
-            }
+            MachineCardsSection()
+            SessionsSection()
+            TrustSection()
             BoatSection()
-            CoreMachinesSection()
-            MoveAllSection()
-            Section("Add a Mac") {
-                MachineSteps()
-                AddMachineView()
-            }
-        }
-    }
-}
-
-/// boat.dev: sessions moved to a new sandbox (the ⛵ in a terminal window), the
-/// template they start from, who approves an agent's move, and where new
-/// sessions start.
-private struct BoatSection: View {
-    @ObservedObject var s = Settings.shared
-    @ObservedObject var template = BoatTemplate.shared
-    @State private var skill = Boat.skillInstalled
-    @State private var machines: [String] = CoreMachines.known.map(\.name)
-
-    private var templateText: (String, String) {
-        switch template.state {
-        case .unknown: return ("Checking…", "")
-        case .none: return ("No template yet", "The first move to boat asks the agent to build one with the reflex skill: this Mac's tools and settings on a sandbox, saved as a private snapshot in your boat account. Your logins never go in it; Reflex copies them to each machine.")
-        case .current(let built): return ("Template up to date", "Built \(Self.day(built)). New boat machines start from it in seconds.")
-        case .stale(let built, let changed):
-            return ("Template out of date", "Built \(Self.day(built)); changed here since: \(changed.joined(separator: ", ")). Moves still use it; ⛵ → Rebuild Template asks an agent to build it again.")
-        }
-    }
-
-    var body: some View {
-        Section {
-            if !Boat.hasBoat {
-                RowLabel("The boat CLI isn't installed", "Install it from docs.boat.dev and run `boat login`: then ⛵ in a terminal window moves a session to a new boat machine.")
-            } else {
-                LabeledContent {
-                    Button("Check") { Task { await template.refresh(fresh: 0) } }
-                } label: {
-                    RowLabel(templateText.0, templateText.1)
-                }
-            }
-            LabeledContent {
-                Button(skill ? "Reinstall" : "Install") {
-                    Boat.install()
-                    skill = Boat.skillInstalled
-                }
-            } label: {
-                RowLabel(skill ? "Reflex skill installed" : "Reflex skill",
-                         "Teaches claude, pi and codex to build your template and move themselves (`reflex move self`). Installed in ~/.claude, ~/.codex and ~/.pi, with `reflex` in ~/.local/bin.")
-            }
-            Picker(selection: $s.moveApproval) {
-                Text("Ask every time").tag("ask")
-                Text("Approve for boat machines").tag("made")
-                Text("Always approve").tag("always")
-            } label: {
-                RowLabel("When an agent asks to move", "It asks with `reflex move self`; its window shows Move and Not Now. The ⛵ button is your OK by itself.")
-            }
-            Picker(selection: $s.fileApproval) {
-                Text("Ask every time").tag("ask")
-                Text("Allow for boat machines").tag("made")
-                Text("Always allow").tag("always")
-            } label: {
-                RowLabel("When a session elsewhere asks for files", "A session Reflex moved asks this Mac with `reflex home fetch` (a file it finds missing) or `reflex home ls`; its window shows Send and Not Now. They go to the same ~ path there.")
-            }
-            Picker(selection: $s.defaultMachine) {
-                Text("This Mac").tag("")
-                if Boat.hasBoat { Text("A new boat machine").tag(Boat.key) }
-                ForEach(machines, id: \.self) { Text($0).tag($0) }
-            } label: {
-                RowLabel("Start new sessions on", "The ⌥⌥ bar starts with this @machine; × or ⌫ on the token starts one here instead.")
-            }
-        } header: {
-            Text("boat.dev")
-        }
-        .task {
-            await template.refresh()
-            machines = await CoreMachines.list().filter { !Boat.made($0.name) }.map(\.name)
-        }
-    }
-
-    private static func day(_ iso: String) -> String {
-        guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
-        return d.formatted(date: .abbreviated, time: .shortened)
-    }
-}
-
-/// herdr-core's machines: the core reaches them itself, and their terminals
-/// join its list (no tunnel of Reflex's). `hc machine rm` removes one.
-private struct CoreMachinesSection: View {
-    @ObservedObject var store = Store.shared
-    @ObservedObject private var lifetime = BoatLifetime.shared
-    @State private var rows: [CoreMachines.Machine] = []
-    @State private var loaded = false
-
-    var body: some View {
-        Section {
-            if rows.isEmpty {
-                RowLabel(loaded ? "No machines yet" : "Asking herdr-core…",
-                         "Add one below, or in a terminal with `hc machine add <ssh-host>`.")
-            }
-            ForEach(rows, id: \.name) { m in
-                let agents = store.state.agents.filter { $0.machine == m.name }.count
-                let stopped = lifetime.isDown(m.name)
-                LabeledContent {
-                    MachineActions(name: m.name, reconnect: m.state == "connected" ? nil : stopped ? {
-                        lifetime.resume(m.name)
-                    } : {
-                        _ = try? await HerdrCore.call("machine.connect", ["machine": m.name], timeout: 30)
-                        await load()
-                    }, reconnectLabel: stopped ? (lifetime.resuming.contains(m.name) ? "Resuming…" : "Resume") : "Reconnect",
-                    reconnectDisabled: lifetime.resuming.contains(m.name), remove: {
-                        // One Reflex made: its boat sandbox goes too.
-                        if Boat.made(m.name) { try await Boat.remove(m.name) } else { try await CoreMachines.remove(m.name) }
-                        await load()
-                    })
-                } label: {
-                    HStack(alignment: .firstTextBaseline, spacing: 8) {
-                        Image(systemName: m.state == "connected" ? "checkmark.circle.fill" : m.state == "connecting" ? "arrow.triangle.2.circlepath" : "exclamationmark.circle.fill")
-                            .foregroundStyle(m.state == "connected" ? Tone.done : m.state == "connecting" ? Tone.working : Tone.blocked)
-                        VStack(alignment: .leading, spacing: 2) {
-                            HStack(spacing: 6) { Text(m.name); MachineChip(machine: m.name) }
-                            Text((Boat.made(m.name) ? "boat sandbox, made by Reflex" : m.temporary ? "temporary · \(m.target)" : "ssh \(m.target)")
-                                 + (m.version.isEmpty ? "" : " · hc \(m.version)"))
-                                .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                            Text(stopped ? "Stopped by boat after an hour idle. Its disk is kept for 14 days: Resume starts it with its agents." : lifetime.problem[m.name] ?? Self.state(m, agents: agents)).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            if !machines.rows.isEmpty {
+                Section {
+                    DisclosureGroup(isExpanded: $herdrOpen) {
+                        ForEach(machines.rows) { m in
+                            MachineRow(machine: m, agents: store.state.agents.filter { $0.machine == m.key }.count)
                         }
+                    } label: {
+                        RowLabel("herdr's machines", "\(machines.rows.count) over Reflex's own ssh tunnels, for sessions still in herdr")
                     }
                 }
             }
+            Section {
+                DisclosureGroup(isExpanded: $addOpen) {
+                    MachineSteps()
+                    AddMachineView()
+                } label: {
+                    Label("Add a machine", systemImage: "plus.circle.fill").font(.system(size: 13, weight: .medium))
+                }
+            }
+        }
+    }
+}
+
+/// What each machine is (MacBook Air, Mac mini, Linux), asked once over
+/// herdr-core's line: its card's icon and subtitle.
+@MainActor
+final class MachineKinds: ObservableObject {
+    static let shared = MachineKinds()
+    @Published private(set) var models: [String: String] = [:]
+    private var asked: Set<String> = []
+
+    func look(_ machine: String) {
+        guard !asked.contains(machine) else { return }
+        asked.insert(machine)
+        Task {
+            let (code, out) = await Boat.runAt("if [ \"$(uname -s)\" = Darwin ]; then system_profiler SPHardwareDataType 2>/dev/null | sed -n 's/^ *Model Name: //p' | head -1; else echo Linux; fi",
+                                               from: machine, dir: "~", timeout: 20)
+            let model = out.split(separator: "\n").last.map { $0.trimmingCharacters(in: .whitespaces) } ?? ""
+            if code == 0, !model.isEmpty { models[machine] = model } else { asked.remove(machine) }
+        }
+    }
+
+    func symbol(_ machine: String, boat: Bool = false) -> String {
+        if boat { return "sailboat.fill" }
+        let m = models[machine] ?? ""
+        if m.contains("MacBook") { return "laptopcomputer" }
+        if m.contains("mini") { return "macmini.fill" }
+        if m.contains("Studio") { return "macstudio.fill" }
+        if m.contains("Mac Pro") { return "macpro.gen3.fill" }
+        if m == "Linux" { return "server.rack" }
+        return "desktopcomputer"
+    }
+
+    func tint(_ machine: String, boat: Bool = false) -> Color {
+        if boat { return Color(red: 0.11, green: 0.62, blue: 0.86) }
+        return models[machine] == "Linux" ? Color(red: 0.93, green: 0.55, blue: 0.2) : Color(red: 0.42, green: 0.45, blue: 0.95)
+    }
+}
+
+/// One machine: what it is, how it's connected, its agents, and what you can
+/// do with it (a shell there, its sessions here, resume, remove).
+private struct MachineCard: View {
+    var name: String
+    var title: String
+    var subtitle: String
+    var symbol: String
+    var tint: Color
+    var status: (tone: Color, text: String)
+    var action: (label: String, run: () -> Void, disabled: Bool)? = nil
+    var menu: AnyView? = nil
+    var hint = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .top) {
+                ZStack(alignment: .bottomTrailing) {
+                    Image(systemName: symbol)
+                        .font(.system(size: 17, weight: .medium))
+                        .foregroundStyle(.white)
+                        .frame(width: 38, height: 38)
+                        .background(tint.gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    Circle().fill(status.tone)
+                        .frame(width: 10, height: 10)
+                        .overlay(Circle().strokeBorder(Color(nsColor: .windowBackgroundColor), lineWidth: 2))
+                        .offset(x: 3, y: 3)
+                }
+                Spacer(minLength: 4)
+                if let menu {
+                    Menu { menu } label: { Image(systemName: "ellipsis.circle").font(.system(size: 15)) }
+                        .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize()
+                        .foregroundStyle(.secondary)
+                }
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title).font(.system(size: 13, weight: .semibold)).lineLimit(1)
+                Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            HStack(spacing: 6) {
+                Text(status.text).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if let action {
+                    Button(action.label, action: action.run).controlSize(.small).disabled(action.disabled)
+                }
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+        .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
+        .help(hint)
+    }
+}
+
+/// This Mac and every machine herdr-core reaches, as cards.
+private struct MachineCardsSection: View {
+    @ObservedObject var store = Store.shared
+    @ObservedObject private var lifetime = BoatLifetime.shared
+    @ObservedObject private var kinds = MachineKinds.shared
+    @State private var rows: [CoreMachines.Machine] = []
+    @State private var loaded = false
+    @State private var removing: CoreMachines.Machine?
+    @State private var failure: String?
+
+    var body: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
+                thisMac
+                ForEach(rows, id: \.name) { card($0) }
+            }
+            .padding(.vertical, 4)
+            if loaded && rows.isEmpty {
+                Text("No other machine yet: add one below, or move a session to boat with ⛵.")
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
         } header: {
-            Text("From herdr-core")
+            Text("Your machines")
         } footer: {
-            Text("herdr-core dials each machine over your ssh and keeps the line up; its agents wear the machine's name in the rail, the inbox and the ⌥⌥ bar.")
+            Text("herdr-core keeps an ssh line to each. Their sessions join the rail, the inbox and the ⌥⌥ bar with the machine's name, and every Reflex listens on the others for a session asking home.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
+        .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
+            Button("Remove Machine", role: .destructive) {
+                guard let m = removing else { return }
+                Task { @MainActor in
+                    do {
+                        if Boat.made(m.name) { try await Boat.remove(m.name) } else { try await CoreMachines.remove(m.name) }
+                    } catch { failure = error.localizedDescription }
+                    await load()
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(removing.map { Boat.made($0.name) ? "Its boat sandbox is deleted too, with its disk." : "herdr-core forgets the connection; sessions there keep running, and you can add it again." } ?? "")
+        }
+        .alert("Couldn't remove it", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
+            Button("OK", role: .cancel) { failure = nil }
+        } message: { Text(failure ?? "") }
         .task {
+            kinds.look(Boat.here)
             while !Task.isCancelled {
                 await load()
                 try? await Task.sleep(for: .seconds(3))
@@ -1113,16 +1129,218 @@ private struct CoreMachinesSection: View {
     private func load() async {
         rows = await CoreMachines.list(fresh: 2)
         loaded = true
+        for m in rows where m.state == "connected" && !Boat.made(m.name) { kinds.look(m.name) }
     }
 
-    private static func state(_ m: CoreMachines.Machine, agents: Int) -> String {
+    private func count(_ n: Int) -> String { n == 0 ? "No agents" : n == 1 ? "1 agent" : "\(n) agents" }
+
+    private var thisMac: some View {
+        let n = store.state.agents.filter { !$0.remote }.count
+        return MachineCard(name: Boat.here, title: Host.current().localizedName ?? "This Mac",
+                           subtitle: "This Mac" + (kinds.models[Boat.here].map { " · \($0)" } ?? ""),
+                           symbol: kinds.symbol(Boat.here), tint: Color(red: 0.36, green: 0.39, blue: 0.47),
+                           status: (Tone.done, count(n)), hint: "Where this Reflex runs")
+    }
+
+    private func status(_ m: CoreMachines.Machine, agents: Int) -> (tone: Color, text: String) {
+        if lifetime.resuming.contains(m.name) { return (Tone.working, "Resuming…") }
+        if lifetime.isDown(m.name) { return (Color.secondary, "Stopped after an hour idle; its disk is kept 14 days") }
+        if let p = lifetime.problem[m.name] { return (Tone.blocked, p) }
         switch m.state {
-        case "connected": return agents == 1 ? "Connected · 1 agent" : "Connected · \(agents) agents"
-        case "connecting": return "Connecting…"
-        case "needs_login": return "Needs you to sign in: run `hc machine connect \(m.name)` in Terminal."
-        case "needs_update": return "Its herdr-core needs updating: run `hc update` there."
-        default: return m.why.isEmpty ? m.state : m.why
+        case "connected": return (Tone.done, count(agents))
+        case "connecting": return (Tone.working, "Connecting…")
+        case "needs_login": return (Tone.blocked, "Needs you to sign in: hc machine connect \(m.name)")
+        case "needs_update": return (Tone.blocked, "Its herdr-core needs an update")
+        default: return (Tone.blocked, m.why.isEmpty ? m.state : m.why)
         }
+    }
+
+    /// The one button a card shows: Resume a stopped sandbox, Reconnect a
+    /// machine that dropped.
+    private func action(_ m: CoreMachines.Machine) -> (label: String, run: () -> Void, disabled: Bool)? {
+        let name = m.name
+        if lifetime.resuming.contains(name) { return ("Resuming…", {}, true) }
+        if lifetime.isDown(name) { return ("Resume", { BoatLifetime.shared.resume(name) }, false) }
+        if m.state == "connected" || m.state == "connecting" { return nil }
+        return ("Reconnect", {
+            Task { _ = try? await HerdrCore.call("machine.connect", ["machine": name], timeout: 30) }
+        }, false)
+    }
+
+    @ViewBuilder private func menu(_ m: CoreMachines.Machine, movable: [AgentInfo]) -> some View {
+        Button("Open Terminal There") { OpenIn.openShell(on: m.name, cwd: "") }
+            .disabled(m.state != "connected" || OpenIn.terminal == nil)
+        Button(movable.isEmpty ? "Move Its Sessions Here" : "Move Its \(movable.count) Session\(movable.count == 1 ? "" : "s") Here") {
+            HerdrMove.shared.move(movable, to: Boat.here)
+        }
+        .disabled(movable.isEmpty)
+        Divider()
+        Button("Remove…", role: .destructive) { removing = m }
+    }
+
+    private func subtitle(_ m: CoreMachines.Machine) -> String {
+        if Boat.made(m.name) { return "boat sandbox" }
+        if let model = kinds.models[m.name] { return "\(model) · \(m.host.isEmpty ? m.target : m.host)" }
+        return m.temporary ? "temporary · \(m.target)" : "ssh \(m.target)"
+    }
+
+    private func card(_ m: CoreMachines.Machine) -> some View {
+        let boat = Boat.made(m.name)
+        let agents = store.state.agents.filter { $0.machine == m.name }
+        let movable = agents.filter { HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
+        let hint = "\(boat ? "boat ssh" : "ssh") \(m.target)" + (m.version.isEmpty ? "" : " · hc \(m.version)")
+        return MachineCard(name: m.name, title: m.name, subtitle: subtitle(m),
+                           symbol: kinds.symbol(m.name, boat: boat), tint: kinds.tint(m.name, boat: boat),
+                           status: status(m, agents: agents.count), action: action(m),
+                           menu: AnyView(menu(m, movable: movable)), hint: hint)
+    }
+}
+
+/// Where new sessions start, and moving a whole machine's sessions.
+private struct SessionsSection: View {
+    @ObservedObject var s = Settings.shared
+    @ObservedObject private var store = Store.shared
+    @ObservedObject private var move = HerdrMove.shared
+    @State private var machines: [String] = []
+    @State private var from = Boat.here
+    @State private var to = ""
+
+    private func label(_ m: String) -> String { m == Boat.here ? "This Mac" : m }
+
+    private var sessions: [AgentInfo] {
+        store.state.agents.filter { Boat.name($0.machine) == from && HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
+    }
+
+    var body: some View {
+        Section {
+            Picker(selection: $s.defaultMachine) {
+                Text("This Mac").tag("")
+                if Boat.hasBoat { Text("A new boat machine").tag(Boat.key) }
+                ForEach(machines.filter { !Boat.made($0) }, id: \.self) { Text($0).tag($0) }
+            } label: {
+                Label("Start new sessions on", systemImage: "play.circle")
+            }
+            .help("The ⌥⌥ bar starts with this @machine; × or ⌫ on the token starts one here instead.")
+            LabeledContent {
+                HStack(spacing: 6) {
+                    Picker("From", selection: $from) {
+                        ForEach([Boat.here] + machines, id: \.self) { Text(label($0)).tag($0) }
+                    }
+                    .labelsHidden().fixedSize()
+                    Image(systemName: "arrow.right").foregroundStyle(.secondary)
+                    Picker("To", selection: $to) {
+                        Text("Choose…").tag("")
+                        ForEach(([Boat.here] + machines).filter { $0 != from }, id: \.self) { Text(label($0)).tag($0) }
+                    }
+                    .labelsHidden().fixedSize()
+                    Button(sessions.isEmpty ? "Move" : "Move \(sessions.count)") { move.move(sessions, to: to) }
+                        .disabled(sessions.isEmpty || to.isEmpty || to == from)
+                }
+            } label: {
+                Label("Move every session", systemImage: "arrow.left.arrow.right.circle")
+            }
+            .help("claude, pi and codex sessions on one machine to another, each with its project and conversation, copied through this Mac. A busy one goes when its turn ends. Retiring a Mac: from the one you keep, move everything off it.")
+        } header: {
+            Text("Sessions")
+        }
+        .task {
+            while !Task.isCancelled {
+                machines = await CoreMachines.list().filter { $0.state == "connected" }.map(\.name)
+                try? await Task.sleep(for: .seconds(5))
+            }
+        }
+    }
+}
+
+/// What a session on another machine may do here without asking you.
+private struct TrustSection: View {
+    @ObservedObject var s = Settings.shared
+
+    var body: some View {
+        Section {
+            Picker(selection: $s.moveApproval) {
+                Text("Ask every time").tag("ask")
+                Text("Allow for boat machines").tag("made")
+                Text("Always allow").tag("always")
+            } label: {
+                Label("Move itself", systemImage: "sailboat")
+            }
+            .help("reflex move self: its window shows Move and Not Now. Pressing ⛵ is your OK by itself.")
+            Picker(selection: $s.fileApproval) {
+                Text("Ask every time").tag("ask")
+                Text("Allow for boat machines").tag("made")
+                Text("Always allow").tag("always")
+            } label: {
+                Label("Take files from this Mac", systemImage: "tray.and.arrow.down")
+            }
+            .help("reflex home fetch and ls: its window shows Send and Not Now. Files go to the same ~ path there.")
+            Picker(selection: $s.runApproval) {
+                Text("Ask every time").tag("ask")
+                Text("Allow from my Macs").tag("macs")
+            } label: {
+                Label("Run commands on this Mac", systemImage: "terminal")
+            }
+            .help("reflex home run: its window shows the command with Run and Not Now; its output and exit code go back. A boat sandbox always asks: what it read could have been written by anyone.")
+        } header: {
+            Text("What sessions elsewhere may do")
+        } footer: {
+            Text("A boat sandbox's commands always ask.").font(Type.meta).foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// boat.dev: the template new boat machines start from, and the skill.
+private struct BoatSection: View {
+    @ObservedObject var template = BoatTemplate.shared
+    @State private var skill = Boat.skillInstalled
+
+    private var templateText: (title: String, tone: Color, detail: String) {
+        switch template.state {
+        case .unknown: return ("Checking…", .secondary, "")
+        case .none: return ("No template yet", Tone.working, "The first move to boat asks the agent to build one with the reflex skill: this Mac's tools and settings, saved as a private snapshot in your boat account. Your logins never go in it.")
+        case .current(let built): return ("Up to date", Tone.done, "Built \(Self.day(built)). New boat machines start from it in seconds.")
+        case .stale(let built, let changed): return ("Out of date", Tone.blocked, "Built \(Self.day(built)); changed here since: \(changed.joined(separator: ", ")). ⛵ → Rebuild Template asks an agent to build it again.")
+        }
+    }
+
+    var body: some View {
+        Section {
+            if !Boat.hasBoat {
+                RowLabel("The boat CLI isn't installed", "Install it from docs.boat.dev and run boat login: then ⛵ moves a session to a new boat machine.")
+            } else {
+                LabeledContent {
+                    HStack(spacing: 8) {
+                        Text(templateText.title)
+                            .font(.system(size: 11, weight: .semibold))
+                            .padding(.horizontal, 8).padding(.vertical, 3)
+                            .background(templateText.tone.opacity(0.16), in: Capsule())
+                            .foregroundStyle(templateText.tone)
+                        Button("Check") { Task { await template.refresh(fresh: 0) } }.controlSize(.small)
+                    }
+                } label: {
+                    Label("Template", systemImage: "square.stack.3d.up")
+                }
+                .help(templateText.detail)
+            }
+            LabeledContent {
+                Button(skill ? "Reinstall" : "Install") {
+                    Boat.install()
+                    skill = Boat.skillInstalled
+                }
+                .controlSize(.small)
+            } label: {
+                Label(skill ? "Reflex skill installed" : "Reflex skill", systemImage: "graduationcap")
+            }
+            .help("Teaches claude, pi and codex to move themselves, say what their work needs, ask home, and build your template. In ~/.claude, ~/.codex and ~/.pi, with reflex in ~/.local/bin.")
+        } header: {
+            Text("boat.dev")
+        }
+        .task { await template.refresh() }
+    }
+
+    private static func day(_ iso: String) -> String {
+        guard let d = ISO8601DateFormatter().date(from: iso) else { return iso }
+        return d.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
@@ -1593,49 +1811,5 @@ enum Remote {
         let ns = NSImage(size: rep.size)
         ns.addRepresentation(rep)
         return ns
-    }
-}
-
-/// Every session from one machine to another: retiring a Mac, or bringing
-/// another Mac's work here. Each goes between turns (a busy one when its
-/// turn ends), its project and conversation copied through this Mac.
-private struct MoveAllSection: View {
-    @ObservedObject private var store = Store.shared
-    @ObservedObject private var move = HerdrMove.shared
-    @State private var from = Boat.here
-    @State private var to = ""
-    @State private var machines: [String] = []
-
-    private func label(_ m: String) -> String { m == Boat.here ? "This Mac" : m }
-
-    private var sessions: [AgentInfo] {
-        store.state.agents.filter { Boat.name($0.machine) == from && HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
-    }
-
-    var body: some View {
-        Section {
-            let places = [Boat.here] + machines
-            Picker("From", selection: $from) { ForEach(places, id: \.self) { Text(label($0)).tag($0) } }
-            Picker("To", selection: $to) {
-                Text("Choose…").tag("")
-                ForEach(places.filter { $0 != from }, id: \.self) { Text(label($0)).tag($0) }
-            }
-            LabeledContent {
-                Button(sessions.isEmpty ? "No Sessions" : "Move \(sessions.count) Session\(sessions.count == 1 ? "" : "s")") {
-                    move.move(sessions, to: to)
-                }
-                .disabled(sessions.isEmpty || to.isEmpty || to == from)
-            } label: {
-                RowLabel("Move every session", "claude, pi and codex sessions on \(label(from)), each with its project and conversation, copied through this Mac. A busy one goes when its turn ends; its window shows how it's going.")
-            }
-        } header: {
-            Text("Move between machines")
-        }
-        .task {
-            while !Task.isCancelled {
-                machines = await CoreMachines.list().filter { $0.state == "connected" }.map(\.name)
-                try? await Task.sleep(for: .seconds(5))
-            }
-        }
     }
 }

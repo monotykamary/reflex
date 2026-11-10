@@ -231,6 +231,8 @@ enum CoreMachines {
         /// Short-lived (`hc machine add --temp`): a sandbox for a task, like
         /// the boat machines Reflex makes.
         var temporary = false
+        /// What the machine calls itself (its hostname), when hc says.
+        var host = ""
     }
 
     private static let lock = NSLock()
@@ -253,7 +255,8 @@ enum CoreMachines {
             guard let name = m["name"] as? String, (m["temporary"] as? Bool) != true || madeByReflex(name) else { return nil }
             return Machine(name: name, target: m["target"] as? String ?? m["host"] as? String ?? "",
                            state: m["state"] as? String ?? "", why: m["why"] as? String ?? "",
-                           version: m["version"] as? String ?? "", temporary: m["temporary"] as? Bool == true)
+                           version: m["version"] as? String ?? "", temporary: m["temporary"] as? Bool == true,
+                           host: m["host"] as? String ?? "")
         }
         return lock.withLock {
             guard revision == version else { return cached }

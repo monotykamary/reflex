@@ -75,6 +75,10 @@ final class Settings: ObservableObject {
     /// or a folder's contents: "ask", "made" (boat machines Reflex made), or
     /// "always".
     @Published var fileApproval: String { didSet { d.set(fileApproval, forKey: "fileApproval") } }
+    /// A session elsewhere asking to run a command on this Mac (`reflex home
+    /// run`): "ask", or "macs" (allowed for your other Macs; a boat sandbox
+    /// always asks).
+    @Published var runApproval: String { didSet { d.set(runApproval, forKey: "runApproval") } }
     /// Where the ⌥⌥ bar starts new sessions: "" this Mac, a machine's name,
     /// or "boat" (a new boat machine from your template each time).
     @Published var defaultMachine: String { didSet { d.set(defaultMachine, forKey: "defaultMachine") } }
@@ -109,6 +113,7 @@ final class Settings: ObservableObject {
         appearance = d.string(forKey: "appearance") ?? "system"
         moveApproval = d.string(forKey: "moveApproval") ?? "ask"
         fileApproval = d.string(forKey: "fileApproval") ?? "ask"
+        runApproval = d.string(forKey: "runApproval") ?? "ask"
         defaultMachine = d.string(forKey: "defaultMachine") ?? ""
         Settings.writeFolders(extraFolders)
     }

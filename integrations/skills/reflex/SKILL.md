@@ -176,10 +176,15 @@ The Mac that moved this session is still there, a line away:
 reflex home ls ~/Downloads             # what's in a folder where you came from
 reflex home fetch ~/Downloads/spec.pdf ~/code/notes   # copy them here, same ~ path
 reflex home machines                   # the machines that Reflex reaches
+reflex home run 'brew list | grep foo' # a command there: its output and exit code come back
+reflex home run --cwd ~/code/app --timeout 300 'git log --oneline -5'
 ```
 
-The user allows each (or Settings allows them); `fetch` waits until the
-files are here, then prints where they went. Don't move back on your own.
+The user allows each (or Settings allows them; a boat sandbox's commands
+always ask, so ask for what you need in one command rather than many);
+`fetch` waits until the files are here, then prints where they went, and
+`run` exits with the command's exit code. Prefer `fetch` for files and
+reading them here. Don't move back on your own.
 
 ## When it fails
 

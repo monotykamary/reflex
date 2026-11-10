@@ -108,14 +108,28 @@ extension OpenIn {
             if let url = URL(string: "\(scheme)://vscode-remote/ssh-remote+\(host)\(path)") { NSWorkspace.shared.open(url) }
             return
         }
-        guard t.kind == .terminal, let app = t.app else { return HerdrWindow.reveal(pane: a.pane) }
+        guard t.kind == .terminal, t.app != nil else { return HerdrWindow.reveal(pane: a.pane) }
+        openShell(on: a.machine, cwd: a.cwd, with: t)
+    }
+
+    /// The terminal app you use (the last one chosen, else the first installed).
+    static var terminal: OpenTarget? {
+        let ts = installed.filter { $0.kind == .terminal }
+        return ts.first { $0.id == Settings.shared.openIn } ?? ts.first
+    }
+
+    /// A login shell on `machine` in `cwd`, in a terminal app here: a herdr-core
+    /// terminal there (gone when the shell exits) with the app attached to it.
+    static func openShell(on machine: String, cwd: String, with target: OpenTarget? = nil) {
+        guard let t = target ?? terminal, let app = t.app else { return }
         let env = HerdrCore.environment()
-        guard let hc = HerdrCore.binary(env) else { return HerdrWindow.reveal(pane: a.pane) }
+        guard let hc = HerdrCore.binary(env) else { return }
         Task.detached {
             // A login shell in its folder there, gone when it exits…
             let p = Process()
             p.executableURL = URL(fileURLWithPath: hc)
-            p.arguments = ["run", "--bg", "--no-parent", "--rm", "--on", a.machine, "--cwd", a.cwd, "--json", "--",
+            // (No folder: its home.)
+            p.arguments = ["run", "--bg", "--no-parent", "--rm", "--on", machine] + (cwd.isEmpty ? [] : ["--cwd", cwd]) + ["--json", "--",
                            "sh", "-c", "exec \"${SHELL:-/bin/sh}\" -l"]
             p.environment = env
             let out = Pipe()

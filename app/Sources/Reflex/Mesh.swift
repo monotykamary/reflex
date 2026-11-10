@@ -43,6 +43,9 @@ final class Bus {
         let to: String?
         let paths: [String]?
         let origin: String?
+        let command: String?
+        let dir: String?
+        let timeout: String?
     }
 
     private func listen(_ m: String) async {
@@ -71,7 +74,10 @@ final class Bus {
                 await Boat.reply(m, r.id, ok: false, message: "No machine called \(to) here (reflex home machines lists them; \"here\" is the Mac Reflex runs on).")
             }
         case "fetch", "ls":
-            FileRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: r.op, paths: r.paths ?? [], origin: origin))
+            HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: r.op, paths: r.paths ?? [], origin: origin))
+        case "run":
+            HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: "run", paths: [], origin: origin,
+                                          command: r.command ?? "", dir: r.dir ?? "~", timeout: Int(r.timeout ?? "") ?? 120))
         case "machines":
             let up = CoreMachines.known.filter { $0.state == "connected" }.map(\.name)
             let list = (["here (\(Host.current().localizedName ?? "this Mac"), where Reflex runs)"] + up.map { $0 + (Boat.made($0) ? " (boat sandbox)" : "") })
@@ -82,12 +88,14 @@ final class Bus {
     }
 }
 
-/// A session elsewhere asking this Mac for files (`reflex home fetch`) or
-/// what's in a folder (`reflex home ls`): yours to allow, unless Settings
-/// allows it. The files go to the same ~ path there.
+/// A session elsewhere asking this Mac for files (`reflex home fetch`), what's
+/// in a folder (`reflex home ls`), or to run a command (`reflex home run`):
+/// yours to allow, unless Settings allows it. Files go to the same ~ path
+/// there; a command's output and exit code go back. A boat sandbox's command
+/// always asks: what it read could have been written by anyone.
 @MainActor
-final class FileRequests: ObservableObject {
-    static let shared = FileRequests()
+final class HomeRequests: ObservableObject {
+    static let shared = HomeRequests()
 
     struct Request: Identifiable, Equatable {
         let id: String
@@ -98,8 +106,12 @@ final class FileRequests: ObservableObject {
         let paths: [String]
         /// Where the files are, as this Reflex names it.
         let origin: String
+        var command = ""
+        var dir = "~"
+        var timeout = 120
 
         var what: String {
+            if op == "run" { return command }
             let names = paths.map { ($0 as NSString).lastPathComponent }
             return op == "ls" ? "what's in \(paths.first ?? "~")" : names.count == 1 ? names[0] : "\(names.count) items"
         }
@@ -120,6 +132,11 @@ final class FileRequests: ObservableObject {
     }
 
     private func allowed(_ r: Request) -> Bool {
+        if r.op == "run" {
+            // Your other Macs, when Settings says so; a sandbox never.
+            return Settings.shared.runApproval == "macs" && r.machine != Boat.here && !Boat.made(r.machine)
+                && CoreMachines.known.first(where: { $0.name == r.machine })?.temporary == false
+        }
         switch Settings.shared.fileApproval {
         case "always": return true
         case "made": return Boat.made(r.machine)
@@ -143,6 +160,16 @@ final class FileRequests: ObservableObject {
 
     private func serve(_ r: Request) async {
         let from = r.origin == Boat.here ? "this Mac" : r.origin
+        if r.op == "run" {
+            if !r.pane.isEmpty { notes[r.pane] = "Running it on \(from)…" }
+            let (code, output) = await Boat.runAt(r.command, from: r.origin, dir: r.dir, timeout: r.timeout)
+            notes[r.pane] = nil
+            // (The end of a long output: the agent can ask for a file instead.)
+            let tail = output.count > 200_000 ? "…\n" + String(output.suffix(200_000)) : output
+            let body: [String: Any] = ["ok": 1, "code": Int(code), "message": "Ran on \(from) (exit \(code)):", "output": tail]
+            await Boat.reply(r.machine, r.id, body)
+            return
+        }
         do {
             if r.op == "ls" {
                 let out = try await Boat.list(r.paths.first ?? "~", from: r.origin)

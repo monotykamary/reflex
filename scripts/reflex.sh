@@ -27,9 +27,11 @@
 #                                   asks Reflex to move this session, and what
 #                                   its work needs; you approve it in the app
 #   reflex list PATH [--from SRC]   what's in a folder there
+#   reflex run-at [--from SRC] [--cwd DIR] [--timeout S] -- COMMAND
 #   reflex bring MACHINE PATH... [--from SRC]
 #                                   repositories (sync) and anything else (copy)
 #   reflex home fetch PATH... | home ls PATH | home machines
+#   reflex home run [--cwd DIR] [--timeout S] COMMAND
 #                                   from a session Reflex moved: ask the Reflex
 #                                   that moved it, over herdr-core's line
 #   reflex bus listen MACHINE | bus reply MACHINE ID   (Reflex's side)
@@ -671,7 +673,10 @@ ask_home() { # ask_home OP WAIT_SECONDS KEY=VALUE... [-- LIST...]
   jget message < "$_a" 2>/dev/null && echo
   jget output < "$_a" 2>/dev/null && echo || true
   _ok=$(jget ok < "$_a" 2>/dev/null || echo 0)
+  # (A command's own exit code, when one ran.)
+  _code=$(jget code < "$_a" 2>/dev/null || true)
   rm -f "$_a"
+  [ -n "$_code" ] && return "$_code"
   [ "$_ok" = 1 ]
 }
 
@@ -694,7 +699,23 @@ home() {
       case $p in "$HOME"/*) p="~/${p#"$HOME"/}" ;; esac
       ask_home ls 600 -- "$p" ;;
     machines) ask_home machines 60 ;;
-    *) die "home fetch PATH... | home ls PATH | home machines" ;;
+    run)
+      # A shell line on the Mac this session came from (the user allows each
+      # one there): its output and exit code come back.
+      shift; _rc=$PWD _rt=120
+      while [ $# -gt 0 ]; do
+        case $1 in
+          --cwd) _rc=$2; shift 2 ;;
+          --timeout) _rt=$2; shift 2 ;;
+          --) shift; break ;;
+          *) break ;;
+        esac
+      done
+      [ $# -gt 0 ] || die "home run [--cwd DIR] [--timeout SECONDS] COMMAND..."
+      case $_rc in "$HOME") _rc="~" ;; "$HOME"/*) _rc="~/${_rc#"$HOME"/}" ;; esac
+      say "Asking Reflex to run that... (the user allows it there)"
+      ask_home run $((1800 + _rt)) command="$*" dir="$_rc" timeout="$_rt" ;;
+    *) die "home fetch PATH... | home ls PATH | home run COMMAND | home machines" ;;
   esac
 }
 
@@ -734,6 +755,29 @@ $1"; shift ;; esac
       ( copy "$m" "$p" --from "$_bf" )
     fi
   done
+}
+
+# A shell line on SRC (a login shell, in DIR when it's there), its output
+# (stdout and stderr) and exit code; ended after SECONDS.
+run_at() { # run_at [--from SRC] [--cwd DIR] [--timeout SECONDS] -- COMMAND
+  _wd="~" _wt=120
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --from) from_src "$2"; shift 2 ;;
+      --cwd) _wd=$2; shift 2 ;;
+      --timeout) _wt=$2; shift 2 ;;
+      --) shift; break ;;
+      *) break ;;
+    esac
+  done
+  case $_wd in ("~") _wd=$S_HOME ;; ("~/"*) _wd="$S_HOME/${_wd#"~/"}" ;; esac
+  _wl="cd $(q "$_wd") 2>/dev/null || cd; $*"
+  if [ "$SRC" = . ]; then
+    perl -e 'alarm shift; exec @ARGV' "$_wt" sh -lc "$_wl" 2>&1
+  else
+    [ "$_wt" -le 600 ] || _wt=600
+    hc exec --on "$SRC" --timeout "$_wt" -- sh -lc "$_wl" 2>&1
+  fi
 }
 
 # What's in a folder (or a file's details), where it is.
@@ -835,6 +879,7 @@ case $cmd in
   copy) copy "$@" ;;
   list) list "$@" ;;
   bring) bring "$@" ;;
+  run-at) run_at "$@" ;;
   creds) creds "$@" ;;
   session) session "$@" ;;
   snapshot) snapshot "$@" ;;

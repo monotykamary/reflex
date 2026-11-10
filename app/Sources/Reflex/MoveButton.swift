@@ -74,11 +74,25 @@ struct MoveBanner: View {
     var pane: String
     var tint: Color
     @ObservedObject private var requests = MoveRequests.shared
-    @ObservedObject private var files = FileRequests.shared
+    @ObservedObject private var files = HomeRequests.shared
     @ObservedObject private var move = HerdrMove.shared
 
     var body: some View {
-        if let r = files.request(for: pane) {
+        if let r = files.request(for: pane), r.op == "run" {
+            HStack(spacing: 8) {
+                Image(systemName: "terminal").font(.system(size: 11, weight: .semibold))
+                Text("Run on \(r.origin == Boat.here ? "this Mac" : r.origin)?").font(.system(size: 12, weight: .semibold)).fixedSize()
+                Text(r.command).font(.system(size: 11.5, design: .monospaced)).lineLimit(1).truncationMode(.middle)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(.primary.opacity(0.08), in: RoundedRectangle(cornerRadius: 5, style: .continuous))
+                Button("Not Now") { files.decline(r) }.controlSize(.small)
+                Button("Run") { files.approve(r) }.buttonStyle(.glassProminent).controlSize(.small)
+            }
+            .padding(.leading, 12).padding(.trailing, 6).padding(.vertical, 5)
+            .raySurface(Capsule())
+            .frame(maxWidth: 640)
+            .help("\(r.command)\n\nin \(r.dir), at most \(r.timeout) s. The session asked with reflex home run; its output and exit code go back to it.")
+        } else if let r = files.request(for: pane) {
             HStack(spacing: 8) {
                 Image(systemName: "tray.and.arrow.down").font(.system(size: 11, weight: .semibold))
                 Text(r.op == "ls" ? "Show it \(r.what) on \(r.origin == Boat.here ? "this Mac" : r.origin)?" : "Send \(r.what) from \(r.origin == Boat.here ? "this Mac" : r.origin)?")

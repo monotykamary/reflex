@@ -90,13 +90,24 @@ enum Boat {
         try await reflex(["copy", machine] + paths + ["--from", from], timeout: 3600)
     }
 
+    /// A shell line on `from`: its output (stdout and stderr) and exit code.
+    static func runAt(_ command: String, from: String, dir: String, timeout: Int) async -> (code: Int32, output: String) {
+        let env = environment(), exe = script
+        let args = [exe, "run-at", "--from", from, "--cwd", dir, "--timeout", String(timeout), "--", command]
+        let r = await Task.detached { MachineSetup.run(env, "/bin/sh", args, timeout: TimeInterval(timeout + 30)) }.value
+        return (r.status, r.out + r.err)
+    }
+
     static func list(_ path: String, from: String) async throws -> String {
         try await reflex(["list", path, "--from", from], timeout: 60)
     }
 
     /// The answer to a request asked on `machine` (reflex home).
     static func reply(_ machine: String, _ id: String, ok: Bool, message: String, output: String = "") async {
-        let body: [String: Any] = ["ok": ok ? 1 : 0, "message": message, "output": output]
+        await reply(machine, id, ["ok": ok ? 1 : 0, "message": message, "output": output])
+    }
+
+    static func reply(_ machine: String, _ id: String, _ body: [String: Any]) async {
         guard let data = try? JSONSerialization.data(withJSONObject: body), let json = String(data: data, encoding: .utf8) else { return }
         _ = try? await reflex(["bus", "reply", machine, id, json], timeout: 60)
     }
