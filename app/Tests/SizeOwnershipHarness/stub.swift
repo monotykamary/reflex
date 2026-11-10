@@ -4,6 +4,12 @@ import Foundation
     var wrappedValue: Value
 }
 enum Motion { static let enter = 0 }
+/// A pane's machine ("" here) and whether boat stopped it: never, in the harness.
+enum Machines { static func machine(of pane: String) -> String { pane.contains("/") ? String(pane.split(separator: "/")[0]) : "" } }
+@MainActor final class BoatLifetime {
+    static let shared = BoatLifetime()
+    func isDown(_ machine: String) -> Bool { false }
+}
 func withAnimation(_ animation: Int, _ body: () -> Void) { body() }
 enum HerdrCore {
     struct Failure: Error { let kind: String }

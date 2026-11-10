@@ -821,7 +821,7 @@ def perform(+cfg: Cfg, +chan: Chan(Env), +id: U32, +label: String, a: M.Action) 
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Term.prompt(Cfg.at(cfg, pane), Term.bare(pane), text)
         prompted(Cfg.at(cfg, pane), Term.bare(pane), text, r)
-    case M.Press{+pane, +key}:
+    case M.PressKey{+pane, +key}:
       do IO<Result<&1, &1, U32 & String, String>>:
         r : Result<&1, &1, U32 & String, J.JSON> <- Term.press(Cfg.at(cfg, pane), Term.bare(pane), key)
         return ok_detail(r, "pressed " ++ key)
@@ -1137,12 +1137,17 @@ def ok_of.pick(core: Bool, c: Bool, h: Bool) -> Bool:
 type Round is Data:
   Round{snap: Snap, core: Bool, herdr: Bool}
 
-def snap.both(core: Bool, c: Snap, h: Snap, remote: List<&2, M.Agent>, +cfg: Cfg, +prev: List<&2, M.Agent>) -> IO(Round):
+# The core counts as unreachable for the app only once it has missed a few
+# polls in a row: one slow answer (a busy machine) isn't your agents gone.
+def unreachable_after() -> U32:
+  4
+
+def snap.both(core: Bool, c: Snap, h: Snap, remote: List<&2, M.Agent>, +cfg: Cfg, +prev: List<&2, M.Agent>, +cm: U32) -> IO(Round):
   match c h:
     case Snap{+cok, cs} Snap{+hok, hs}:
       do IO<Round>:
         xs : List<&2, M.Agent> <- screens(List.append(&2, M.Agent, List.append(&2, M.Agent, cs, hs), remote), cfg, prev)
-        return Round{Snap{ok_of.pick(core, cok, hok), xs}, cok, hok}
+        return Round{Snap{ok_of.pick(core, cok || U32.is_lt(cm, unreachable_after()), hok), xs}, cok, hok}
 
 # herdr-core's agents (this Mac's and its machines'), this Mac's herdr's,
 # then herdr's other Macs'. `ok`: whether your agents can be reached (see
@@ -1151,7 +1156,7 @@ def snap.both(core: Bool, c: Snap, h: Snap, remote: List<&2, M.Agent>, +cfg: Cfg
 def snap(c: Result<&1, &1, U32 & String, Hc.Listed>, h: Result<&1, &1, U32 & String, List<&2, M.Agent>>, remote: List<&2, M.Agent>, +cfg: Cfg, +prev: List<&2, M.Agent>, +cm: U32, +hm: U32) -> IO(Round):
   do IO<Round>:
     +busy : List<&2, String> <- read_busy()
-    snap.both(Core.bool_not(String.eq(Cfg.backend(cfg), "herdr")), core_now(c, busy, prev, cm), herdr_now(h, busy, prev, hm), remote, cfg, prev)
+    snap.both(Core.bool_not(String.eq(Cfg.backend(cfg), "herdr")), core_now(c, busy, prev, cm), herdr_now(h, busy, prev, hm), remote, cfg, prev, cm)
 
 def misses(answered: Bool, +n: U32) -> U32:
   match answered:

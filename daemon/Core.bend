@@ -219,7 +219,7 @@ def is_sep(+c: U32) -> Bool:
 def opt_of.if(ok: Bool, +d: U32, rest: String, +pane: String) -> Maybe<&2, M.Opt>:
   match ok:
     case True{}:
-      Some{M.Opt{SCon{Chr{d}, SNil{}}, String.trim(rest), M.Press{pane, SCon{Chr{d}, SNil{}}}}}
+      Some{M.Opt{SCon{Chr{d}, SNil{}}, String.trim(rest), M.PressKey{pane, SCon{Chr{d}, SNil{}}}}}
     case False{}:
       None{}
 
@@ -273,7 +273,7 @@ def any_check(xs: List<&2, M.Opt>) -> Bool:
 def with_next.if(multi: Bool, +xs: List<&2, M.Opt>, +pane: String) -> List<&2, M.Opt>:
   match multi:
     case True{}:
-      List.append(&2, M.Opt, xs, [M.Opt{"⇥", "Next — keep these choices", M.Press{pane, "tab"}}])
+      List.append(&2, M.Opt, xs, [M.Opt{"⇥", "Next — keep these choices", M.PressKey{pane, "tab"}}])
     case False{}:
       xs
 
@@ -423,7 +423,7 @@ def menu_opts(xs: List<&2, Line>, +sel: Nat, +i: Nat, +pane: String) -> List<&2,
       []
     case Con{Line{c, +text, s}, rest}:
       menu_opts.pick(Nat.is_lt(i, 9n),
-        M.Opt{SCon{Chr{(49 + U32.from_nat(i) : U32)}, SNil{}}, text, M.Press{pane, moves(i, sel)}},
+        M.Opt{SCon{Chr{(49 + U32.from_nat(i) : U32)}, SNil{}}, text, M.PressKey{pane, moves(i, sel)}},
         menu_opts(rest, sel, 1n+i, pane))
 
 def arrows.of(+menu: List<&2, Line>, +pane: String) -> List<&2, M.Opt>:

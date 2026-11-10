@@ -168,6 +168,12 @@ copied is at the same `~` path and the conversation is the one you had.
 Paths in earlier messages that start with the old home are now under the
 new one. A tool that's missing: install it there.
 
+Keep a boat sandbox light: it has 4 CPUs unless the user chose a bigger
+size, and its line home shares them. Send heavy work (builds, test suites,
+browsers, benchmarks) through supercomputer's pool rather than running it on
+the sandbox; a sandbox kept busy answers slowly, and the user's windows on it
+go blank while requests to their Mac stall.
+
 A boat machine's lifetime is Reflex's to keep: it renews it while you work
 or wait on the user, and lets it stop an hour after you go idle (the disk is
 kept; the user resumes it, with you in the same terminal). Don't extend it

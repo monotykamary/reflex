@@ -1301,6 +1301,7 @@ private struct TrustSection: View {
 
 /// boat.dev: the template new boat machines start from, and the skill.
 private struct BoatSection: View {
+    @ObservedObject var s = Settings.shared
     @ObservedObject var template = BoatTemplate.shared
     @State private var skill = Boat.skillInstalled
 
@@ -1332,6 +1333,15 @@ private struct BoatSection: View {
                 }
                 .help(templateText.detail)
             }
+            Picker(selection: $s.boatType) {
+                Text("Default · 4 CPUs, 8 GB").tag("")
+                Text("Large · 8 CPUs, 16 GB, 2× rate").tag("large")
+                Text("Extra large · 16 CPUs, 32 GB").tag("xlarge")
+                Text("Small · 2 CPUs, 4 GB, ½ rate").tag("small")
+            } label: {
+                Label("Machine size", systemImage: "cpu")
+            }
+            .help("For boat machines Reflex makes, and for one it resumes after boat stopped it: a sandbox your lanes keep busy answers slowly over its line (blank windows, slow commands); a bigger one keeps up.")
             LabeledContent {
                 Button(skill ? "Reinstall" : "Install") {
                     Boat.install()

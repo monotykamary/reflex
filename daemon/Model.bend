@@ -53,7 +53,7 @@ type Action is Data:
   # "attach" (a running background session) — then prompt it if text is set
   Resume{cwd: String, kind: String, session: String, mode: String, text: String}
   # press one key in an agent's pane, e.g. "1" to answer a numbered question
-  Press{pane: String, key: String}
+  PressKey{pane: String, key: String}
   # the harness's own side-question command, typed into its TUI (/btw)
   SideNative{pane: String, text: String}
   # fork the agent's session headlessly and ask there; the reply comes back
@@ -199,7 +199,7 @@ def Action.json(a: Action) -> String:
       Js.obj([Js.kv("type", Js.str("spawn")), Js.kv("cwd", Js.str(cwd)), Js.kv("kind", Js.str(kind)), Js.kv("text", Js.str(text))])
     case Resume{cwd, kind, session, mode, text}:
       Js.obj([Js.kv("type", Js.str("resume")), Js.kv("cwd", Js.str(cwd)), Js.kv("kind", Js.str(kind)), Js.kv("session", Js.str(session)), Js.kv("mode", Js.str(mode)), Js.kv("text", Js.str(text))])
-    case Press{pane, key}:
+    case PressKey{pane, key}:
       Js.obj([Js.kv("type", Js.str("press")), Js.kv("pane", Js.str(pane)), Js.kv("key", Js.str(key))])
     case SideNative{pane, text}:
       Js.obj([Js.kv("type", Js.str("btw")), Js.kv("pane", Js.str(pane)), Js.kv("text", Js.str(text))])

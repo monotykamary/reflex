@@ -79,6 +79,9 @@ final class Settings: ObservableObject {
     /// run`): "ask", or "macs" (allowed for your other Macs; a boat sandbox
     /// always asks).
     @Published var runApproval: String { didSet { d.set(runApproval, forKey: "runApproval") } }
+    /// The size of boat machines Reflex makes or resumes: "" (boat's
+    /// default, 4 CPUs), "small", "large" or "xlarge".
+    @Published var boatType: String { didSet { d.set(boatType, forKey: "boatType") } }
     /// Where the ⌥⌥ bar starts new sessions: "" this Mac, a machine's name,
     /// or "boat" (a new boat machine from your template each time).
     @Published var defaultMachine: String { didSet { d.set(defaultMachine, forKey: "defaultMachine") } }
@@ -114,6 +117,7 @@ final class Settings: ObservableObject {
         moveApproval = d.string(forKey: "moveApproval") ?? "ask"
         fileApproval = d.string(forKey: "fileApproval") ?? "ask"
         runApproval = d.string(forKey: "runApproval") ?? "ask"
+        boatType = d.string(forKey: "boatType") ?? ""
         defaultMachine = d.string(forKey: "defaultMachine") ?? ""
         Settings.writeFolders(extraFolders)
     }

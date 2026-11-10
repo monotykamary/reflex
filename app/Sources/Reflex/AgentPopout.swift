@@ -116,6 +116,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     private var openingPaint: CoreStream?
     private var paintRevision = 0
     private var reattaching = 0
+    /// Whether the stream attached last has shown the screen yet.
+    private var screened = false
     /// The terminal's facts as they change (`events.subscribe`): its size,
     /// which another window may set (see CoreSize).
     private var facts: CoreStream?
@@ -171,8 +173,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                 guard self.attached, self.stream == nil else { return s.close() }
                 self.stream = s
                 self.sizing.painted()
+                self.screened = false
                 s.start(data: { [weak self] d in
                     guard let self, self.paintStream == nil else { return }
+                    self.screened = true
                     self.view.feed(byteArray: ArraySlice([UInt8](d)))
                 }, closed: { [weak self] why in self?.coreEnded(why) })
                 if self.view.window?.isKeyWindow == true { s.focus(true) }
@@ -184,6 +188,13 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                 }
                 self.reattaching = 0
                 self.followSize()
+                // A stream that opens but never shows the screen (its machine's
+                // line is busy): again, rather than a blank window for good.
+                DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self, weak s] in
+                    guard let self, let s, self.stream === s, self.attached, !self.screened else { return }
+                    NSLog("Reflex: %@ showed nothing in 15 s; attaching again", self.pane)
+                    self.attachCore(reason: "no screen in 15 s")
+                }
             } catch {
                 NSLog("Reflex: attach %@ through herdr-core failed: %@", pane, error.localizedDescription)
                 self?.coreEnded((error as? HerdrCore.Failure)?.kind ?? "lost")
@@ -201,9 +212,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         let back = ["lost", "unavailable", "timeout", "signaled", "server_stop", "stopped_by_restart", "holder_lost"]
         // (A boat machine that stopped isn't coming back by itself: Resume.)
         let stopped = BoatLifetime.shared.isDown(Machines.machine(of: pane))
-        if back.contains(why), reattaching < 30, !stopped {
+        // Another machine's line can be slow for minutes (a busy sandbox):
+        // its windows keep trying, every few seconds, for about ten.
+        let remote = !Machines.machine(of: pane).isEmpty
+        if back.contains(why), reattaching < (remote ? 230 : 30), !stopped {
             reattaching += 1
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            DispatchQueue.main.asyncAfter(deadline: .now() + (reattaching > 30 ? 2.5 : 1)) { [weak self] in
                 guard let self, self.attached, self.stream == nil else { return }
                 self.attachCore(reason: "back after \(why)")
             }
@@ -319,6 +333,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                     self.freshScreen()
                 }
                 guard self.paintStream === s else { return }
+                self.screened = true
                 self.view.feed(byteArray: ArraySlice([UInt8](d)))
             }, closed: { [weak self, weak s] _ in
                 guard let self, let s else { return }

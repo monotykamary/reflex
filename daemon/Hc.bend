@@ -346,9 +346,11 @@ def list.of(r: Result<&1, &1, U32 & String, J.JSON>, +sock: String, +home: Strin
         return Done{Listed{agents, down_of(Js.as_list(Js.get(v, "machines")))}}
 
 # Every agent the core runs, this Mac's and its connected machines' alike.
+# (8 s: the list waits on each machine, and one busy sandbox can take a few
+# seconds; failing it would count the whole core as unreachable.)
 def list_agents(+sock: String, +home: String) -> IO(Result<&1, &1, U32 & String, Listed>):
   do IO<Result<&1, &1, U32 & String, Listed>>:
-    r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "terminal.list", "{}", 3000)
+    r : Result<&1, &1, U32 & String, J.JSON> <- call(sock, "terminal.list", "{}", 8000)
     list.of(r, sock, home)
 
 def lost_reasons() -> List<&2, String>:

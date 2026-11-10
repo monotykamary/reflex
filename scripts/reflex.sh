@@ -208,10 +208,11 @@ machine_state() { # machine_state NAME: boat's word for it (running, idle, stopp
   boat info "$(boat_id "$1")" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $(boat_id "$1") failed"
   echo
 }
-machine_resume() { # machine_resume NAME: running and connected again
+machine_resume() { # machine_resume NAME [--type T]: running (at that size) and connected again
   ours "$1" || die "$1 isn't a machine Reflex made"
-  say "Resuming $(boat_id "$1")..."
-  boat resume "$(boat_id "$1")" --ttl 3600 --json --no-update >/dev/null 2>&1 || die "boat resume $(boat_id "$1") failed"
+  _rt=""; [ "${2:-}" = --type ] && _rt=${3:-}
+  say "Resuming $(boat_id "$1")${_rt:+ as $_rt}..."
+  boat resume "$(boat_id "$1")" --ttl 3600 ${_rt:+--type "$_rt"} --json --no-update >/dev/null 2>&1 || die "boat resume $(boat_id "$1") failed"
   i=0
   until connected "$1"; do
     i=$((i + 1))

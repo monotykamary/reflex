@@ -71,8 +71,11 @@ enum Boat {
     /// The boat machines Reflex made (and may delete).
     static func made(_ machine: String) -> Bool { CoreMachines.madeByReflex(machine) }
 
+    /// The size Settings asks for ([] for boat's default).
+    static var typeArgs: [String] { Settings.shared.boatType.isEmpty ? [] : ["--type", Settings.shared.boatType] }
+
     static func newMachine(template: Bool) async throws -> String {
-        try await reflex(["machine", "new"] + (template ? ["--template"] : []), timeout: 300)
+        try await reflex(["machine", "new"] + (template ? ["--template"] : []) + typeArgs, timeout: 300)
     }
 
     /// The project around `dir` (on `from`), at the same ~ path there: that path.
@@ -411,7 +414,7 @@ final class BoatLifetime: ObservableObject {
         Task {
             defer { resuming.remove(m) }
             do {
-                _ = try await Boat.reflex(["machine", "resume", m], timeout: 300)
+                _ = try await Boat.reflex(["machine", "resume", m] + Boat.typeArgs, timeout: 300)
                 NSLog("Reflex: %@ resumed", m)
                 down[m] = nil
                 working[m] = nil
