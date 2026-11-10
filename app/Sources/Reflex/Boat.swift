@@ -60,7 +60,7 @@ enum Boat {
     /// `reflex <args>`: what it printed, or its last complaint.
     static func reflex(_ args: [String], timeout: TimeInterval = 600) async throws -> String {
         let env = environment(), exe = script
-        let r = await Task.detached { MachineSetup.run(env, "/bin/sh", [exe] + args, timeout: timeout) }.value
+        let r = await Blocking.run { MachineSetup.run(env, "/bin/sh", [exe] + args, timeout: timeout) }
         guard r.status == 0 else {
             let why = r.err.split(separator: "\n").last { !$0.isEmpty }.map(String.init) ?? "reflex \(args.first ?? "") failed (\(r.status))"
             throw Failure(message: why.replacingOccurrences(of: "reflex: ", with: ""))
@@ -97,7 +97,7 @@ enum Boat {
     static func runAt(_ command: String, from: String, dir: String, timeout: Int) async -> (code: Int32, output: String) {
         let env = environment(), exe = script
         let args = [exe, "run-at", "--from", from, "--cwd", dir, "--timeout", String(timeout), "--", command]
-        let r = await Task.detached { MachineSetup.run(env, "/bin/sh", args, timeout: TimeInterval(timeout + 30)) }.value
+        let r = await Blocking.run { MachineSetup.run(env, "/bin/sh", args, timeout: TimeInterval(timeout + 30)) }
         return (r.status, r.out + r.err)
     }
 
@@ -106,6 +106,11 @@ enum Boat {
     }
 
     /// The answer to a request asked on `machine` (reflex home).
+    /// Whether the session that asked still waits for the answer.
+    static func asking(_ machine: String, _ id: String) async -> Bool {
+        (try? await reflex(["bus", "alive", machine, id], timeout: 20)) != nil
+    }
+
     static func reply(_ machine: String, _ id: String, ok: Bool, message: String, output: String = "") async {
         await reply(machine, id, ["ok": ok ? 1 : 0, "message": message, "output": output])
     }
@@ -225,7 +230,7 @@ final class BoatTemplate: ObservableObject {
         at = Date()
         let env = ["REFLEX_DATA": Settings.supportDir.path, "HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
         let exe = Boat.script
-        let r = await Task.detached { MachineSetup.run(env, "/bin/sh", [exe, "template", "--json"], timeout: 10) }.value
+        let r = await Blocking.run { MachineSetup.run(env, "/bin/sh", [exe, "template", "--json"], timeout: 10) }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(r.out.utf8)) else { return }
         let built = reply.at ?? ""
         switch reply.state {
@@ -251,6 +256,8 @@ final class MoveRequests: ObservableObject {
         let made: Bool
         /// What the agent said its work needs besides its project.
         var paths: [String] = []
+        /// When the asking session stops waiting (0: never said).
+        var until: Int = 0
     }
 
     @Published private(set) var pending: [Request] = []
@@ -264,22 +271,22 @@ final class MoveRequests: ObservableObject {
 
     /// A move an agent asked for (through the bus): this Reflex's to serve
     /// when it knows the machine. "here" / "home" is this Mac.
-    func add(pane: String, id: String, to raw: String, paths: [String]) -> Bool {
+    func add(pane: String, id: String, to raw: String, paths: [String], until: Int = 0) -> Bool {
         let to = ["here", "home", ".", "this mac"].contains(raw.lowercased()) ? Boat.here : raw
         guard to == Boat.here || CoreMachines.known.contains(where: { $0.name == to && $0.state == "connected" }) else { return false }
         guard Store.shared.state.agents.contains(where: { $0.pane == pane }) else {
             NSLog("Reflex: move request from %@ to %@: no such agent here", pane, to)
             return true
         }
-        let r = Request(id: id, pane: pane, to: to, made: Boat.made(to), paths: paths)
+        let r = Request(id: id, pane: pane, to: to, made: Boat.made(to), paths: paths, until: until)
         NSLog("Reflex: %@ asks to move to %@ (%d paths)", pane, to, paths.count)
         if autoApproved(r) {
             approve(r)
         } else {
             pending.removeAll { $0.pane == pane }
             pending.append(r)
-            // Seen where it's asked: its terminal, in front, and the inbox.
-            AppDelegate.current?.showPane(r.pane)
+            // Seen in its window when that's open, the inbox and the rail;
+            // never by taking you away from what you're in.
             NSApp.requestUserAttention(.informationalRequest)
             MachineNotes.post(r.pane, title: "asks to move to \(to == Boat.here ? "this Mac" : to)",
                               body: paths.isEmpty ? "Move or Not Now in its window." : "With " + paths.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ") + ". Move or Not Now in its window.",
@@ -288,10 +295,11 @@ final class MoveRequests: ObservableObject {
         return true
     }
 
-    /// An agent that went away takes its question with it.
+    /// An agent that went away, or stopped waiting, takes its question with it.
     func prune() {
         let live = Set(Store.shared.state.agents.map(\.pane))
-        pending.removeAll { !live.contains($0.pane) }
+        let now = Int(Date().timeIntervalSince1970)
+        pending.removeAll { !live.contains($0.pane) || ($0.until > 0 && now > $0.until) }
     }
 
     private func autoApproved(_ r: Request) -> Bool {

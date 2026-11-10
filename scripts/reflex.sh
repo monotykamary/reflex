@@ -650,20 +650,29 @@ self_id() {
 # Post a request (JSON from perl's args), wait for its answer, print it.
 ask_home() { # ask_home OP WAIT_SECONDS KEY=VALUE... [-- LIST...]
   _op=$1 _wait=$2; shift 2
+  export REFLEX_WAIT=$_wait
   _id="$(date +%s)-$$"
   mkdir -p "$HOME/.reflex/bus/out" "$HOME/.reflex/bus/in"
   perl -MJSON::PP -e '
     my %r = (op => shift, id => shift, pane => $ENV{HC_TERMINAL_ID} // "", cwd => $ENV{PWD} // "", at => time);
+    $r{until} = time + $ENV{REFLEX_WAIT};
     my $h = eval { local $/; open my $f, "<", "$ENV{HOME}/.reflex/home" or die; JSON::PP->new->decode(<$f>) } // {};
     $r{home} = $h->{home} // ""; $r{origin} = $h->{origin} // "";
     my @list; my $l = 0;
     for (@ARGV) { if ($_ eq "--") { $l = 1; next } if ($l) { push @list, $_ } else { my ($k, $v) = split /=/, $_, 2; $r{$k} = $v } }
     $r{paths} = \@list if $l;
     print JSON::PP->new->canonical->encode(\%r), "\n"' "$_op" "$_id" "$@" > "$HOME/.reflex/bus/out/$_id.json.tmp"
+  # A heartbeat while this waits: Reflex drops a request whose asker is gone
+  # (stopped, interrupted), and an asker that stops takes its request along.
+  mkdir -p "$HOME/.reflex/bus/alive"
+  : > "$HOME/.reflex/bus/alive/$_id"
+  trap 'rm -f "$HOME/.reflex/bus/out/'"$_id"'.json" "$HOME/.reflex/bus/alive/'"$_id"'" "$HOME/.reflex/bus/in/'"$_id"'.json"; rm -rf "$T"' EXIT
+  trap 'exit 130' INT TERM HUP
   mv "$HOME/.reflex/bus/out/$_id.json.tmp" "$HOME/.reflex/bus/out/$_id.json"
   [ "$_wait" -gt 0 ] || { echo "$_id"; return 0; }
   _n=0
   until [ -f "$HOME/.reflex/bus/in/$_id.json" ]; do
+    touch "$HOME/.reflex/bus/alive/$_id"
     _n=$((_n + 1))
     if [ $_n -gt "$_wait" ]; then
       rm -f "$HOME/.reflex/bus/out/$_id.json"
@@ -803,10 +812,18 @@ bus_listen() { # bus_listen MACHINE [SECONDS]
     age() { echo \$(( \$(date +%s) - \$(stat -c %Y \"\$1\" 2>/dev/null || stat -f %m \"\$1\") )); }
     # (Taken by a Reflex that went away before answering: again.)
     for f in \"\$d\"/taken/*.json; do [ -f \"\$f\" ] && [ ! -f \"\$d/in/\$(basename \"\$f\")\" ] && [ \$(age \"\$f\") -gt 1800 ] && mv \"\$f\" \"\$d/out/\"; done
+    # Answers nobody read (the asker had gone) and stale claims: away.
+    for f in \"\$d\"/in/*.json \"\$d\"/in/.json; do [ -f \"\$f\" ] && [ \$(age \"\$f\") -gt 600 ] && rm -f \"\$f\"; done
+    for f in \"\$d\"/taken/*.json; do [ -f \"\$f\" ] && [ \$(age \"\$f\") -gt 86400 ] && rm -f \"\$f\"; done
+    mkdir -p \"\$d/alive\"
     while [ \$i -lt ${2:-240} ]; do
       got=''
       for f in \"\$d\"/out/*.json; do
         [ -f \"\$f\" ] || continue
+        # Its asker gone (no heartbeat for 15 s; none at all from an older
+        # reflex, past 30 minutes): nobody to answer.
+        n=\$(basename \"\$f\" .json); a=\"\$d/alive/\$n\"
+        if { [ -f \"\$a\" ] && [ \$(age \"\$a\") -gt 15 ]; } || { [ ! -f \"\$a\" ] && [ \$(age \"\$f\") -gt 1800 ]; }; then rm -f \"\$f\" \"\$a\"; continue; fi
         if grep -q \"\\\"home\\\":\\\"\$me\\\"\" \"\$f\" || { grep -q '\"home\":\"\"' \"\$f\" && [ \$(age \"\$f\") -ge $_wait ]; } || [ \$(age \"\$f\") -gt 20 ]; then
           cat \"\$f\" && got=1
         fi
@@ -814,6 +831,11 @@ bus_listen() { # bus_listen MACHINE [SECONDS]
       [ -n \"\$got\" ] && exit 0
       sleep 1; i=\$((i + 1))
     done; exit 0"
+}
+
+# Whether the session that asked ID still waits (its heartbeat fresh).
+bus_alive() { # bus_alive MACHINE ID
+  rsh "$1" "a=$BUS/alive/$2; [ -f \"\$a\" ] && [ \$(( \$(date +%s) - \$(stat -c %Y \"\$a\" 2>/dev/null || stat -f %m \"\$a\") )) -le 15 ]" >/dev/null
 }
 
 # Request ID is this Reflex's to answer (exit 1: another took it).
@@ -832,6 +854,7 @@ bus() {
     listen) shift; bus_listen "$@" ;;
     reply) shift; bus_reply "$@" ;;
     claim) shift; bus_claim "$@" ;;
+    alive) shift; bus_alive "$@" ;;
     *) die "bus listen MACHINE [SECONDS] | bus reply MACHINE ID" ;;
   esac
 }

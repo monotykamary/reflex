@@ -41,12 +41,12 @@ final class MachineSetup: ObservableObject {
         phase = .testing
         let env = Daemon.shared.childEnvironment()
         let core = core
-        Task.detached {
+        Task {
             // -v: whether it got as far as signing in tells "Remote Login
             // allows only some users" from "nothing answers SSH there".
             let look = core ? "{ command -v herdr-core || command -v hc; } >/dev/null" : "command -v herdr >/dev/null"
-            let r = Self.run(env, "/usr/bin/ssh", ["-v", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target,
-                                              "PATH=\"$HOME/.local/bin:$PATH\"; \(look) && echo herdr-yes || echo herdr-no"])
+            let r = await Blocking.run { Self.run(env, "/usr/bin/ssh", ["-v", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", target,
+                                              "PATH=\"$HOME/.local/bin:$PATH\"; \(look) && echo herdr-yes || echo herdr-no"]) }
             let verdict = Self.verdict(r)
             await MainActor.run { if self.target == target { self.phase = .tested(verdict) } }
         }
@@ -59,9 +59,9 @@ final class MachineSetup: ObservableObject {
         let env = core ? HerdrCore.environment() : Daemon.shared.childEnvironment()
         let core = core
         let hc = HerdrCore.binary(env) ?? "hc"
-        Task.detached {
-            let r = core ? Self.run(env, hc, ["machine", "add", target, "--json"])
-                : Self.run(env, "/bin/sh", ["-c", "herdr machine add \"$1\"", "herdr-add", target])
+        Task {
+            let r = await Blocking.run { core ? Self.run(env, hc, ["machine", "add", target, "--json"])
+                : Self.run(env, "/bin/sh", ["-c", "herdr machine add \"$1\"", "herdr-add", target]) }
             await MainActor.run {
                 if r.status == 0 {
                     self.phase = .added

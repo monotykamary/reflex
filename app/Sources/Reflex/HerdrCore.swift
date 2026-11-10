@@ -113,7 +113,7 @@ enum HerdrCore {
     static func call(_ method: String, _ params: [String: Any] = [:], timeout: TimeInterval = 5) async throws -> [String: Any] {
         let path = socketPath(environment())
         nonisolated(unsafe) let p = params
-        return try await Task.detached { try callSync(method, p, timeout: timeout, socket: path) }.value
+        return try await Blocking.run { try callSync(method, p, timeout: timeout, socket: path) }
     }
 
     /// Runs the core's CLI (`hc <args> --json` and the like): its exit code
@@ -275,7 +275,7 @@ enum CoreMachines {
 
     /// Forget the saved connection, not the terminals running on that Mac.
     static func remove(_ name: String) async throws {
-        let r = await Task.detached { HerdrCore.run(["machine", "rm", name, "--json"], timeout: 10) }.value
+        let r = await Blocking.run { HerdrCore.run(["machine", "rm", name, "--json"], timeout: 10) }
         guard r.status == 0 else {
             let why = (r.err.isEmpty ? r.out : r.err).trimmingCharacters(in: .whitespacesAndNewlines)
             throw HerdrCore.Failure(kind: "machine.remove",

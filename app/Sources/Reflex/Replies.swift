@@ -51,8 +51,8 @@ final class Replies: ObservableObject {
                             alone: !agents.contains { $0.pane != a.pane && $0.kind == "pi" && $0.machine == a.machine && $0.cwd == a.cwd })
             let key = item.id, machine = a.machine
             busy.insert(key)
-            Task.detached(priority: .utility) {
-                let got = machine.isEmpty ? Replies.readHere(want) : Replies.readThere(machine, want)
+            Task {
+                let got = await Blocking.run { machine.isEmpty ? Replies.readHere(want) : Replies.readThere(machine, want) }
                 await MainActor.run {
                     self.busy.remove(key)
                     guard let got else { return }

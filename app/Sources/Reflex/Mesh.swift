@@ -29,6 +29,8 @@ final class Bus {
     /// empty).
     private func refresh() {
         Task { _ = await CoreMachines.list(fresh: 20) }
+        MoveRequests.shared.prune()
+        HomeRequests.shared.prune()
         let up = [Boat.here] + CoreMachines.known.filter { $0.state == "connected" }.map(\.name)
         for m in up where listening[m] == nil {
             listening[m] = Task { [weak self] in await self?.listen(m) }
@@ -51,6 +53,8 @@ final class Bus {
         let timeout: String?
         /// `reflex on NAME …`: that machine, not the session's origin.
         let on: String?
+        /// When the asking session stops waiting.
+        let until: Int?
     }
 
     private func listen(_ m: String) async {
@@ -86,15 +90,15 @@ final class Bus {
         switch r.op {
         case "move":
             let to = r.to ?? ""
-            if MoveRequests.shared.add(pane: pane, id: r.id, to: to, paths: r.paths ?? []) {
+            if MoveRequests.shared.add(pane: pane, id: r.id, to: to, paths: r.paths ?? [], until: r.until ?? 0) {
                 await Boat.reply(m, r.id, ok: true, message: "Reflex has it: the user approves the move, and it happens once this turn ends. End your turn now.")
             } else {
                 await Boat.reply(m, r.id, ok: false, message: "No machine called \(to) here (reflex home machines lists them; \"here\" is the Mac Reflex runs on).")
             }
         case "fetch", "ls":
-            HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: r.op, paths: r.paths ?? [], origin: origin))
+            HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: r.op, paths: r.paths ?? [], origin: origin, until: r.until ?? 0))
         case "run":
-            HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: "run", paths: [], origin: origin,
+            HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: "run", paths: [], origin: origin, until: r.until ?? 0,
                                           command: r.command ?? "", dir: r.dir ?? "~", timeout: Int(r.timeout ?? "") ?? 120))
         case "machines":
             let up = CoreMachines.known.filter { $0.state == "connected" }.map(\.name)
@@ -124,6 +128,8 @@ final class HomeRequests: ObservableObject {
         let paths: [String]
         /// Where the files are, as this Reflex names it.
         let origin: String
+        /// When the asking session stops waiting (0: never said).
+        var until = 0
         var command = ""
         var dir = "~"
         var timeout = 120
@@ -144,7 +150,8 @@ final class HomeRequests: ObservableObject {
             Task { await serve(r) }
         } else {
             pending.append(r)
-            if !r.pane.isEmpty { AppDelegate.current?.showPane(r.pane) }
+            // (Its window shows it when open; the inbox and rail always. No
+            // taking you away from what you're in.)
             NSApp.requestUserAttention(.informationalRequest)
             let from = r.origin == Boat.here ? "this Mac" : r.origin
             let title = r.op == "run" ? "asks to run a command on \(from)" : r.op == "ls" ? "asks what's in \(r.paths.first ?? "~") on \(from)" : "asks for \(r.what) from \(from)"
@@ -171,7 +178,21 @@ final class HomeRequests: ObservableObject {
 
     func approve(_ r: Request) {
         pending.removeAll { $0.id == r.id }
-        Task { await serve(r) }
+        Task {
+            // The session may have stopped waiting (interrupted, gone): then
+            // there's nobody to send it to, and a command runs for no one.
+            guard await Boat.asking(r.machine, r.id) else {
+                if !r.pane.isEmpty { notes[r.pane] = "The session stopped waiting for this; nothing was \(r.op == "run" ? "run" : "sent")." }
+                return
+            }
+            await serve(r)
+        }
+    }
+
+    /// Requests whose session stopped waiting go.
+    func prune() {
+        let now = Int(Date().timeIntervalSince1970)
+        pending.removeAll { $0.until > 0 && now > $0.until }
     }
 
     func decline(_ r: Request) {
@@ -236,7 +257,7 @@ final class FileAccess: ObservableObject {
             defer { checking = false }
             let env = HerdrCore.environment()
             guard let hc = HerdrCore.binary(env) else { return }
-            let r = await Task.detached { MachineSetup.run(env, hc, ["exec", "--timeout", "8", "--", "sh", "-c", Self.probe], timeout: 15) }.value
+            let r = await Blocking.run { MachineSetup.run(env, hc, ["exec", "--timeout", "8", "--", "sh", "-c", Self.probe], timeout: 15) }
             granted = r.status == 0
         }
     }

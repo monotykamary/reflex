@@ -94,7 +94,7 @@ enum Sessions {
 
     @MainActor private static func claude(_ args: [String]) async {
         let env = Daemon.shared.childEnvironment()
-        await Task.detached {
+        await Blocking.run {
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             p.arguments = ["claude"] + args
@@ -104,7 +104,7 @@ enum Sessions {
             p.standardInput = FileHandle.nullDevice
             guard (try? p.run()) != nil else { return }
             p.waitUntilExit()
-        }.value
+        }
     }
 
     /// A new session's pane is known once it has started ("started rx1-42 in

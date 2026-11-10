@@ -1,5 +1,26 @@
 import Foundation
 
+/// Reflex's own lines (NSLog: windows attaching, moves, stalls) in
+/// ~/Library/Logs/Reflex/reflex.log, when nothing else reads them (launched
+/// from Finder its stderr is /dev/null); the old one kept as reflex.1.log
+/// past 10 MB.
+enum EventLog {
+    static func start() {
+        var err = stat(), null = stat()
+        guard fstat(2, &err) == 0, stat("/dev/null", &null) == 0, err.st_rdev == null.st_rdev, (err.st_mode & S_IFMT) == S_IFCHR else { return }
+        let fm = FileManager.default
+        try? fm.createDirectory(at: StallWatch.folder, withIntermediateDirectories: true)
+        let url = StallWatch.folder.appendingPathComponent("reflex.log")
+        if let size = (try? fm.attributesOfItem(atPath: url.path))?[.size] as? Int, size > 10_000_000 {
+            let old = StallWatch.folder.appendingPathComponent("reflex.1.log")
+            try? fm.removeItem(at: old)
+            try? fm.moveItem(at: url, to: old)
+        }
+        guard freopen(url.path, "a", stderr) != nil else { return }
+        setvbuf(stderr, nil, _IOLBF, 0)
+    }
+}
+
 /// The main thread stalling: typing, terminals and the rail all wait on it.
 /// A watcher off it asks every 50 ms; a stall past 250 ms is logged, and one
 /// still stuck at 300 ms is sampled while it lasts (macOS's `sample`, at most
@@ -124,10 +145,13 @@ final class DaemonWatch {
         let folder = StallWatch.folder
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let file = folder.appendingPathComponent("reflexd-stuck-\(stamp).txt")
-        Task.detached {
-            try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-            let files = Self.run("/usr/sbin/lsof", ["-p", String(pid)]).split(separator: "\n").count
-            _ = Self.run("/usr/bin/sample", [String(pid), "3", "-mayDie", "-file", file.path])
+        Task {
+            let files = await Blocking.run { () -> Int in
+                try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                let n = Self.run("/usr/sbin/lsof", ["-p", String(pid)]).split(separator: "\n").count
+                _ = Self.run("/usr/bin/sample", [String(pid), "3", "-mayDie", "-file", file.path])
+                return n
+            }
             await MainActor.run {
                 Diag.log("\(why): restarted it (pid \(pid), \(files) open files; sampled to \(file.lastPathComponent))")
                 NSLog("Reflex: %@: restarting reflexd", why)

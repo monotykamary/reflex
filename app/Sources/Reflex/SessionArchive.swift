@@ -83,11 +83,13 @@ final class SessionArchive: ObservableObject {
         scanning = true
         let cached = cache
         let env = Daemon.shared.childEnvironment()
-        Task.detached(priority: .utility) {
-            let states = SessionArchive.claudeAgents(env: env)
-            var next = cached
-            let found = SessionArchive.scan(cache: &next)
-            let kept = next
+        Task {
+            let (states, found, kept) = await Blocking.run {
+                let states = SessionArchive.claudeAgents(env: env)
+                var next = cached
+                let found = SessionArchive.scan(cache: &next)
+                return (states, found, next)
+            }
             await MainActor.run {
                 self.cache = kept
                 self.background = states

@@ -47,5 +47,6 @@ PY
 swiftc -swift-version 5 -parse-as-library \
   "$root/app/Tests/MachineRemovalHarness/stub.swift" \
   "$work/MachineSetup.swift" "$work/Machines.swift" "$work/CoreMachines.swift" \
+  "$root/app/Sources/Reflex/Blocking.swift" \
   "$root/app/Tests/MachineRemovalHarness/main.swift" -o "$work/test-removal"
 MACHINE_TEST_ROOT="$work" "$work/test-removal"

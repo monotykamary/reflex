@@ -58,7 +58,7 @@ final class BackgroundWatch {
     /// One look; true while any background session is working.
     private func check() async -> Bool {
         let env = Daemon.shared.childEnvironment()
-        let list = await Task.detached(priority: .utility) { BackgroundWatch.list(env: env) }.value
+        let list = await Blocking.run { BackgroundWatch.list(env: env) }
         let attached = Set(Store.shared.state.agents.map(\.session))
         var busy = false
         for b in list {
@@ -79,7 +79,8 @@ final class BackgroundWatch {
         var reply: String?
         for attempt in 0..<5 {
             if attempt > 0 { try? await Task.sleep(for: .seconds(1)) }
-            reply = await Task.detached { Replies.locate(kind: "claude", id: b.id).flatMap(Replies.lastReply) }.value
+            let id = b.id
+            reply = await Blocking.run { Replies.locate(kind: "claude", id: id).flatMap(Replies.lastReply) }
             if reply != nil { break }
         }
         let title = BackgroundWatch.needsYou(b) ? "needs you (background)" : "finished in the background"

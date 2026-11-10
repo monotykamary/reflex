@@ -56,13 +56,13 @@ final class Asks: ObservableObject {
             url = paths[a.session]
             if url == nil {
                 let id = a.session
-                url = await Task.detached(priority: .utility) { Replies.locate(kind: "claude", id: id) }.value
+                url = await Blocking.run { Replies.locate(kind: "claude", id: id) }
                 if let url { paths[id] = url }
             }
         }
-        let found = await Task.detached(priority: .utility) { [url] in
+        let found = await Blocking.run { [url] in
             Asks.read(item, screen: screen.isEmpty ? item.body : screen, transcript: url)
-        }.value
+        }
         if let found { detail[item.pane] = (item.id, found) } else { detail[item.pane] = nil }
     }
 

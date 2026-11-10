@@ -93,13 +93,13 @@ enum Attachments {
             for f in files { paths.append(try await coreUpload(f, on: machine)) }
             return paths
         }
-        return try await Task.detached {
+        return try await Blocking.run {
             let (up, env) = Machines.shared.reachable()
             guard let m = up.first(where: { $0.key == machine }) else {
                 throw NotCopied(why: "\(machine) isn't connected, so the image can't get there.")
             }
             return try files.map { try upload($0, to: m.target, env: env) }
-        }.value
+        }
     }
 
     /// Images pasted into a herdr-core terminal on another Mac: the core puts

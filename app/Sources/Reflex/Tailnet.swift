@@ -76,8 +76,8 @@ final class TailnetState: ObservableObject {
     @Published private(set) var checked = false
 
     func refresh() {
-        Task.detached(priority: .utility) {
-            let t = Tailnet.detect()
+        Task {
+            let t = await Blocking.run { Tailnet.detect() }
             await MainActor.run {
                 if self.current != t { self.current = t }
                 self.checked = true

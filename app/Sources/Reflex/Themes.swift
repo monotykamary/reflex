@@ -142,10 +142,12 @@ final class Themes: ObservableObject {
     func learnDarkness() {
         guard darkness.isEmpty else { return }
         let all = names
-        Task.detached(priority: .utility) {
-            var out: [String: Bool] = [:]
-            for n in all { out[n] = Themes.load(n)?.isDark ?? true }
-            let learned = out
+        Task {
+            let learned = await Blocking.run { () -> [String: Bool] in
+                var out: [String: Bool] = [:]
+                for n in all { out[n] = Themes.load(n)?.isDark ?? true }
+                return out
+            }
             await MainActor.run { Themes.shared.darkness = learned }
         }
     }

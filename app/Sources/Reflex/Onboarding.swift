@@ -188,8 +188,8 @@ final class Onboarding: ObservableObject {
         let seen = "\(real) \(date?.timeIntervalSince1970 ?? 0)"
         guard seen != jevSeen else { return }
         jevSeen = seen
-        Task.detached {
-            let v = Onboarding.version(of: real)
+        Task {
+            let v = await Blocking.run { Onboarding.version(of: real) }
             await MainActor.run { if self.jevSeen == seen { self.jevVersion = v } }
         }
     }
@@ -245,8 +245,8 @@ final class Onboarding: ObservableObject {
         let seen = "\(real) \(date?.timeIntervalSince1970 ?? 0)"
         guard seen != coreSeen else { return }
         coreSeen = seen
-        Task.detached {
-            let v = Onboarding.version(of: real, ["--version"])
+        Task {
+            let v = await Blocking.run { Onboarding.version(of: real, ["--version"]) }
             await MainActor.run { if self.coreSeen == seen { self.coreVersion = v } }
         }
     }
@@ -297,8 +297,8 @@ final class Onboarding: ObservableObject {
         let seen = "\(real) \(date?.timeIntervalSince1970 ?? 0)"
         guard seen != herdrSeen else { return }
         herdrSeen = seen
-        Task.detached {
-            let v = Onboarding.version(of: real, ["--version"])
+        Task {
+            let v = await Blocking.run { Onboarding.version(of: real, ["--version"]) }
             await MainActor.run {
                 guard self.herdrSeen == seen else { return }
                 self.herdrVersion = v
@@ -311,8 +311,8 @@ final class Onboarding: ObservableObject {
     func readHerdrServer() {
         guard let path = Onboarding.path(of: Tool.herdr.rawValue) else { herdrServer = nil; return }
         let env = Daemon.shared.childEnvironment()
-        Task.detached {
-            let v = Onboarding.version(of: path, Onboarding.herdrArgs(env) + ["status", "server"], env: env)
+        Task {
+            let v = await Blocking.run { Onboarding.version(of: path, Onboarding.herdrArgs(env) + ["status", "server"], env: env) }
             await MainActor.run { self.herdrServer = v }
         }
     }
@@ -450,7 +450,7 @@ final class Onboarding: ObservableObject {
         herdrInstalled = Onboarding.which("herdr")
         coreInstalled = HerdrCore.binary(Daemon.shared.childEnvironment()) != nil
         if coreInstalled {
-            Task.detached { let up = (try? HerdrCore.callSync("server.status", timeout: 2)) != nil
+            Task { let up = await Blocking.run { (try? HerdrCore.callSync("server.status", timeout: 2)) != nil }
                 await MainActor.run { if self.coreRunning != up { self.coreRunning = up } } }
         } else if coreRunning { coreRunning = false }
         jevInstalled = Onboarding.which("jev-fabric")
@@ -579,7 +579,8 @@ final class Onboarding: ObservableObject {
         working = label
         failures[label] = nil
         let env = Daemon.shared.childEnvironment()
-        Task.detached {
+        Task {
+          let failed = await Blocking.run { () -> String? in
             let p = Process()
             p.executableURL = URL(fileURLWithPath: "/bin/sh")
             p.arguments = ["-c", command]
@@ -602,7 +603,8 @@ final class Onboarding: ObservableObject {
                     why = last.map { String($0.prefix(160)) } ?? "it stopped with status \(p.terminationStatus)."
                 }
             } catch { why = error.localizedDescription }
-            let failed = why
+            return why
+          }
             await MainActor.run {
                 self.working = nil
                 self.refresh()

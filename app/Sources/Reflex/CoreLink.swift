@@ -217,7 +217,7 @@ final class CoreLink: @unchecked Sendable {
     /// stream there, so none of its bytes go astray.
     func call(_ method: String, _ params: [String: Any], timeout: TimeInterval = 10,
               opened: ((([String: Any])) -> Void)? = nil) async throws -> [String: Any] {
-        guard await Task.detached(operation: { self.connected() }).value else {
+        guard await Blocking.run({ self.connected() }) else {
             throw HerdrCore.Failure(kind: "unavailable", message: "herdr-core isn't running or isn't installed")
         }
         return try await withCheckedThrowingContinuation { (k: CheckedContinuation<[String: Any], Error>) in

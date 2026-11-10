@@ -98,9 +98,9 @@ final class EdgeReveal {
             coveredAt = now
             coveredAsking = true
             let frames = NSScreen.screens.map(\.frame), me = ProcessInfo.processInfo.processIdentifier
-            Task.detached(priority: .utility) { [weak self] in
-                let full = FullScreen.covered(frames, me: me)
-                await self?.cover(full)
+            Task { [weak self] in
+                let full = await Blocking.run { FullScreen.covered(frames, me: me) }
+                self?.cover(full)
             }
         }
         if let s = screen(at: p), covered.contains(where: { $0 === s }) {

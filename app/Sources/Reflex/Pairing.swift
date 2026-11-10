@@ -39,7 +39,7 @@ final class Pairing: ObservableObject {
                 if await Client.local.healthy() { break }
                 try? await Task.sleep(for: .milliseconds(250))
             }
-            let tailnet = await Task.detached { Tailnet.detect() }.value
+            let tailnet = await Blocking.run { Tailnet.detect() }
             guard self.code == code else { return }
             if tailnet == nil && !s.remoteLAN {
                 phase = .failed("Your phone can't reach this Mac yet. Install Tailscale on both — private, and it works anywhere — or allow this Wi-Fi in Settings → Phone.")

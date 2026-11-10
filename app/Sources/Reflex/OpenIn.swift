@@ -124,7 +124,7 @@ extension OpenIn {
         guard let t = target ?? terminal, let app = t.app else { return }
         let env = HerdrCore.environment()
         guard let hc = HerdrCore.binary(env) else { return }
-        Task.detached {
+        Blocking.queue.async {
             // A login shell in its folder there, gone when it exits…
             let p = Process()
             p.executableURL = URL(fileURLWithPath: hc)

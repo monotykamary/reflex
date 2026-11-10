@@ -166,9 +166,14 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         let cols = max(own.cols, 20), rows = max(own.rows, 5)
         let display = display()
         let pane = pane
+        let began = Date()
         Task { @MainActor [weak self] in
             do {
                 let s = try await CoreLink.shared.attach(pane, cols: cols, rows: rows, history: 2000, display: display)
+                // (Where a blank window's time goes: herdr-core opening the
+                // stream, or the screen coming over it.)
+                let opened = Date().timeIntervalSince(began)
+                if opened > 1 { NSLog("Reflex: %@ took %.1f s to attach", pane, opened) }
                 guard let self else { return s.close() }
                 guard self.attached, self.stream == nil else { return s.close() }
                 self.stream = s
@@ -176,6 +181,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
                 self.screened = false
                 s.start(data: { [weak self] d in
                     guard let self, self.paintStream == nil else { return }
+                    if !self.screened {
+                        let first = Date().timeIntervalSince(began)
+                        if first > 1 { NSLog("Reflex: %@ showed its screen %.1f s after attaching began", pane, first) }
+                    }
                     self.screened = true
                     self.view.feed(byteArray: ArraySlice([UInt8](d)))
                 }, closed: { [weak self] why in self?.coreEnded(why) })
