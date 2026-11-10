@@ -5,6 +5,8 @@
 #
 #   reflex machine new [--template | --from SNAPSHOT] [--type T] [--name N]
 #   reflex machine rm NAME          reflex machine ls
+#   reflex machine extend NAME SECONDS | state NAME | resume NAME
+#                                   its sandbox's lifetime, state, restart
 #   reflex where MACHINE PATH       the path there (~/x here is ~/x there,
 #                                   /tmp/x is /tmp/x)
 #   reflex sync MACHINE [DIR] [--include PATH]...
@@ -88,7 +90,9 @@ connected() {
 }
 
 machine_new() {
-  from="" type="" name="" ttl=""
+  # An hour: Reflex renews it while an agent there works, so the hour
+  # starts when the machine goes idle (and when Reflex isn't watching).
+  from="" type="" name="" ttl=3600
   while [ $# -gt 0 ]; do
     case $1 in
       --template) from=$(template_field snapshot) || die "no template yet: build one with the reflex skill"; shift ;;
@@ -109,12 +113,20 @@ machine_new() {
   name=${name:-boat-${id#bx_}}
   printf '%s\n%s\n' "$id" "${from:-}" > "$(record "$name")"
   say "Adding $id to herdr-core as $name..."
-  if ! r=$(hc machine add --via "boat ssh $id" --name "$name" --temp --install --json 2>&1); then
-    say "hc machine add failed: $r"
-    boat delete --yes "$id" >/dev/null 2>&1 || true
-    rm -f "$(record "$name")"
-    exit 1
-  fi
+  # (A sandbox just ready can take a while to answer ssh.)
+  a=0
+  until r=$(hc machine add --via "boat ssh $id" --name "$name" --temp --install --json 2>&1); do
+    a=$((a + 1))
+    if [ $a -ge 4 ]; then
+      say "hc machine add failed: $r"
+      hc machine rm "$name" >/dev/null 2>&1 || true
+      boat delete --yes "$id" >/dev/null 2>&1 || true
+      rm -f "$(record "$name")"
+      exit 1
+    fi
+    say "$id isn't answering ssh yet; again in 5 s"
+    sleep 5
+  done
   i=0
   until connected "$name"; do
     i=$((i + 1))
@@ -135,6 +147,29 @@ machine_rm() {
   rm -f "$(record "$name")"
   rm -rf "$DIR/sent/$name"
   echo "removed $name ($id)"
+}
+
+# Its boat sandbox: how long it stays up, its state, and back up again.
+machine_extend() { # machine_extend NAME SECONDS
+  ours "$1" || die "$1 isn't a machine Reflex made"
+  boat extend "$(boat_id "$1")" --ttl "$2" --json --no-update >/dev/null 2>&1 || die "boat extend $(boat_id "$1") failed"
+}
+machine_state() { # machine_state NAME: boat's word for it (running, idle, stopped...)
+  ours "$1" || die "$1 isn't a machine Reflex made"
+  boat info "$(boat_id "$1")" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $(boat_id "$1") failed"
+  echo
+}
+machine_resume() { # machine_resume NAME: running and connected again
+  ours "$1" || die "$1 isn't a machine Reflex made"
+  say "Resuming $(boat_id "$1")..."
+  boat resume "$(boat_id "$1")" --ttl 3600 --json --no-update >/dev/null 2>&1 || die "boat resume $(boat_id "$1") failed"
+  i=0
+  until connected "$1"; do
+    i=$((i + 1))
+    [ $i -lt 120 ] || die "$1 is running again but herdr-core hasn't reconnected (hc machine ls)"
+    sleep 1
+  done
+  echo "$1"
 }
 
 machine_ls() {
@@ -534,7 +569,11 @@ cmd=${1:-}
 case $cmd in
   machine)
     sub=${1:-}; [ $# -gt 0 ] && shift
-    case $sub in new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;; *) die "machine new|rm|ls" ;; esac ;;
+    case $sub in
+      new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;;
+      extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;;
+      *) die "machine new|rm|ls|extend|state|resume" ;;
+    esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;
   fixgit) fixgit "$1" "$(where "$1" "$(cd "${2:-$PWD}" && pwd -P)")" ;;

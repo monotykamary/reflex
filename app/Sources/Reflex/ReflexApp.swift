@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         // Agents asking to move (`reflex move self`), and the skill they
         // follow kept at this version once you've used it.
         MoveRequests.shared.start()
+        BoatLifetime.shared.start()
         Boat.updateInstalled()
         hotkey = DoubleOption { [weak self] in
             if Onboarding.shared.consumeHotkey() { return }
@@ -212,6 +213,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             case "access": AccessGuide.shared.start(preview: true)
             case "settings": self.showSettings()
             case let s where s.hasPrefix("pane:"): self.showPane(String(s.dropFirst(5)))
+            // Dev: a stopped boat machine's terminal, then Resume a moment later.
+            case let s where s.hasPrefix("boatresume:"):
+                let pane = String(s.dropFirst(11))
+                self.showPane(pane)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 20) { BoatLifetime.shared.resume(Machines.machine(of: pane)) }
             // Dev: open a terminal, close it, open it again (a reopen's attach).
             case let s where s.hasPrefix("reopen:"):
                 let pane = String(s.dropFirst(7))

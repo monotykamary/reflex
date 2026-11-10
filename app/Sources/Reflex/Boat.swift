@@ -286,3 +286,114 @@ final class MoveRequests: ObservableObject {
         try? FileManager.default.removeItem(at: dir.appendingPathComponent(r.id))
     }
 }
+
+/// How long Reflex's boat machines stay up. Each starts with an hour; while
+/// an agent there works (or waits on you), Reflex keeps renewing it, so the
+/// hour only runs once the machine is idle (or Reflex isn't watching: quit,
+/// asleep). A machine boat stopped is shown as stopped, with Resume: its
+/// disk is kept, and its kept terminals start their agents again (same
+/// sessions, same terminals), so their windows reattach.
+@MainActor
+final class BoatLifetime: ObservableObject {
+    static let shared = BoatLifetime()
+    static let hour = 3600
+
+    /// Machines boat stopped, with their agents as last seen.
+    @Published private(set) var down: [String: [AgentInfo]] = [:]
+    @Published private(set) var resuming: Set<String> = []
+    /// Why the last resume of a machine didn't work.
+    @Published private(set) var problem: [String: String] = [:]
+    /// When each machine last came back (windows on it reattach).
+    @Published private(set) var back: [String: Date] = [:]
+
+    private var seen: [String: [AgentInfo]] = [:]
+    private var working: [String: Bool] = [:]
+    private var renewed: [String: Date] = [:]
+    private var asked: [String: Date] = [:]
+    private var timer: Timer?
+
+    func start() {
+        guard timer == nil else { return }
+        timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { _ in
+            MainActor.assumeIsolated { BoatLifetime.shared.tick() }
+        }
+        tick()
+    }
+
+    /// The machines Reflex made (their records).
+    private var made: [String] {
+        let dir = Settings.supportDir.appendingPathComponent("boat/machines")
+        return ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") }
+    }
+
+    static func isWorking(_ a: AgentInfo) -> Bool { ["working", "blocked", "busy"].contains(a.status) }
+
+    private func tick() {
+        let machines = made
+        let agents = Store.shared.state.agents
+        let up = Set(CoreMachines.known.filter { $0.state == "connected" }.map(\.name))
+        for m in machines where down[m] == nil && !resuming.contains(m) && up.contains(m) {
+            let here = agents.filter { $0.machine == m }
+            if !here.isEmpty { seen[m] = here }
+            let now = here.contains(where: Self.isWorking)
+            if now {
+                // Never near the end while it works.
+                if Date().timeIntervalSince(renewed[m] ?? .distantPast) > 600 { extend(m, "an agent works there") }
+            } else if working[m] != false {
+                // Just went idle (or first seen idle): the hour starts now.
+                extend(m, "idle from now")
+            }
+            working[m] = now
+        }
+        for m in Array(down.keys) where !machines.contains(m) { down[m] = nil }
+        Task { await checkDown(machines) }
+    }
+
+    private func extend(_ m: String, _ why: String) {
+        NSLog("Reflex: %@ stays up another hour (%@)", m, why)
+        renewed[m] = Date()
+        Task { _ = try? await Boat.reflex(["machine", "extend", m, String(Self.hour)], timeout: 60) }
+    }
+
+    /// One herdr-core can't reach: boat's word on it (a minute apart).
+    private func checkDown(_ machines: [String]) async {
+        let states = Dictionary(await CoreMachines.list().map { ($0.name, $0.state) }, uniquingKeysWith: { a, _ in a })
+        for m in machines where states[m] != "connected" && states[m] != "connecting" && down[m] == nil && !resuming.contains(m) {
+            guard Date().timeIntervalSince(asked[m] ?? .distantPast) > 60 else { continue }
+            asked[m] = Date()
+            guard let s = try? await Boat.reflex(["machine", "state", m], timeout: 30) else { continue }
+            if ["stopped", "stopping", "archived", "suspended"].contains(s), down[m] == nil {
+                down[m] = seen[m] ?? []
+                working[m] = nil
+                NSLog("Reflex: boat stopped %@ (%@), %d agents there", m, s, down[m]?.count ?? 0)
+                if !(seen[m] ?? []).isEmpty { NSApp.requestUserAttention(.informationalRequest) }
+            }
+        }
+    }
+
+    func isDown(_ machine: String) -> Bool { down[machine] != nil }
+
+    /// Up again: boat resumes it from its disk, herdr-core reconnects, and its
+    /// agents start again in the same terminals.
+    func resume(_ m: String) {
+        guard !resuming.contains(m) else { return }
+        resuming.insert(m)
+        problem[m] = nil
+        Task {
+            defer { resuming.remove(m) }
+            do {
+                _ = try await Boat.reflex(["machine", "resume", m], timeout: 300)
+                NSLog("Reflex: %@ resumed", m)
+                down[m] = nil
+                working[m] = nil
+                renewed[m] = Date()
+                _ = await CoreMachines.list(fresh: 0)
+                // (Its kept terminals take a moment to start their agents.)
+                try? await Task.sleep(for: .seconds(3))
+                back[m] = Date()
+            } catch {
+                problem[m] = error.localizedDescription
+            }
+        }
+    }
+}

@@ -1049,6 +1049,7 @@ private struct BoatSection: View {
 /// join its list (no tunnel of Reflex's). `hc machine rm` removes one.
 private struct CoreMachinesSection: View {
     @ObservedObject var store = Store.shared
+    @ObservedObject private var lifetime = BoatLifetime.shared
     @State private var rows: [CoreMachines.Machine] = []
     @State private var loaded = false
 
@@ -1060,11 +1061,15 @@ private struct CoreMachinesSection: View {
             }
             ForEach(rows, id: \.name) { m in
                 let agents = store.state.agents.filter { $0.machine == m.name }.count
+                let stopped = lifetime.isDown(m.name)
                 LabeledContent {
-                    MachineActions(name: m.name, reconnect: m.state == "connected" ? nil : {
+                    MachineActions(name: m.name, reconnect: m.state == "connected" ? nil : stopped ? {
+                        lifetime.resume(m.name)
+                    } : {
                         _ = try? await HerdrCore.call("machine.connect", ["machine": m.name], timeout: 30)
                         await load()
-                    }, remove: {
+                    }, reconnectLabel: stopped ? (lifetime.resuming.contains(m.name) ? "Resuming…" : "Resume") : "Reconnect",
+                    reconnectDisabled: lifetime.resuming.contains(m.name), remove: {
                         // One Reflex made: its boat sandbox goes too.
                         if Boat.made(m.name) { try await Boat.remove(m.name) } else { try await CoreMachines.remove(m.name) }
                         await load()
@@ -1078,7 +1083,7 @@ private struct CoreMachinesSection: View {
                             Text((Boat.made(m.name) ? "boat sandbox, made by Reflex" : m.temporary ? "temporary · \(m.target)" : "ssh \(m.target)")
                                  + (m.version.isEmpty ? "" : " · hc \(m.version)"))
                                 .font(.system(size: 11, design: .monospaced)).foregroundStyle(.secondary).textSelection(.enabled)
-                            Text(Self.state(m, agents: agents)).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                            Text(stopped ? "Stopped by boat after an hour idle. Its disk is kept for 14 days: Resume starts it with its agents." : lifetime.problem[m.name] ?? Self.state(m, agents: agents)).font(.system(size: 11.5)).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
                         }
                     }
                 }
@@ -1157,6 +1162,7 @@ private struct MachineRow: View {
 private struct MachineActions: View {
     let name: String
     var reconnect: (() async -> Void)?
+    var reconnectLabel = "Reconnect"
     var reconnectDisabled = false
     var remove: () async throws -> Void
     @State private var confirming = false
@@ -1166,7 +1172,7 @@ private struct MachineActions: View {
     var body: some View {
         HStack(spacing: 8) {
             if let reconnect {
-                Button("Reconnect") { Task { await reconnect() } }
+                Button(reconnectLabel) { Task { await reconnect() } }
                     .disabled(removing || reconnectDisabled)
             }
             Button(removing ? "Removing…" : "Remove…", role: .destructive) { confirming = true }

@@ -199,7 +199,9 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         endFacts()
         guard attached else { return }
         let back = ["lost", "unavailable", "timeout", "signaled", "server_stop", "stopped_by_restart", "holder_lost"]
-        if back.contains(why), reattaching < 30 {
+        // (A boat machine that stopped isn't coming back by itself: Resume.)
+        let stopped = BoatLifetime.shared.isDown(Machines.machine(of: pane))
+        if back.contains(why), reattaching < 30, !stopped {
             reattaching += 1
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
                 guard let self, self.attached, self.stream == nil else { return }
@@ -998,6 +1000,7 @@ struct AgentPopout: View {
     @ObservedObject var store = Store.shared
     @ObservedObject var themes = Themes.shared
     @ObservedObject private var move = HerdrMove.shared
+    @ObservedObject private var lifetime = BoatLifetime.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var hintSize = CGSize.zero
 
@@ -1061,10 +1064,28 @@ struct AgentPopout: View {
                     Spacer()
                 }
                 .animation(Motion.micro, value: MoveRequests.shared.pending)
-                // (Closed to move: the banner says where it's going.)
-                if session.ended && !move.moving.contains(session.pane) && move.notes[session.pane] == nil {
+                // (Closed to move: the banner says where it's going. Its boat
+                // machine stopped: said at once, even while its stream hangs on.)
+                let host = Machines.machine(of: session.pane)
+                if (session.ended || lifetime.isDown(host) || lifetime.resuming.contains(host))
+                    && !move.moving.contains(session.pane) && move.notes[session.pane] == nil {
                     VStack(spacing: 10) {
-                        if session.elsewhere {
+                        let machine = Machines.machine(of: session.pane)
+                        if lifetime.isDown(machine) || lifetime.resuming.contains(machine) {
+                            // boat stopped its machine (an hour idle): its disk is
+                            // kept, and its agents start again where they were.
+                            Text("\(machine) stopped").font(Type.title)
+                            Text("boat stops a machine after an hour idle. Its disk is kept for 14 days; Resume starts it again with \(agent?.kind ?? "this session") where it was.")
+                                .font(.system(size: 12)).foregroundStyle(Ink.dim).multilineTextAlignment(.center).frame(maxWidth: 360)
+                            if let why = lifetime.problem[machine] {
+                                Text(why).font(.system(size: 12)).foregroundStyle(Tone.blocked).multilineTextAlignment(.center).frame(maxWidth: 360)
+                            }
+                            Button(lifetime.resuming.contains(machine) ? "Resuming…" : "Resume") {
+                                lifetime.resume(machine)
+                            }
+                            .buttonStyle(.glassProminent)
+                            .disabled(lifetime.resuming.contains(machine))
+                        } else if session.elsewhere {
                             Text("Open in another window").font(Type.title)
                             Text("herdr shows \(agent?.kind ?? "an agent") in one window at a time.")
                                 .font(.system(size: 12)).foregroundStyle(Ink.dim)
@@ -1088,6 +1109,13 @@ struct AgentPopout: View {
         // An agent takes the mouse; the shell it leaves behind gives it back.
         .onChange(of: agent == nil, initial: true) { _, gone in TerminalSelect.set(session.view, agent: !gone) }
         .onDisappear { session.detach() }
+        // Its boat machine back (here, or Resume in Settings): the agent is in
+        // the same terminal again.
+        .onChange(of: lifetime.back[Machines.machine(of: session.pane)]) { _, _ in
+            // (A stream left hanging by the stop goes too.)
+            session.detach()
+            session.attach(reason: "machine resumed")
+        }
         .overlay(alignment: .topLeading) {
             if let link = session.link, !session.ended {
                 GeometryReader { g in
