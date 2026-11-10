@@ -700,6 +700,7 @@ struct OnboardingView: View {
     @ObservedObject var store = Store.shared
     @ObservedObject var settings = Settings.shared
     @ObservedObject var machines = MachinesModel.shared
+    @ObservedObject private var access = FileAccess.shared
     @Environment(\.accessibilityReduceMotion) private var reduce
     @State private var key = ""
 
@@ -913,6 +914,11 @@ struct OnboardingView: View {
             }
         case .machines:
             VStack(alignment: .leading, spacing: 10) {
+                Check(ok: access.granted == true, title: "Files for your other machines",
+                      detail: access.granted == true ? "herdr-core can read Downloads, Desktop and Documents" : "lets a session on another machine fetch from Downloads, Desktop and Documents here") {
+                    if access.granted != true { GlassAction("Allow…") { access.allow() } }
+                }
+                .onAppear { access.check() }
                 ForEach(machines.rows) { m in
                     Check(ok: m.link == .connected, title: m.label,
                           detail: m.link == .connected ? "connected · ssh \(m.target)" : (m.link == .off ? "disabled in herdr" : "connecting to \(m.target)…")) { EmptyView() }

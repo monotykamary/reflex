@@ -1007,6 +1007,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if command.target == pane { command.target = nil }
     }
 
+    /// The rail out where it's anchored, like a notification (a machine
+    /// event that needs you).
+    func surfaceRail() { edge.surface() }
+
     func showPane(_ pane: String) {
         // A background session's note: attach it in herdr (then it is a pane).
         if pane.hasPrefix("bg:") {

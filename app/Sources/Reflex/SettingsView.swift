@@ -1078,6 +1078,7 @@ private struct MachineCardsSection: View {
     @ObservedObject var store = Store.shared
     @ObservedObject private var lifetime = BoatLifetime.shared
     @ObservedObject private var kinds = MachineKinds.shared
+    @ObservedObject private var access = FileAccess.shared
     @State private var rows: [CoreMachines.Machine] = []
     @State private var loaded = false
     @State private var removing: CoreMachines.Machine?
@@ -1129,7 +1130,10 @@ private struct MachineCardsSection: View {
     private func load() async {
         rows = await CoreMachines.list(fresh: 2)
         loaded = true
-        for m in rows where m.state == "connected" && !Boat.made(m.name) { kinds.look(m.name) }
+        for m in rows where m.state == "connected" && !Boat.made(m.name) {
+            kinds.look(m.name)
+            if FileAccess.shared.remote[m.name] == nil, kinds.models[m.name].map({ $0 != "Linux" }) ?? false { FileAccess.shared.check(m.name) }
+        }
     }
 
     private func count(_ n: Int) -> String { n == 0 ? "No agents" : n == 1 ? "1 agent" : "\(n) agents" }
@@ -1174,6 +1178,12 @@ private struct MachineCardsSection: View {
             HerdrMove.shared.move(movable, to: Boat.here)
         }
         .disabled(movable.isEmpty)
+        // A Mac's protected folders: allowed on its own screen.
+        if !Boat.made(m.name), kinds.models[m.name].map({ $0 != "Linux" }) ?? false {
+            Button(FileAccess.shared.remote[m.name] == true ? "Its Files Are Allowed" : "Allow Its Files…") { FileAccess.shared.allow(on: m.name) }
+                .disabled(m.state != "connected" || FileAccess.shared.remote[m.name] == true)
+                .help("Opens Full Disk Access on \(m.name)'s screen with herdr-core shown in Finder: someone there (or Parsec) drags it in.")
+        }
         Divider()
         Button("Remove…", role: .destructive) { removing = m }
     }
@@ -1529,6 +1539,7 @@ private struct SetupPane: View {
                     }
                     CheckRow(ok: true, title: "Agent status", detail: o.statusDetail) {}
                     piShellsRow
+                    FileAccessRow()
                 }
                 if !herdrAgents.isEmpty {
                     Section {
@@ -1711,6 +1722,25 @@ private struct MoveFromHerdr: View {
         case .machine: return "\(a.machine) has no herdr-core connected: add it under Machines first."
         case .notHere: return "Only this Mac's agents move to another machine."
         }
+    }
+}
+
+/// herdr-core may read Downloads, Desktop and Documents: what your other
+/// machines fetch from there goes through it.
+private struct FileAccessRow: View {
+    @ObservedObject private var access = FileAccess.shared
+
+    var body: some View {
+        CheckRow(ok: access.granted == true, title: "Files for your other machines",
+                 detail: access.granted == nil ? "Checking whether herdr-core can read Downloads, Desktop and Documents…"
+                    : access.granted == true ? "herdr-core can read Downloads, Desktop and Documents: other machines' sessions can fetch from them."
+                    : "macOS keeps Downloads, Desktop and Documents from herdr-core, so a session elsewhere can't fetch from them. Allow… opens Full Disk Access with herdr-core in Finder: drag it in (or turn it on). Only you can; no script can.") {
+            HStack(spacing: 6) {
+                Button("Check") { access.check() }
+                Button("Allow…") { access.allow() }.buttonStyle(.borderedProminent)
+            }
+        }
+        .onAppear { if access.granted == nil { access.check() } }
     }
 }
 

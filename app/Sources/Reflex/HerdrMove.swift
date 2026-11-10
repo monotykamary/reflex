@@ -182,6 +182,7 @@ final class HerdrMove: ObservableObject {
 
     private func fail(_ pane: String, _ why: String) {
         NSLog("Reflex: move of %@ stopped: %@", pane, why)
+        MachineNotes.post(pane, title: "didn't move", body: why)
         problem = why
         notes[pane] = why
     }
@@ -274,6 +275,7 @@ final class HerdrMove: ObservableObject {
         }
         notes[a.pane] = nil
         if let moved = arrived() {
+            MachineNotes.post(moved.pane, title: "moved to \(place)", body: "From \(src == Boat.here ? "this Mac" : src), with its project\(paths.isEmpty ? "" : " and \(paths.count) more") and this conversation.")
             // Its window is the one there now.
             AppDelegate.current?.closedSession(a.pane)
             AppDelegate.current?.showPane(moved.pane)

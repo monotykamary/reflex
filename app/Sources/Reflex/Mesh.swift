@@ -146,6 +146,11 @@ final class HomeRequests: ObservableObject {
             pending.append(r)
             if !r.pane.isEmpty { AppDelegate.current?.showPane(r.pane) }
             NSApp.requestUserAttention(.informationalRequest)
+            let from = r.origin == Boat.here ? "this Mac" : r.origin
+            let title = r.op == "run" ? "asks to run a command on \(from)" : r.op == "ls" ? "asks what's in \(r.paths.first ?? "~") on \(from)" : "asks for \(r.what) from \(from)"
+            MachineNotes.post(r.pane, title: title,
+                              body: (r.op == "run" ? r.command : r.paths.joined(separator: "\n")) + "\n\n" + (r.op == "run" ? "Run" : r.op == "ls" ? "Show" : "Send") + " or Not Now in its window.",
+                              needsYou: true)
         }
     }
 
@@ -201,6 +206,91 @@ final class HomeRequests: ObservableObject {
         } catch {
             if !r.pane.isEmpty { notes[r.pane] = "Couldn't send \(r.what): \(error.localizedDescription)" }
             await Boat.reply(r.machine, r.id, ok: false, message: "Reflex couldn't send it: \(error.localizedDescription)")
+        }
+    }
+}
+
+/// Whether a Mac's herdr-core may read your protected folders (Downloads,
+/// Desktop, Documents): what another machine fetches from there goes
+/// through it. macOS grants that only to a person, in System Settings
+/// (Full Disk Access) or its prompt; no ssh or script can. Reflex checks,
+/// and opens the right pane with herdr-core shown in Finder to drag in, on
+/// this Mac or another one's screen.
+@MainActor
+final class FileAccess: ObservableObject {
+    static let shared = FileAccess()
+    /// This Mac: nil until checked.
+    @Published private(set) var granted: Bool?
+    /// Other Macs, by machine name.
+    @Published private(set) var remote: [String: Bool] = [:]
+    private var checking = false
+
+    nonisolated private static let probe = "for d in Downloads Desktop Documents; do ls \"$HOME/$d\" >/dev/null 2>&1 || exit 1; done"
+    private static let pane = "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"
+
+    /// Through this Mac's herdr-core (what reads them for other machines).
+    func check() {
+        guard !checking else { return }
+        checking = true
+        Task {
+            defer { checking = false }
+            let env = HerdrCore.environment()
+            guard let hc = HerdrCore.binary(env) else { return }
+            let r = await Task.detached { MachineSetup.run(env, hc, ["exec", "--timeout", "8", "--", "sh", "-c", Self.probe], timeout: 15) }.value
+            granted = r.status == 0
+        }
+    }
+
+    func check(_ machine: String) {
+        Task {
+            let (code, _) = await Boat.runAt(Self.probe, from: machine, dir: "~", timeout: 8)
+            remote[machine] = code == 0
+        }
+    }
+
+    /// Full Disk Access in System Settings, and herdr-core in Finder to drag
+    /// into it; checked again for a minute.
+    func allow() {
+        if let url = URL(string: Self.pane) { NSWorkspace.shared.open(url) }
+        if let bin = HerdrCore.binary() {
+            let real = URL(fileURLWithPath: bin).resolvingSymlinksInPath()
+            NSWorkspace.shared.activateFileViewerSelecting([real])
+        }
+        recheck { self.check() }
+    }
+
+    /// The same on another Mac's screen (someone there, or Parsec, clicks).
+    func allow(on machine: String) {
+        Task {
+            _ = await Boat.runAt("open '\(Self.pane)'; b=$(command -v herdr-core || echo \"$HOME/.local/bin/herdr-core\"); open -R \"$(readlink -f \"$b\" 2>/dev/null || echo \"$b\")\"",
+                                 from: machine, dir: "~", timeout: 15)
+        }
+        recheck { self.check(machine) }
+    }
+
+    private func recheck(_ again: @escaping () -> Void) {
+        Task {
+            for _ in 0..<12 {
+                try? await Task.sleep(for: .seconds(5))
+                again()
+            }
+        }
+    }
+}
+
+/// Machine events in the inbox (and on the phone): a session elsewhere asking
+/// for something, a move done or stopped, a sandbox boat stopped. One that
+/// needs you also slides the rail out, as a question does.
+@MainActor
+enum MachineNotes {
+    static func post(_ pane: String, title: String, body: String = "", needsYou: Bool = false) {
+        let a = Store.shared.state.agents.first { $0.pane == pane }
+        let machine = Machines.machine(of: pane)
+        let agent = a?.label ?? (machine.isEmpty ? "reflex" : machine)
+        Task {
+            await Client.local.note(pane: pane, agent: agent, title: title, body: body)
+            await Store.shared.refresh()
+            if needsYou, Settings.shared.surfaceQuestions { AppDelegate.current?.surfaceRail() }
         }
     }
 }

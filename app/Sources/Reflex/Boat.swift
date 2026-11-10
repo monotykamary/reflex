@@ -275,9 +275,12 @@ final class MoveRequests: ObservableObject {
         } else {
             pending.removeAll { $0.pane == pane }
             pending.append(r)
-            // Seen where it's asked: its terminal, in front.
+            // Seen where it's asked: its terminal, in front, and the inbox.
             AppDelegate.current?.showPane(r.pane)
             NSApp.requestUserAttention(.informationalRequest)
+            MachineNotes.post(r.pane, title: "asks to move to \(to == Boat.here ? "this Mac" : to)",
+                              body: paths.isEmpty ? "Move or Not Now in its window." : "With " + paths.map { ($0 as NSString).lastPathComponent }.joined(separator: ", ") + ". Move or Not Now in its window.",
+                              needsYou: true)
         }
         return true
     }
@@ -389,6 +392,8 @@ final class BoatLifetime: ObservableObject {
             if ["stopped", "stopping", "archived", "suspended"].contains(s), down[m] == nil {
                 down[m] = seen[m] ?? []
                 working[m] = nil
+                MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped",
+                                  body: "boat stops a sandbox after an hour idle. Its disk is kept 14 days: Resume in its window or Settings → Machines brings it back with its agents.")
                 NSLog("Reflex: boat stopped %@ (%@), %d agents there", m, s, down[m]?.count ?? 0)
                 if !(seen[m] ?? []).isEmpty { NSApp.requestUserAttention(.informationalRequest) }
             }
