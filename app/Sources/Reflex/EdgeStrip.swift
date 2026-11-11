@@ -783,6 +783,66 @@ private struct StatusPill: View {
 
 /// Every agent, grouped by project: what it is doing, and one click to its
 /// terminal, a message, or herdr.
+/// The open list's rows, kept where they are while it's open: a poll sorting
+/// again by state or recency, or briefly missing a session (a machine slow
+/// to answer), would move rows under the pointer. A session's row updates in
+/// place; a new one goes at the end of its group; one that's gone stays a few
+/// seconds, dimmed, then goes. Sorted afresh each time the list opens.
+struct SteadyRows {
+    /// One project's agents (a header), or `folder` nil: the one-agent ones.
+    struct Group: Equatable {
+        var folder: String?
+        var panes: [String]
+    }
+    private(set) var groups: [Group] = []
+    private(set) var info: [String: AgentInfo] = [:]
+    private(set) var goneAt: [String: Date] = [:]
+    static let grace: TimeInterval = 6
+
+    var isEmpty: Bool { groups.isEmpty }
+    func gone(_ pane: String) -> Bool { goneAt[pane] != nil }
+
+    @MainActor mutating func update(_ agents: [AgentInfo], folder: (AgentInfo) -> String, now: Date = Date()) {
+        var fresh: [String: AgentInfo] = [:]
+        for a in agents where fresh[a.pane] == nil { fresh[a.pane] = a }
+        guard !groups.isEmpty else {
+            // Opening: waiting first, then working, done, idle; recent first.
+            var order: [String] = []
+            var by: [String: [String]] = [:]
+            for a in Rail.ordered(agents) where fresh[a.pane] != nil {
+                let f = folder(a)
+                if by[f] == nil { order.append(f) }
+                by[f, default: []].append(a.pane)
+            }
+            let singles = Rail.ordered(agents).filter { by[folder($0)]?.count == 1 }.map(\.pane)
+            groups = order.filter { (by[$0]?.count ?? 0) > 1 }.map { Group(folder: $0, panes: by[$0] ?? []) }
+                + (singles.isEmpty ? [] : [Group(folder: nil, panes: singles)])
+            info = fresh
+            goneAt = [:]
+            return
+        }
+        let known = Set(groups.flatMap(\.panes))
+        for (p, a) in fresh { info[p] = a; goneAt[p] = nil }
+        for p in known where fresh[p] == nil && goneAt[p] == nil { goneAt[p] = now }
+        let expired = Set(goneAt.filter { now.timeIntervalSince($0.value) > Self.grace }.keys)
+        if !expired.isEmpty {
+            for i in groups.indices { groups[i].panes.removeAll { expired.contains($0) } }
+            groups.removeAll { $0.panes.isEmpty }
+            for p in expired { info[p] = nil; goneAt[p] = nil }
+        }
+        for a in Rail.ordered(agents.filter { !known.contains($0.pane) }) {
+            let f = folder(a)
+            if let i = groups.firstIndex(where: { $0.folder == f }) {
+                groups[i].panes.append(a.pane)
+            } else if let i = groups.firstIndex(where: { $0.folder == nil }) {
+                groups[i].panes.append(a.pane)
+            } else {
+                groups.append(Group(folder: nil, panes: [a.pane]))
+            }
+        }
+    }
+}
+
 struct AgentList: View {
     var agents: [AgentInfo]
     var pulses: [String: Int]
@@ -796,16 +856,29 @@ struct AgentList: View {
     var reveal: (AgentInfo) -> Void
     var showQuestion: () -> Void
     @State private var rowsHeight: CGFloat = 0
+    /// The rows as they were laid out when the list opened (see SteadyRows).
+    @State private var steady = SteadyRows()
     @ObservedObject private var rail = RailModel.shared
     private var query: String { rail.filter }
 
-    private var shown: [AgentInfo] {
+    /// Whether the chips and what you typed keep this agent.
+    private func passes(_ a: AgentInfo) -> Bool {
+        if let s = rail.stateFilter, Rail.norm(a.status) != s { return false }
         let q = query.trimmingCharacters(in: .whitespaces)
-        let inState = rail.stateFilter.map { s in agents.filter { Rail.norm($0.status) == s } } ?? agents
-        guard !q.isEmpty else { return inState }
-        return inState.filter { a in
-            [a.title, a.folder, a.kind, a.status, a.machine].contains { $0.localizedCaseInsensitiveContains(q) }
-        }
+        return q.isEmpty || [a.title, a.folder, a.kind, a.status, a.machine].contains { $0.localizedCaseInsensitiveContains(q) }
+    }
+
+    /// The steady rows for these agents (the list's own, or laid out now
+    /// for its first frame).
+    private func layout(_ agents: [AgentInfo]) -> SteadyRows {
+        var s = steady
+        if s.isEmpty { s.update(agents, folder: AgentList.folder(in: AgentList.projects(of: agents))) }
+        return s
+    }
+
+    /// The folder an agent is listed under, given the projects.
+    static func folder(in projects: [String: String]) -> (AgentInfo) -> String {
+        { a in ((projects[a.cwd] ?? a.cwd) as NSString).lastPathComponent }
     }
 
     /// The stopped ones shown: all, or those the filter keeps (a state other
@@ -858,7 +931,9 @@ struct AgentList: View {
     /// Each agent's folder → the folder it is listed under: its own, or the
     /// outermost folder above it that another agent is working in, so a
     /// project's sub-folders stay with the project.
-    private var projects: [String: String] {
+    private var projects: [String: String] { AgentList.projects(of: agents) }
+
+    static func projects(of agents: [AgentInfo]) -> [String: String] {
         let cwds = Set(agents.map(\.cwd))
         let tops = cwds.filter { !AgentList.holdsProjects($0) }
         return Dictionary(uniqueKeysWithValues: cwds.map { c in
@@ -872,17 +947,6 @@ struct AgentList: View {
         return String(a.cwd.dropFirst(p.count + 1))
     }
 
-    /// Projects in order of first appearance, waiting agents' projects first.
-    private func groups(_ projects: [String: String]) -> [(String, [AgentInfo])] {
-        var order: [String] = []
-        var by: [String: [AgentInfo]] = [:]
-        for a in Rail.ordered(shown) {
-            let folder = ((projects[a.cwd] ?? a.cwd) as NSString).lastPathComponent
-            if by[folder] == nil { order.append(folder) }
-            by[folder, default: []].append(a)
-        }
-        return order.map { ($0, by[$0] ?? []) }
-    }
 
     private var summary: String {
         let w = agents.filter { $0.status == "working" }.count
@@ -950,7 +1014,8 @@ struct AgentList: View {
             }
 
             let projects = self.projects
-            let groups = self.groups(projects)
+            let rows = layout(agents)
+            let groups = visible(rows)
             ScrollView {
                 // Every agent, in one scroll. Up to `eager` rows they are built
                 // when the list opens, so scrolling only moves what's drawn;
@@ -958,12 +1023,12 @@ struct AgentList: View {
                 // what's on screen.
                 Group {
                     if groups.reduce(0, { $0 + $1.1.count }) + stoppedShown.count + background.count <= AgentList.eager {
-                        VStack(alignment: .leading, spacing: 0) { rows(projects, groups) }
+                        VStack(alignment: .leading, spacing: 0) { self.rows(projects, groups, rows) }
                     } else {
-                        LazyVStack(alignment: .leading, spacing: 0) { rows(projects, groups) }
+                        LazyVStack(alignment: .leading, spacing: 0) { self.rows(projects, groups, rows) }
                     }
                 }
-                .padding(.horizontal, 4).padding(.top, groups.contains { $0.1.count > 1 } ? 0 : 3).padding(.bottom, 6)
+                .padding(.horizontal, 4).padding(.top, groups.contains { $0.0 != nil } ? 0 : 3).padding(.bottom, 6)
                 // Only up to the tallest the list gets: past it, scrolling (and
                 // a lazy stack's estimates as rows come into view) changes
                 // nothing here, so the list isn't redrawn while it scrolls.
@@ -980,6 +1045,17 @@ struct AgentList: View {
         }
         .frame(width: width)
         .raySurface(RoundedRectangle(cornerRadius: 16, style: .continuous))
+        // Laid out when it opens; each poll after updates the rows in place.
+        .onAppear { keep(agents) }
+        .onReceive(Store.shared.$state) { keep($0.agents) }
+    }
+
+    private func keep(_ agents: [AgentInfo]) {
+        var next = steady
+        next.update(agents, folder: AgentList.folder(in: AgentList.projects(of: agents)))
+        guard next.groups != steady.groups || next.info != steady.info || next.goneAt != steady.goneAt else { return }
+        // (Rows coming and going ease; ones already there don't move.)
+        if next.groups != steady.groups { withAnimation(Motion.swap) { steady = next } } else { steady = next }
     }
 
     /// Rows built at once when the list opens; past this, as they scroll in.
@@ -990,24 +1066,33 @@ struct AgentList: View {
     /// A project gets a header only when it holds two or more agents;
     /// one-agent projects stay a flat list that names each folder — under
     /// "Other" only when real groups are above.
-    @ViewBuilder private func rows(_ projects: [String: String], _ groups: [(String, [AgentInfo])]) -> some View {
-        let multi = groups.filter { $0.1.count > 1 }
-        let singles = Rail.ordered(groups.filter { $0.1.count == 1 }.flatMap(\.1))
+    /// The steady groups, each narrowed to what the chips and typing keep.
+    private func visible(_ rows: SteadyRows) -> [(String?, [AgentInfo])] {
+        rows.groups.map { g in (g.folder, g.panes.compactMap { rows.info[$0] }.filter(passes)) }.filter { !$0.1.isEmpty }
+    }
+
+    /// A row; one whose session has gone fades and can't be clicked.
+    private func row(_ a: AgentInfo, _ place: String, _ rows: SteadyRows) -> some View {
+        let gone = rows.gone(a.pane)
+        return AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: place,
+                        open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
+            .opacity(gone ? 0.4 : 1)
+            .allowsHitTesting(!gone)
+            .animation(Motion.swap, value: gone)
+    }
+
+    @ViewBuilder private func rows(_ projects: [String: String], _ groups: [(String?, [AgentInfo])], _ rows: SteadyRows) -> some View {
+        let multi = groups.compactMap { g in g.0.map { ($0, g.1) } }
+        let singles = groups.first { $0.0 == nil }?.1 ?? []
         ForEach(multi, id: \.0) { folder, list in
             header(folder)
             // Its folder always shows: where in the project it is, or the
             // project's own folder (the header is a group, not a place).
-            ForEach(list) { a in
-                AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: inside(a, projects) ?? a.folder,
-                         open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
-            }
+            ForEach(list) { a in row(a, inside(a, projects) ?? a.folder, rows) }
         }
         if !singles.isEmpty {
             if !multi.isEmpty { header("Other") }
-            ForEach(singles) { a in
-                AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: a.folder,
-                         open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
-            }
+            ForEach(singles) { a in row(a, a.folder, rows) }
         }
         if !stoppedShown.isEmpty {
             header("Stopped")
