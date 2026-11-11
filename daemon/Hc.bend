@@ -640,8 +640,12 @@ def wrap.pick(here: Bool, +shell: String, xs: List<&2, String>) -> List<&2, Stri
 def wrap(+shell: String, +m: String, xs: List<&2, String>) -> List<&2, String>:
   wrap.pick(String.is_empty(m), shell, xs)
 
+# PI_CLIPBOARD_OSC52: pi sends what it copies through the terminal too (OSC
+# 52), not only to the clipboard of the machine it runs on: herdr-core passes
+# it to Reflex's window, so a copy from another Mac's pi lands on this one.
+# (Claude Code does that already; pi only does it over ssh.)
 def p_run(+shell: String, +name: String, +m: String, +cwd: String, +kind: String, +session: String, xs: List<&2, String>) -> String:
-  Js.obj(List.append(&2, String, [Js.kv("name", Js.str(name)), Js.kv("cwd", Js.str(cwd)), Js.kv("argv", Js.arr(strs(wrap(shell, m, xs)))), Js.kv("labels", labels(kind, session)), Js.kv("no_parent", "true"), Js.kv("keep", "true"), Js.kv("env", Js.obj([Js.kv("TERM", Js.str("xterm-256color")), Js.kv("COLORTERM", Js.str("truecolor"))]))], on_kv(m)))
+  Js.obj(List.append(&2, String, [Js.kv("name", Js.str(name)), Js.kv("cwd", Js.str(cwd)), Js.kv("argv", Js.arr(strs(wrap(shell, m, xs)))), Js.kv("labels", labels(kind, session)), Js.kv("no_parent", "true"), Js.kv("keep", "true"), Js.kv("env", Js.obj([Js.kv("TERM", Js.str("xterm-256color")), Js.kv("COLORTERM", Js.str("truecolor")), Js.kv("PI_CLIPBOARD_OSC52", Js.str("1"))]))], on_kv(m)))
 
 def address(r: Result<&1, &1, U32 & String, J.JSON>) -> Result<&1, &1, U32 & String, String>:
   match r:
