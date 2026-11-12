@@ -358,7 +358,9 @@ final class MoveRequests: ObservableObject {
 /// How long Reflex's boat machines stay up. Each starts with an hour; while
 /// an agent there works (or waits on you), Reflex keeps renewing it, so the
 /// hour only runs once the machine is idle (or Reflex isn't watching: quit,
-/// asleep). A machine boat stopped is shown as stopped, with Resume: its
+/// asleep). One with a session's terminal window open on any of your Macs
+/// never stops (it holds itself up while one does), nor one whose CPUs
+/// work. A machine boat stopped is shown as stopped, with Resume: its
 /// disk is kept, and its kept terminals start their agents again (same
 /// sessions, same terminals), so their windows reattach.
 @MainActor
@@ -388,6 +390,15 @@ final class BoatLifetime: ObservableObject {
     /// idle (a stray daemon shouldn't keep one up for good).
     static let backgroundLimit: TimeInterval = 12 * 3600
     private var timer: Timer?
+    /// What this Mac last told each machine it holds (its open windows'
+    /// panes there; [] let go), and when; a hold being sent.
+    private var held: [String: [String]] = [:]
+    private var heldAt: [String: Date] = [:]
+    private var holding: Set<String> = []
+    /// This Mac's name in holds (`reflex id`).
+    private var holder: String?
+    /// When a held machine boat stopped anyway was last resumed by itself.
+    private var autoResumed: [String: Date] = [:]
 
     func start() {
         guard timer == nil else { return }
@@ -447,6 +458,7 @@ final class BoatLifetime: ObservableObject {
             }
             working[m] = now
         }
+        hold(machines, up: up)
         for m in Array(down.keys) where !machines.contains(m) { down[m] = nil }
         // Back without Resume here (another Reflex, boat itself, a script):
         // not stopped any more, and its windows reattach.
@@ -464,11 +476,19 @@ final class BoatLifetime: ObservableObject {
     private func probe(_ m: String) {
         probedAt[m] = Date()
         Task {
-            guard let out = try? await Boat.reflex(["machine", "busy", m], timeout: 60) else { return }
+            guard let out = try? await Boat.reflex(["machine", "busy", m], timeout: 60) else {
+                // No answer in time: a machine too busy to answer isn't idle
+                // (a slow one is what full CPUs look like from here).
+                guard working[m] == false, down[m] == nil else { return }
+                if Date().timeIntervalSince(renewed[m] ?? .distantPast) > 600 { extend(m, "it didn't answer the check for work") }
+                return
+            }
             let lines = out.split(separator: "\n").map(String.init)
             guard let first = lines.first, first != "none", working[m] == false, down[m] == nil else { return }
             let quiet = Date().timeIntervalSince(quietSince[m] ?? Date())
-            if quiet < Self.backgroundLimit {
+            // Its CPUs working is never idle, however long.
+            let cpu = lines.dropFirst().first?.hasPrefix("cpu:") == true
+            if quiet < Self.backgroundLimit || cpu {
                 if Date().timeIntervalSince(renewed[m] ?? .distantPast) > 600 {
                     extend(m, "background work: \(lines.dropFirst().first ?? first)".prefix(160).description)
                 }
@@ -477,6 +497,48 @@ final class BoatLifetime: ObservableObject {
                 NSLog("Reflex: %@ kept up %d h by background work alone; the last hour starts", m, Int(quiet / 3600))
                 MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stops in an hour",
                                   body: "Its agents have been idle \(Int(quiet / 3600)) hours while work they left runs there. Reflex kept it up that long; it stops in an hour unless an agent works.")
+            }
+        }
+    }
+
+    /// A session there with its terminal window open here: the machine
+    /// never stops. Renewed from here every 10 minutes, and held there too
+    /// (`reflex machine hold`: the sandbox renews itself while any Mac holds
+    /// it, so this Mac asleep still holds it). Stopped anyway (boat itself):
+    /// resumed at once. A window closed lets go; a first pass after launch
+    /// lets go of what an earlier run held.
+    private func hold(_ machines: [String], up: Set<String>) {
+        let open = Dictionary(grouping: AppDelegate.current?.openPanes ?? [], by: { Machines.machine(of: $0) })
+        for m in machines {
+            let panes = (open[m] ?? []).sorted()
+            if !panes.isEmpty {
+                if down[m] != nil {
+                    if !resuming.contains(m), Date().timeIntervalSince(autoResumed[m] ?? .distantPast) > 300 {
+                        autoResumed[m] = Date()
+                        NSLog("Reflex: %@ stopped with a window open on it here; resuming it", m)
+                        resume(m)
+                    }
+                } else if up.contains(m), Date().timeIntervalSince(renewed[m] ?? .distantPast) > 600 {
+                    extend(m, "a window is open on it here")
+                }
+            }
+            guard up.contains(m), down[m] == nil, !holding.contains(m) else { continue }
+            // (Changed, or again every 10 minutes while held: a restart there
+            // ends its loop.)
+            if held[m] == panes && (panes.isEmpty || Date().timeIntervalSince(heldAt[m] ?? .distantPast) < 600) { continue }
+            holding.insert(m)
+            Task {
+                defer { holding.remove(m) }
+                if holder == nil { holder = try? await Boat.reflex(["id"], timeout: 30) }
+                guard let me = holder, !me.isEmpty else { return }
+                do {
+                    _ = try await Boat.reflex(["machine", "hold", m, me] + panes, timeout: 60)
+                    if held[m] != panes { NSLog("Reflex: %@ %@", m, panes.isEmpty ? "let go (no window open on it here)" : "held by \(panes.count) open window(s) here") }
+                    held[m] = panes
+                    heldAt[m] = Date()
+                } catch {
+                    NSLog("Reflex: holding %@ didn't work: %@", m, error.localizedDescription)
+                }
             }
         }
     }
@@ -509,6 +571,30 @@ final class BoatLifetime: ObservableObject {
 
     func isDown(_ machine: String) -> Bool { down[machine] != nil }
 
+    private struct Terminals: Decodable {
+        struct T: Decodable { var agent: String?; var cwd: String?; var state: String? }
+        var terminals: [T]
+    }
+    static func key(_ kind: String, _ cwd: String) -> String { kind + "\u{0}" + cwd }
+
+    /// The agents its herdr-core runs, counted by kind and folder (asked a
+    /// few times while it starts; nothing if it never answers).
+    static func running(on m: String) async -> [String: Int] {
+        for attempt in 0..<6 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(5)) }
+            guard let out = try? await Boat.reflex(["machine", "terminals", m], timeout: 30),
+                  let t = try? JSONDecoder().decode(Terminals.self, from: Data(out.utf8)) else { continue }
+            var n: [String: Int] = [:]
+            for x in t.terminals where x.state != "finished" {
+                guard let a = x.agent, let cwd = x.cwd else { continue }
+                let kind = a == "claude-code" ? "claude" : a
+                n[key(kind, cwd), default: 0] += 1
+            }
+            return n
+        }
+        return [:]
+    }
+
     /// Up again: boat resumes it from its disk, herdr-core reconnects, and its
     /// agents start again in the same terminals.
     func resume(_ m: String) {
@@ -528,13 +614,21 @@ final class BoatLifetime: ObservableObject {
                 // (Its kept terminals take a moment to start their agents.)
                 try? await Task.sleep(for: .seconds(8))
                 back[m] = Date()
-                // Any that didn't come back (resumed on a different size, its
-                // herdr-core starts empty): their sessions again, there.
-                let there = Set(Store.shared.state.agents.filter { $0.machine == m }.map(\.session))
-                for a in were where HerdrMove.kinds.contains(a.kind) && !a.session.isEmpty && !there.contains(a.session) {
+                // Any that didn't come back (a stopped VM ran nothing on, so
+                // its herdr-core usually starts empty): their sessions again,
+                // there. What came back is what its herdr-core runs now, not
+                // the list here (which can still show them as they were).
+                var there = await Self.running(on: m)
+                for a in were where HerdrMove.kinds.contains(a.kind) && !a.session.isEmpty {
+                    let key = Self.key(a.kind, a.cwd)
+                    if let n = there[key], n > 0 { there[key] = n - 1; continue }
                     NSLog("Reflex: %@ on %@ didn't come back; resuming its session", a.kind, m)
-                    _ = try? await Client.local.resume(cwd: Place.on(m, a.cwd), kind: a.kind, session: a.session,
-                                                       label: "resume \(a.kind) · \(a.folder) on \(m)")
+                    do {
+                        _ = try await Client.local.resume(cwd: Place.on(m, a.cwd), kind: a.kind, session: a.session,
+                                                          label: "resume \(a.kind) · \(a.folder) on \(m)")
+                    } catch {
+                        NSLog("Reflex: resuming %@'s session on %@ didn't work: %@", a.kind, m, error.localizedDescription)
+                    }
                 }
             } catch {
                 problem[m] = error.localizedDescription

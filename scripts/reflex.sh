@@ -232,7 +232,7 @@ machine_extend() { # machine_extend NAME SECONDS
 # sandboxes. Prints "none", or how many and the first few.
 BUSY_PROBE='up=$(cut -d" " -f1 /proc/uptime 2>/dev/null | cut -d. -f1)
 [ -n "$up" ] || { echo none; exit 0; }
-ps -eo pid=,ppid=,etimes=,user=,args= 2>/dev/null | awk -v me="$(id -un)" -v up="$up" '"'"'
+ps -eo pid=,ppid=,etimes=,user=,tty=,args= 2>/dev/null | awk -v me="$(id -un)" -v up="$up" '"'"'
 function walk(p, born,   n, i, k, ks) {
   n = split(kids[p], ks, " ")
   for (i = 1; i <= n; i++) {
@@ -242,10 +242,16 @@ function walk(p, born,   n, i, k, ks) {
     walk(k, born)
   }
 }
+function holds(p,   n, i, ks) {
+  if (p in agent) return 1
+  n = split(kids[p], ks, " ")
+  for (i = 1; i <= n; i++) if (holds(ks[i])) return 1
+  return 0
+}
 function found(p) { if (p in got) return; got[p] = 1; count++; if (count <= 3) shown = shown "\n" substr(args[p], 1, 120) }
 {
-  p = $1; ppid[p] = $2; age[p] = $3; user[p] = $4
-  a = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[^ ]+ +/, "", a); args[p] = a
+  p = $1; ppid[p] = $2; age[p] = $3; user[p] = $4; tty[p] = $5
+  a = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[^ ]+ +[^ ]+ +/, "", a); args[p] = a
   kids[$2] = kids[$2] " " p
 }
 END {
@@ -257,11 +263,65 @@ END {
   }
   for (p in agent) walk(p, age[p])
   for (p in args) if (ppid[p] == 1 && user[p] == me && up - age[p] > 600 && args[p] !~ base) found(p)
+  # What runs in herdr-core terminals besides the agents (hc run --bg, a
+  # command typed in a shell there): a program itself, or what its shell
+  # runs. (A terminal has a tty; what herdr-core execs, Reflex asking, not.
+  # One with an agent in it belongs to that agent.)
+  shell = "^-?(/[^ ]*/)?(ba|z|da|fi)?sh( -[il]+)?$"
+  for (p in args) {
+    q = ppid[p]; split(args[q], w, " "); c = w[1]; sub(/.*\//, "", c)
+    if (c != "herdr-core" || tty[p] == "?" || user[p] != me || holds(p)) continue
+    if (args[p] !~ shell) { found(p); continue }
+    n = split(kids[p], ks, " ")
+    for (i = 1; i <= n; i++) found(ks[i])
+  }
   if (count == 0) print "none"; else printf "%d%s\n", count, shown
 }'"'"
+# Its CPUs working (over 3 s) is work too, whatever runs it: three
+# quarters of a core or more busy is never idle.
+CPU_PROBE='if [ -r /proc/stat ]; then
+  set -- $(awk "/^cpu /{print \$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9, \$5+\$6; exit}" /proc/stat); t1=$1 i1=$2
+  sleep 3
+  set -- $(awk "/^cpu /{print \$2+\$3+\$4+\$5+\$6+\$7+\$8+\$9, \$5+\$6; exit}" /proc/stat); t2=$1 i2=$2
+  n=$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)
+  b=$(awk -v t="$((t2 - t1))" -v i="$((i2 - i1))" -v n="$n" "BEGIN { if (t > 0) printf \"%.1f\", (t - i) / t * n; else print 0 }")
+  if awk -v b="$b" "BEGIN { exit !(b >= 0.75) }"; then printf "1\ncpu: %s of %s cores busy\n" "$b" "$n"; exit 0; fi
+fi
+'
 machine_busy() { # machine_busy NAME: "none", or the background work there
   sandbox_id "$1" >/dev/null || die "$1 isn't a boat sandbox Reflex made or was shared"
-  rsh "$1" "$BUSY_PROBE"
+  rsh "$1" "$CPU_PROBE$BUSY_PROBE"
+}
+
+# A window on one of your Macs has sessions there open: it never stops
+# while one does. Each Mac's hold is a file there (~/.reflex/held/HOLDER,
+# its panes), and the sandbox renews itself while any is left, so a Mac
+# asleep or gone still holds it. No panes: this Mac lets go.
+KEEP='id=$1; d="$HOME/.reflex/held"
+PATH="$HOME/.ascii/bin:$HOME/.local/bin:/usr/local/bin:$PATH"
+while ls "$d"/* >/dev/null 2>&1; do
+  boat extend "$id" --ttl 3600 --json --no-update >/dev/null 2>&1 || boat extend "$id" --ttl 3600 --json --no-update >/dev/null 2>&1
+  sleep 600
+done'
+machine_terminals() { # machine_terminals NAME: its herdr-core's terminals, as JSON
+  rsh "$1" 'PATH="$HOME/.local/bin:$PATH"; herdr-core ls --json'
+}
+machine_hold() { # machine_hold NAME HOLDER [PANE...]
+  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
+  _hn=$1 _hh=$2; shift 2
+  case $_hh in ''|*/*|.*) die "hold: a holder name" ;; esac
+  _hp=""; for _x in "$@"; do _hp="$_hp $(q "$_x")"; done
+  # (herdr-core ends what an exec started: the loop is a unit of its own.)
+  printf '%s\n' "$KEEP" | rsh_in "$_hn" "d=\"\$HOME/.reflex/held\"; mkdir -p \"\$d\"
+    cat > \"\$HOME/.reflex/reflex-keep\"
+    if [ -n $(q "$_hp") ]; then printf '%s\n'$_hp > \"\$d\"/$(q "$_hh"); else rm -f \"\$d\"/$(q "$_hh"); fi
+    ls \"\$d\"/* >/dev/null 2>&1 || { systemctl --user stop reflex-keep >/dev/null 2>&1; echo free; exit 0; }
+    if command -v systemd-run >/dev/null 2>&1; then
+      systemctl --user is-active -q reflex-keep 2>/dev/null || { systemctl --user reset-failed reflex-keep >/dev/null 2>&1; systemd-run --user --unit=reflex-keep --collect sh \"\$HOME/.reflex/reflex-keep\" $(q "$_id") >/dev/null 2>&1; }
+    else
+      pgrep -f reflex-keep >/dev/null 2>&1 || (setsid nohup sh \"\$HOME/.reflex/reflex-keep\" $(q "$_id") </dev/null >/dev/null 2>&1 &)
+    fi
+    echo held"
 }
 machine_state() { # machine_state NAME: boat's word for it (running, idle, stopped...)
   _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
@@ -1125,7 +1185,8 @@ case $cmd in
       new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;;
       unshare) machine_unshare "$@" ;;
       extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;; busy) machine_busy "$@" ;;
-      *) die "machine new|rm|ls|extend|state|resume|busy" ;;
+      hold) machine_hold "$@" ;; terminals) machine_terminals "$@" ;;
+      *) die "machine new|rm|ls|extend|state|resume|busy|hold|terminals" ;;
     esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;

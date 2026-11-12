@@ -52,6 +52,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var pairing: KeyPanel?
     private var settings: NSWindow?
     private var popouts: [String: NSWindow] = [:]
+    /// The sessions with a terminal window open here (a boat machine with
+    /// one never stops: BoatLifetime).
+    var openPanes: [String] { Array(popouts.keys) }
     private var terminals: [String: TerminalSession] = [:]
     private let command = CommandModel()
     private var hotkey: DoubleOption?
