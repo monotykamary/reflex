@@ -378,6 +378,15 @@ final class BoatLifetime: ObservableObject {
     private var working: [String: Bool] = [:]
     private var renewed: [String: Date] = [:]
     private var asked: [String: Date] = [:]
+    /// Since when its agents have all been idle, and when it was last asked
+    /// for work left running (`reflex machine busy`).
+    private var quietSince: [String: Date] = [:]
+    private var probedAt: [String: Date] = [:]
+    /// Kept up by background work alone for `backgroundLimit`: no longer.
+    private var capped: Set<String> = []
+    /// How long work left running keeps a sandbox up while its agents are
+    /// idle (a stray daemon shouldn't keep one up for good).
+    static let backgroundLimit: TimeInterval = 12 * 3600
     private var timer: Timer?
 
     func start() {
@@ -424,9 +433,17 @@ final class BoatLifetime: ObservableObject {
             if now {
                 // Never near the end while it works.
                 if Date().timeIntervalSince(renewed[m] ?? .distantPast) > 600 { extend(m, "an agent works there") }
-            } else if working[m] != false {
-                // Just went idle (or first seen idle): the hour starts now.
-                extend(m, "idle from now")
+                quietSince[m] = nil
+                capped.remove(m)
+            } else {
+                if working[m] != false {
+                    // Just went idle (or first seen idle): the hour starts now.
+                    extend(m, "idle from now")
+                    quietSince[m] = Date()
+                }
+                // Agents idle isn't the sandbox idle: one may be waiting on
+                // work it left running there.
+                if Date().timeIntervalSince(probedAt[m] ?? .distantPast) > 300 { probe(m) }
             }
             working[m] = now
         }
@@ -439,6 +456,29 @@ final class BoatLifetime: ObservableObject {
             back[m] = Date()
         }
         Task { await checkDown(machines) }
+    }
+
+    /// Work an agent left running there (a waiter on a remote run, a build,
+    /// a loop) keeps the hour renewed, as an agent working does, up to
+    /// `backgroundLimit` after the agents went idle.
+    private func probe(_ m: String) {
+        probedAt[m] = Date()
+        Task {
+            guard let out = try? await Boat.reflex(["machine", "busy", m], timeout: 60) else { return }
+            let lines = out.split(separator: "\n").map(String.init)
+            guard let first = lines.first, first != "none", working[m] == false, down[m] == nil else { return }
+            let quiet = Date().timeIntervalSince(quietSince[m] ?? Date())
+            if quiet < Self.backgroundLimit {
+                if Date().timeIntervalSince(renewed[m] ?? .distantPast) > 600 {
+                    extend(m, "background work: \(lines.dropFirst().first ?? first)".prefix(160).description)
+                }
+            } else if !capped.contains(m) {
+                capped.insert(m)
+                NSLog("Reflex: %@ kept up %d h by background work alone; the last hour starts", m, Int(quiet / 3600))
+                MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stops in an hour",
+                                  body: "Its agents have been idle \(Int(quiet / 3600)) hours while work they left runs there. Reflex kept it up that long; it stops in an hour unless an agent works.")
+            }
+        }
     }
 
     private func extend(_ m: String, _ why: String) {

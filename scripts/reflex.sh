@@ -224,6 +224,45 @@ machine_extend() { # machine_extend NAME SECONDS
   _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
   boat extend "$_id" --ttl "$2" --json --no-update >/dev/null 2>&1 || die "boat extend $_id failed"
 }
+# Work an agent left running there while it waits (a waiter on a remote run,
+# a build, a loop): the agents look idle, the sandbox isn't. Two kinds:
+# what runs under an agent but started 90 s or more after it (what starts
+# with it, MCP servers and such, is its own), and your own processes that
+# went to init (nohup, setsid) more than 10 minutes after boot. Linux: the
+# sandboxes. Prints "none", or how many and the first few.
+BUSY_PROBE='up=$(cut -d" " -f1 /proc/uptime 2>/dev/null | cut -d. -f1)
+[ -n "$up" ] || { echo none; exit 0; }
+ps -eo pid=,ppid=,etimes=,user=,args= 2>/dev/null | awk -v me="$(id -un)" -v up="$up" '"'"'
+function walk(p, born,   n, i, k, ks) {
+  n = split(kids[p], ks, " ")
+  for (i = 1; i <= n; i++) {
+    k = ks[i]
+    if (k in agent) continue
+    if (born - age[k] >= 90 && args[k] !~ helper) { found(k); continue }
+    walk(k, born)
+  }
+}
+function found(p) { if (p in got) return; got[p] = 1; count++; if (count <= 3) shown = shown "\n" substr(args[p], 1, 120) }
+{
+  p = $1; ppid[p] = $2; age[p] = $3; user[p] = $4
+  a = $0; sub(/^ *[0-9]+ +[0-9]+ +[0-9]+ +[^ ]+ +/, "", a); args[p] = a
+  kids[$2] = kids[$2] " " p
+}
+END {
+  helper = "mcp|language-server|tsserver|lsp|cua-driver"
+  base = "herdr-core|sshd|systemd|dbus|ibus|at-spi|pulseaudio|sunshine|ascii|ssh-agent|gpg-agent|bus listen"
+  for (p in args) {
+    split(args[p], w, " "); c = w[1]; sub(/.*\//, "", c)
+    if (c == "pi" || c == "claude" || c == "codex" || (c == "node" && args[p] ~ /\/(pi|claude|codex)( |$)/)) agent[p] = 1
+  }
+  for (p in agent) walk(p, age[p])
+  for (p in args) if (ppid[p] == 1 && user[p] == me && up - age[p] > 600 && args[p] !~ base) found(p)
+  if (count == 0) print "none"; else printf "%d%s\n", count, shown
+}'"'"
+machine_busy() { # machine_busy NAME: "none", or the background work there
+  sandbox_id "$1" >/dev/null || die "$1 isn't a boat sandbox Reflex made or was shared"
+  rsh "$1" "$BUSY_PROBE"
+}
 machine_state() { # machine_state NAME: boat's word for it (running, idle, stopped...)
   _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
   boat info "$_id" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $_id failed"
@@ -1085,8 +1124,8 @@ case $cmd in
     case $sub in
       new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;;
       unshare) machine_unshare "$@" ;;
-      extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;;
-      *) die "machine new|rm|ls|extend|state|resume" ;;
+      extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;; busy) machine_busy "$@" ;;
+      *) die "machine new|rm|ls|extend|state|resume|busy" ;;
     esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;

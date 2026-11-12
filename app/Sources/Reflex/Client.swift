@@ -148,6 +148,8 @@ final class Store: ObservableObject {
     /// When each pane last had a question in the inbox.
     private var askedAt: [String: Date] = [:]
     private var clearing: Set<Int> = []
+    /// Another machine's agents a slow answer left out of the list, kept.
+    private var missing = MissingHold()
 
     func start() {
         loop?.cancel()
@@ -167,6 +169,7 @@ final class Store: ObservableObject {
             // Being cleared: gone at once, not back for a poll or two.
             clearing.formIntersection(next.inbox.map(\.id))
             next.inbox.removeAll { clearing.contains($0.id) }
+            holdMissing(&next)
             observe(next)
             state = next
             lastOK = Date()
@@ -180,6 +183,17 @@ final class Store: ObservableObject {
         } catch {
             connected = false
         }
+    }
+
+    /// A connected machine that listed agents and now lists none: its agents
+    /// as last seen, up to `holdMissing` (then it really has none).
+    private func holdMissing(_ next: inout StateInfo) {
+        let connected = Set(CoreMachines.known.filter { $0.state == "connected" }.map(\.name))
+        let r = missing.apply(next.agents, connected: connected) { $0.machine }
+        for (m, n) in r.started {
+            NSLog("Reflex: herdr-core's list left out %@'s %d agents (it says connected); kept as they were", m, n)
+        }
+        next.agents = r.agents
     }
 
     func refreshStopped() async {
