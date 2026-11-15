@@ -399,6 +399,20 @@ final class BoatLifetime: ObservableObject {
     private var holder: String?
     /// When a held machine boat stopped anyway was last resumed by itself.
     private var autoResumed: [String: Date] = [:]
+    /// Why each machine is down: boat's word ("stopped", or "error" for one
+    /// whose machine boat lost).
+    @Published private(set) var downWhy: [String: String] = [:]
+    /// Since when boat has called a machine `error` (lost): down past a grace.
+    private var erroredAt: [String: Date] = [:]
+    static let errorGrace: TimeInterval = 600
+    /// The sessions each machine ran when last looked at (`reflex machine
+    /// sessions`: whoever started them, an agent too), kept on disk: what one
+    /// boat lost has again.
+    struct Ran: Codable, Equatable { var kind: String; var cwd: String; var session: String }
+    private struct Sessions: Decodable { var up: Int; var agents: [Ran] }
+    private var ran: [String: [Ran]] = [:]
+    private var ranAt: [String: Date] = [:]
+    private var recording: Set<String> = []
 
     func start() {
         guard timer == nil else { return }
@@ -457,15 +471,21 @@ final class BoatLifetime: ObservableObject {
                 if Date().timeIntervalSince(probedAt[m] ?? .distantPast) > 300 { probe(m) }
             }
             working[m] = now
+            erroredAt[m] = nil
+            record(m)
         }
         hold(machines, up: up)
-        for m in Array(down.keys) where !machines.contains(m) { down[m] = nil }
+        for m in Array(down.keys) where !machines.contains(m) { down[m] = nil; downWhy[m] = nil }
         // Back without Resume here (another Reflex, boat itself, a script):
-        // not stopped any more, and its windows reattach.
+        // not stopped any more, and its windows reattach. Its sessions again,
+        // from the Mac that made it (one Mac, not each).
         for m in Array(down.keys) where up.contains(m) && !resuming.contains(m) {
             NSLog("Reflex: %@ is connected again", m)
+            let were = down[m] ?? []
             down[m] = nil
+            downWhy[m] = nil
             back[m] = Date()
+            if made.contains(m) { Task { await bringBack(m, were: were) } }
         }
         Task { await checkDown(machines) }
     }
@@ -556,14 +576,29 @@ final class BoatLifetime: ObservableObject {
             guard Date().timeIntervalSince(asked[m] ?? .distantPast) > 60 else { continue }
             asked[m] = Date()
             guard let s = try? await Boat.reflex(["machine", "state", m], timeout: 30) else { continue }
-            if ["stopped", "stopping", "archived", "suspended"].contains(s), down[m] == nil {
+            // boat lost its machine (unreachable): down once that lasts (it
+            // can come back by itself), and brought back like a stopped one.
+            if s == "error" {
+                let since = erroredAt[m] ?? Date()
+                erroredAt[m] = since
+                guard Date().timeIntervalSince(since) >= Self.errorGrace else { continue }
+            } else {
+                erroredAt[m] = nil
+            }
+            if ["stopped", "stopping", "archived", "suspended", "error"].contains(s), down[m] == nil {
                 down[m] = seen[m] ?? []
+                downWhy[m] = s
                 working[m] = nil
-                NSLog("Reflex: boat stopped %@ (%@), %d agents there", m, s, down[m]?.count ?? 0)
+                NSLog("Reflex: boat %@ %@ (%@), %d agents there", s == "error" ? "lost" : "stopped", m, s, down[m]?.count ?? 0)
                 // (One Mac says so: the one that made it, else any that sees it.)
                 guard made.contains(m) || !ownerAround(m) else { continue }
-                MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped",
-                                  body: "boat stops a sandbox after an hour idle. Its disk is kept 14 days: Resume in its window or Settings → Machines brings it back with its agents.")
+                if s == "error" {
+                    MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped answering",
+                                      body: "boat lost the machine it runs on (unreachable for \(Int(Self.errorGrace / 60)) minutes). Its disk is kept: Resume in its window or Settings → Machines brings it back with its sessions.")
+                } else {
+                    MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped",
+                                      body: "boat stops a sandbox after an hour idle. Its disk is kept 14 days: Resume in its window or Settings → Machines brings it back with its agents.")
+                }
                 if !(seen[m] ?? []).isEmpty { NSApp.requestUserAttention(.informationalRequest) }
             }
         }
@@ -571,28 +606,75 @@ final class BoatLifetime: ObservableObject {
 
     func isDown(_ machine: String) -> Bool { down[machine] != nil }
 
-    private struct Terminals: Decodable {
-        struct T: Decodable { var agent: String?; var cwd: String?; var state: String? }
-        var terminals: [T]
+    private static func ranFile(_ m: String) -> URL {
+        Settings.supportDir.appendingPathComponent("boat/sessions").appendingPathComponent(m + ".json")
     }
-    static func key(_ kind: String, _ cwd: String) -> String { kind + "\u{0}" + cwd }
 
-    /// The agents its herdr-core runs, counted by kind and folder (asked a
-    /// few times while it starts; nothing if it never answers).
-    static func running(on m: String) async -> [String: Int] {
-        for attempt in 0..<6 {
-            if attempt > 0 { try? await Task.sleep(for: .seconds(5)) }
-            guard let out = try? await Boat.reflex(["machine", "terminals", m], timeout: 30),
-                  let t = try? JSONDecoder().decode(Terminals.self, from: Data(out.utf8)) else { continue }
-            var n: [String: Int] = [:]
-            for x in t.terminals where x.state != "finished" {
-                guard let a = x.agent, let cwd = x.cwd else { continue }
-                let kind = a == "claude-code" ? "claude" : a
-                n[key(kind, cwd), default: 0] += 1
-            }
-            return n
+    /// What `m` last ran (from disk after a launch).
+    private func lastRan(_ m: String) -> [Ran] {
+        if let r = ran[m] { return r }
+        let r = (try? Data(contentsOf: Self.ranFile(m))).flatMap { try? JSONDecoder().decode([Ran].self, from: $0) } ?? []
+        ran[m] = r
+        return r
+    }
+
+    /// Looked at every 2 minutes while it's up. Not in its first 10 minutes
+    /// up: what it runs then isn't what it ran yet (its sessions are coming
+    /// back), and the record stays.
+    private func record(_ m: String) {
+        guard !recording.contains(m), Date().timeIntervalSince(ranAt[m] ?? .distantPast) > 120 else { return }
+        recording.insert(m)
+        ranAt[m] = Date()
+        Task {
+            defer { recording.remove(m) }
+            guard let s = await Self.sessions(on: m), s.up >= 600, s.agents != lastRan(m) else { return }
+            ran[m] = s.agents
+            let f = Self.ranFile(m)
+            try? FileManager.default.createDirectory(at: f.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try? JSONEncoder().encode(s.agents).write(to: f, options: .atomic)
         }
-        return [:]
+    }
+
+    private static func sessions(on m: String) async -> Sessions? {
+        guard let out = try? await Boat.reflex(["machine", "sessions", m], timeout: 60) else { return nil }
+        return try? JSONDecoder().decode(Sessions.self, from: Data(out.utf8))
+    }
+
+    /// Back after boat stopped or lost it: every session it ran that doesn't
+    /// run there now starts again, in its conversation. What it ran is its
+    /// last record (agents' own sessions too), else the agents last listed
+    /// here; what runs now is what it says (asked while it starts), never the
+    /// list here, which can still show them as they were.
+    private func bringBack(_ m: String, were: [AgentInfo]) async {
+        var want = lastRan(m)
+        if want.isEmpty {
+            want = were.filter { HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
+                .map { Ran(kind: $0.kind, cwd: $0.cwd, session: $0.session) }
+        }
+        var once = Set<String>()
+        want = want.filter { once.insert($0.kind + "\u{0}" + $0.session).inserted }
+        guard !want.isEmpty else { return }
+        var now: Set<String>?
+        for attempt in 0..<4 {
+            if attempt > 0 { try? await Task.sleep(for: .seconds(5)) }
+            if let s = await Self.sessions(on: m) { now = Set(s.agents.map(\.session)); break }
+        }
+        guard let now else {
+            NSLog("Reflex: %@ didn't say what it runs; its %d sessions weren't started again", m, want.count)
+            return
+        }
+        // (A pi session is its id or its file's name, which ends with it.)
+        func runs(_ s: String) -> Bool { now.contains { $0 == s || $0.hasSuffix(s) || s.hasSuffix($0) } }
+        for r in want where !runs(r.session) {
+            let folder = (r.cwd as NSString).lastPathComponent
+            NSLog("Reflex: %@ in %@ on %@ didn't come back; resuming its session", r.kind, folder, m)
+            do {
+                _ = try await Client.local.resume(cwd: Place.on(m, r.cwd), kind: r.kind, session: r.session,
+                                                  label: "resume \(r.kind) · \(folder) on \(m)")
+            } catch {
+                NSLog("Reflex: resuming %@'s session on %@ didn't work: %@", r.kind, m, error.localizedDescription)
+            }
+        }
     }
 
     /// Up again: boat resumes it from its disk, herdr-core reconnects, and its
@@ -605,9 +687,12 @@ final class BoatLifetime: ObservableObject {
             defer { resuming.remove(m) }
             let were = down[m] ?? []
             do {
-                _ = try await Boat.reflex(["machine", "resume", m] + Boat.typeArgs, timeout: 600)
+                // (A lost machine's stop can take a while to give up.)
+                _ = try await Boat.reflex(["machine", "resume", m] + Boat.typeArgs, timeout: 2400)
                 NSLog("Reflex: %@ resumed", m)
                 down[m] = nil
+                downWhy[m] = nil
+                erroredAt[m] = nil
                 working[m] = nil
                 renewed[m] = Date()
                 _ = await CoreMachines.list(fresh: 0)
@@ -615,21 +700,8 @@ final class BoatLifetime: ObservableObject {
                 try? await Task.sleep(for: .seconds(8))
                 back[m] = Date()
                 // Any that didn't come back (a stopped VM ran nothing on, so
-                // its herdr-core usually starts empty): their sessions again,
-                // there. What came back is what its herdr-core runs now, not
-                // the list here (which can still show them as they were).
-                var there = await Self.running(on: m)
-                for a in were where HerdrMove.kinds.contains(a.kind) && !a.session.isEmpty {
-                    let key = Self.key(a.kind, a.cwd)
-                    if let n = there[key], n > 0 { there[key] = n - 1; continue }
-                    NSLog("Reflex: %@ on %@ didn't come back; resuming its session", a.kind, m)
-                    do {
-                        _ = try await Client.local.resume(cwd: Place.on(m, a.cwd), kind: a.kind, session: a.session,
-                                                          label: "resume \(a.kind) · \(a.folder) on \(m)")
-                    } catch {
-                        NSLog("Reflex: resuming %@'s session on %@ didn't work: %@", a.kind, m, error.localizedDescription)
-                    }
-                }
+                // its herdr-core starts empty): their sessions again, there.
+                await bringBack(m, were: were)
             } catch {
                 problem[m] = error.localizedDescription
             }

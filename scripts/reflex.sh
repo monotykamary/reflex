@@ -303,6 +303,59 @@ while ls "$d"/* >/dev/null 2>&1; do
   boat extend "$id" --ttl 3600 --json --no-update >/dev/null 2>&1 || boat extend "$id" --ttl 3600 --json --no-update >/dev/null 2>&1
   sleep 600
 done'
+# The agent sessions running there in terminals, whoever started them (Reflex
+# or an agent), so a sandbox boat lost can have them all again: Claude's
+# from its own record (~/.claude/sessions/PID.json); pi's (its process
+# hides its arguments) the newest of its folder's sessions written since it
+# started, one per pi there, else the one its command named. Linux (the
+# sandboxes). {"up": seconds since boot, "agents": [{kind, cwd, session}]}.
+SESSIONS_PROBE='import glob, json, os, re
+home = os.path.expanduser("~"); me = os.getuid(); found = []; pis = {}
+def argv(p):
+    try: return [x.decode(errors="replace") for x in open("/proc/%s/cmdline" % p, "rb").read().split(b"\0") if x]
+    except OSError: return []
+def named(xs):
+    for i, x in enumerate(xs[:-1]):
+        if x in ("--session", "--resume", "--session-id", "-r"): return xs[i + 1]
+    return ""
+for p in os.listdir("/proc"):
+    if not p.isdigit(): continue
+    try:
+        if os.stat("/proc/" + p).st_uid != me or "/dev/pts/" not in os.readlink("/proc/%s/fd/0" % p): continue
+        a = argv(p); c = os.path.basename(a[0]) if a else ""
+        if c == "node" and len(a) > 1: c = os.path.basename(a[1])
+        if c not in ("pi", "claude", "codex"): continue
+        # (One an agent started, a helper of it, is not a session of its own.)
+        q, helper = p, False
+        for _ in range(4):
+            q = open("/proc/%s/stat" % q).read().rsplit(")", 1)[1].split()[1]
+            b = argv(q); n = os.path.basename(b[0]) if b else ""
+            if n == "node" and len(b) > 1: n = os.path.basename(b[1])
+            if n in ("pi", "claude", "codex"): helper = True; break
+            if n in ("herdr-core", "systemd", "init") or q in ("0", "1"): break
+        if helper: continue
+        cwd = os.readlink("/proc/%s/cwd" % p); start = os.stat("/proc/" + p).st_mtime
+        hint = named(a) or named(argv(open("/proc/%s/stat" % p).read().rsplit(")", 1)[1].split()[1]))
+    except (OSError, IndexError): continue
+    if c == "claude":
+        try: hint = json.load(open("%s/.claude/sessions/%s.json" % (home, p))).get("sessionId") or hint
+        except (OSError, ValueError): pass
+        if hint: found.append({"kind": c, "cwd": cwd, "session": hint})
+    elif c == "pi": pis.setdefault(cwd, []).append((start, hint))
+    elif hint: found.append({"kind": c, "cwd": cwd, "session": hint})
+for cwd, ps in pis.items():
+    d = "%s/.pi/agent/sessions/--%s--" % (home, cwd.strip("/").replace("/", "-"))
+    since = min(s for s, _ in ps) - 5
+    files = sorted((f for f in glob.glob(d + "/*.jsonl") if os.path.getmtime(f) >= since), key=os.path.getmtime, reverse=True)
+    ids = [re.sub(r"^.*?_", "", os.path.basename(f))[:-6] for f in files[:len(ps)]]
+    for _, h in ps:
+        if len(ids) >= len(ps): break
+        if h and h not in ids and not any(h.endswith(i) or i.endswith(h) for i in ids): ids.append(h)
+    found += [{"kind": "pi", "cwd": cwd, "session": i} for i in ids]
+print(json.dumps({"up": int(float(open("/proc/uptime").read().split()[0])), "agents": found}))'
+machine_sessions() { # machine_sessions NAME: the agent sessions running there, as JSON
+  rsh "$1" "python3 -I -c $(q "$SESSIONS_PROBE")"
+}
 machine_terminals() { # machine_terminals NAME: its herdr-core's terminals, as JSON
   rsh "$1" 'PATH="$HOME/.local/bin:$PATH"; herdr-core ls --json'
 }
@@ -335,14 +388,41 @@ machine_resume() { # machine_resume NAME [--type T]: running (at that size) and 
   _via=$(target_of "$1" 2>/dev/null || true); [ -n "$_via" ] || _via="boat ssh $_id"
   # (Already running, after all: nothing to resume.)
   _st=$(machine_state "$1" 2>/dev/null || true)
+  # boat lost its machine (unreachable, `error`): power-cycled where boat
+  # can, else stopped to a snapshot and resumed (below) like any stopped one.
+  if [ "$_st" = error ]; then
+    say "boat lost $_id's machine; power-cycling it..."
+    if boat recover "$_id" --json --no-update >/dev/null 2>&1; then
+      i=0
+      until case "$(machine_state "$1" 2>/dev/null || true)" in running|idle|ready|busy) true ;; *) false ;; esac; do
+        i=$((i + 1)); [ $i -lt 100 ] || die "$_id was power-cycled but hasn't come back after 5 minutes"
+        sleep 3
+      done
+      _st=running
+    else
+      say "$_id can't be power-cycled there: stopping it to a snapshot..."
+      boat stop "$_id" --json --no-update >/dev/null 2>&1 || true
+      _st=stopping
+    fi
+  fi
   if [ "$_st" = stopping ]; then
     say "$_id is still saving; waiting for it to stop..."
-    i=0
-    while [ "$(machine_state "$1" 2>/dev/null || true)" = stopping ]; do
-      i=$((i + 1)); [ $i -lt 120 ] || die "$_id is still stopping after 6 minutes"
+    i=0 _forced=""
+    while :; do
+      _st=$(machine_state "$1" 2>/dev/null || true)
+      [ "$_st" = stopping ] || [ "$_st" = error ] || break
+      # A stop that failed (its machine never answered): only then forced,
+      # keeping its last good snapshot (what it wrote after is lost).
+      _ss=$(boat info "$_id" --json --no-update 2>/dev/null | jget sandbox stop status 2>/dev/null || true)
+      if [ -z "$_forced" ] && { [ "$_ss" = failed ] || [ "$_ss" = failing ]; }; then
+        say "$_id couldn't be saved; stopping it at its last good snapshot"
+        boat stop "$_id" --force --json --no-update >/dev/null 2>&1 || true
+        _forced=1
+      fi
+      i=$((i + 1)); [ $i -lt 600 ] || die "$_id is still stopping after 30 minutes"
       sleep 3
     done
-    _st=stopped
+    case $_st in stopped|archived|suspended) _st=stopped ;; esac
   fi
   case $_st in
     running|idle|ready|busy) ;;
@@ -1185,8 +1265,8 @@ case $cmd in
       new) machine_new "$@" ;; rm) machine_rm "$@" ;; ls) machine_ls ;;
       unshare) machine_unshare "$@" ;;
       extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;; busy) machine_busy "$@" ;;
-      hold) machine_hold "$@" ;; terminals) machine_terminals "$@" ;;
-      *) die "machine new|rm|ls|extend|state|resume|busy|hold|terminals" ;;
+      hold) machine_hold "$@" ;; terminals) machine_terminals "$@" ;; sessions) machine_sessions "$@" ;;
+      *) die "machine new|rm|ls|extend|state|resume|busy|hold|terminals|sessions" ;;
     esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;

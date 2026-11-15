@@ -1096,10 +1096,13 @@ struct AgentPopout: View {
                     VStack(spacing: 10) {
                         let machine = Machines.machine(of: session.pane)
                         if lifetime.isDown(machine) || lifetime.resuming.contains(machine) {
-                            // boat stopped its machine (an hour idle): its disk is
-                            // kept, and its agents start again where they were.
-                            Text("\(machine) stopped").font(Type.title)
-                            Text("boat stops a machine after an hour idle. Its disk is kept for 14 days; Resume starts it again with \(agent?.kind ?? "this session") where it was.")
+                            // boat stopped its machine (an hour idle) or lost it
+                            // (unreachable): its disk is kept, and its agents
+                            // start again where they were.
+                            let lost = lifetime.downWhy[machine] == "error"
+                            Text(lost ? "\(machine) stopped answering" : "\(machine) stopped").font(Type.title)
+                            Text(lost ? "boat lost the machine it runs on. Its disk is kept; Resume starts it again with \(agent?.kind ?? "this session") where it was."
+                                      : "boat stops a machine after an hour idle. Its disk is kept for 14 days; Resume starts it again with \(agent?.kind ?? "this session") where it was.")
                                 .font(.system(size: 12)).foregroundStyle(Ink.dim).multilineTextAlignment(.center).frame(maxWidth: 360)
                             if let why = lifetime.problem[machine] {
                                 Text(why).font(.system(size: 12)).foregroundStyle(Tone.blocked).multilineTextAlignment(.center).frame(maxWidth: 360)

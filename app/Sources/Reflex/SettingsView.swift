@@ -1148,7 +1148,10 @@ private struct MachineCardsSection: View {
 
     private func status(_ m: CoreMachines.Machine, agents: Int) -> (tone: Color, text: String) {
         if lifetime.resuming.contains(m.name) { return (Tone.working, "Resuming…") }
-        if lifetime.isDown(m.name) { return (Color.secondary, "Stopped after an hour idle; its disk is kept 14 days") }
+        if lifetime.isDown(m.name) {
+            if lifetime.downWhy[m.name] == "error" { return (Tone.blocked, "boat lost its machine; Resume brings it back") }
+            return (Color.secondary, "Stopped after an hour idle; its disk is kept 14 days")
+        }
         if let p = lifetime.problem[m.name] { return (Tone.blocked, p) }
         switch m.state {
         case "connected": return (Tone.done, count(agents))
