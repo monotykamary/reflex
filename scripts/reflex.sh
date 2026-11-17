@@ -309,8 +309,21 @@ done'
 # hides its arguments) the newest of its folder's sessions written since it
 # started, one per pi there, else the one its command named. Linux (the
 # sandboxes). {"up": seconds since boot, "agents": [{kind, cwd, session}]}.
+# Its folder as it was started in (its PWD), when that is the folder it is
+# in: one started before boat's disk handover is in the same folder seen
+# through /var/lib/ascii-lazy/retired/home, a path the next boot won't have.
 SESSIONS_PROBE='import glob, json, os, re
 home = os.path.expanduser("~"); me = os.getuid(); found = []; pis = {}
+def where(p, cwd):
+    try: env = open("/proc/%s/environ" % p, "rb").read().split(b"\0")
+    except OSError: return cwd
+    for e in env:
+        if not e.startswith(b"PWD="): continue
+        w = e[4:].decode(errors="replace").rstrip("/")
+        try:
+            if w != cwd and os.path.isdir(w) and (os.path.samefile(w, cwd) or (w.startswith(home + "/") and cwd.endswith(w[len(home):]))): return w
+        except OSError: pass
+    return cwd
 def argv(p):
     try: return [x.decode(errors="replace") for x in open("/proc/%s/cmdline" % p, "rb").read().split(b"\0") if x]
     except OSError: return []
@@ -334,7 +347,7 @@ for p in os.listdir("/proc"):
             if n in ("pi", "claude", "codex"): helper = True; break
             if n in ("herdr-core", "systemd", "init") or q in ("0", "1"): break
         if helper: continue
-        cwd = os.readlink("/proc/%s/cwd" % p); start = os.stat("/proc/" + p).st_mtime
+        cwd = where(p, os.readlink("/proc/%s/cwd" % p)); start = os.stat("/proc/" + p).st_mtime
         hint = named(a) or named(argv(open("/proc/%s/stat" % p).read().rsplit(")", 1)[1].split()[1]))
     except (OSError, IndexError): continue
     if c == "claude":
