@@ -13,13 +13,13 @@ def line(+pane: String) -> String:
   pane ++ "  =>  machine " ++ Herdr.machine(pane) ++ ", pane " ++ Herdr.bare(pane) ++ ", socket " ++ Herdr.at("/local/herdr.sock", "/data/machines", pane)
 
 def agent(pane: String) -> M.Agent:
-  M.Agent{pane, "a", "claude", M.Idle{}, "/w", "", 0, "", ""}
+  M.Agent{pane, "a", "claude", M.Idle{}, "/w", "", 0, "", "", ""}
 
 def panes(xs: List<&2, M.Agent>) -> String:
   match xs:
     case Nil{}:
       ""
-    case Con{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, t}:
+    case Con{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}, t}:
       pane ++ " " ++ panes(t)
 
 def place(+path: String) -> String:

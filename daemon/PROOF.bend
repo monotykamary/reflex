@@ -132,13 +132,13 @@ def Laws.answer_runs_nothing(s, item, key):
 # The inbox
 # ---------
 
-def Laws.new_blocked_agent_asks(pane, name, kind, cwd, title, seq, session, screen):
+def Laws.new_blocked_agent_asks(pane, name, kind, cwd, title, seq, session, screen, parent):
   {==}
 
-def Laws.finished_turn_reports(p, pane, name, kind, cwd, title, seq, session, screen):
+def Laws.finished_turn_reports(p, pane, name, kind, cwd, title, seq, session, screen, parent):
   {==}
 
-def Laws.answered_question_clears(pane, name, kind, cwd, title, seq, session, screen):
+def Laws.answered_question_clears(pane, name, kind, cwd, title, seq, session, screen, parent):
   {==}
 
 # Routing

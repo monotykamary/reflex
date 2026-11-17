@@ -1,13 +1,13 @@
 import Foundation
 // Stubs: an agent, and the rail's order (waiting, working, done, idle).
-struct AgentInfo: Equatable { var pane: String; var status: String; var cwd: String }
+struct AgentInfo: Equatable { var pane: String; var status: String; var cwd: String; var parent: String? = nil }
 enum Rail {
     @MainActor static func ordered(_ a: [AgentInfo]) -> [AgentInfo] {
         let r = ["blocked": 0, "working": 1, "done": 2]
         return a.enumerated().sorted { (r[$0.element.status] ?? 3, $0.offset) < (r[$1.element.status] ?? 3, $1.offset) }.map(\.element)
     }
 }
-func a(_ p: String, _ s: String, _ c: String) -> AgentInfo { AgentInfo(pane: p, status: s, cwd: c) }
+func a(_ p: String, _ s: String, _ c: String, from: String? = nil) -> AgentInfo { AgentInfo(pane: p, status: s, cwd: c, parent: from) }
 let folder: (AgentInfo) -> String = { ($0.cwd as NSString).lastPathComponent }
 nonisolated(unsafe) var fails = 0
 func check(_ ok: Bool, _ what: String) { print((ok ? "PASS " : "FAIL ") + what); if !ok { fails += 1 } }
@@ -40,5 +40,33 @@ MainActor.assumeIsolated {
     var again = SteadyRows()
     again.update([a("1", "idle", "/p/x"), a("2", "blocked", "/p/x")], folder: folder, now: t0)
     check(flat(again) == ["2", "1"], "a list opened again sorts afresh")
+
+    // Started by another agent: under it, whatever its own state or folder.
+    var n = SteadyRows()
+    n.update([a("p", "idle", "/p/x"), a("c", "blocked", "/p/x", from: "p"), a("q", "working", "/p/y"),
+              a("g", "working", "/p/z", from: "c"), a("o", "done", "/p/w", from: "gone")], folder: folder, now: t0)
+    check(flat(n) == ["q", "o", "p", "c", "g"], "children open under their starter, theirs under them (\(flat(n)))")
+    check(n.groups.allSatisfy { $0.folder == nil }, "its children don't make a starter's folder a group")
+    let shown = Set(flat(n))
+    check([n.depth("p", among: shown), n.depth("c", among: shown), n.depth("g", among: shown), n.depth("o", among: shown)] == [0, 1, 2, 0],
+          "indented by how many starters are above (a starter not listed: none)")
+    check(n.depth("g", among: ["g", "c"]) == 1 && n.depth("c", among: ["c"]) == 0, "a starter filtered out: not indented under it")
+    // While open: a new child goes after its starter's earlier ones; a new
+    // agent and its child arrive together, the child under it.
+    n.update([a("p", "idle", "/p/x"), a("c", "blocked", "/p/x", from: "p"), a("q", "working", "/p/y"),
+              a("g", "working", "/p/z", from: "c"), a("o", "done", "/p/w", from: "gone"),
+              a("c2", "blocked", "/p/x", from: "p"), a("r2", "idle", "/p/v", from: "r"), a("r", "idle", "/p/v")], folder: folder, now: t0 + 1)
+    check(flat(n) == ["q", "o", "p", "c", "g", "c2", "r", "r2"], "new children join under their starter (\(flat(n)))")
+    // The starter goes: its children stay where they are, no longer indented.
+    let left = [a("c", "blocked", "/p/x", from: "p"), a("q", "working", "/p/y"), a("g", "working", "/p/z", from: "c"),
+                a("o", "done", "/p/w", from: "gone"), a("c2", "blocked", "/p/x", from: "p"), a("r2", "idle", "/p/v", from: "r"), a("r", "idle", "/p/v")]
+    n.update(left, folder: folder, now: t0 + 2)
+    n.update(left, folder: folder, now: t0 + 3 + SteadyRows.grace)
+    check(flat(n) == ["q", "o", "c", "g", "c2", "r", "r2"] && n.depth("c", among: Set(flat(n))) == 0 && n.depth("g", among: Set(flat(n))) == 1,
+          "a starter gone: its children stay put, a level up (\(flat(n)))")
+    // Two that name each other: both listed, neither lost.
+    var ring = SteadyRows()
+    ring.update([a("x", "idle", "/p/x", from: "y"), a("y", "idle", "/p/y", from: "x")], folder: folder, now: t0)
+    check(Set(flat(ring)) == ["x", "y"], "agents naming each other are both listed (\(flat(ring)))")
 }
 exit(fails == 0 ? 0 : 1)

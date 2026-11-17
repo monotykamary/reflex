@@ -788,6 +788,9 @@ private struct StatusPill: View {
 /// to answer), would move rows under the pointer. A session's row updates in
 /// place; a new one goes at the end of its group; one that's gone stays a few
 /// seconds, dimmed, then goes. Sorted afresh each time the list opens.
+/// An agent another listed agent started (`hc run` in its terminal) is no row
+/// of its own in a group: it sits under the agent that started it, after
+/// that agent's earlier ones; once that agent is gone it stays where it is.
 struct SteadyRows {
     /// One project's agents (a header), or `folder` nil: the one-agent ones.
     struct Group: Equatable {
@@ -798,27 +801,74 @@ struct SteadyRows {
     private(set) var info: [String: AgentInfo] = [:]
     private(set) var goneAt: [String: Date] = [:]
     static let grace: TimeInterval = 6
+    /// Deeper than this, a row is indented no further.
+    static let deepest = 3
 
     var isEmpty: Bool { groups.isEmpty }
     func gone(_ pane: String) -> Bool { goneAt[pane] != nil }
+
+    /// The listed agent that started `pane`'s, if any.
+    func parent(of pane: String) -> String? {
+        guard let p = info[pane]?.parent, !p.isEmpty, p != pane, info[p] != nil else { return nil }
+        return p
+    }
+
+    /// How many of `pane`'s starters, one above the other, are among `shown`:
+    /// how far in its row goes.
+    func depth(_ pane: String, among shown: Set<String>) -> Int {
+        var d = 0, p = pane, seen: Set<String> = [pane]
+        while d < Self.deepest, let up = parent(of: p), shown.contains(up), seen.insert(up).inserted { d += 1; p = up }
+        return d
+    }
+
+    /// Whether `pane` is `top` or was started, at some remove, by it.
+    private func under(_ pane: String, _ top: String) -> Bool {
+        var p = pane, seen: Set<String> = []
+        while seen.insert(p).inserted {
+            if p == top { return true }
+            guard let up = parent(of: p) else { return false }
+            p = up
+        }
+        return false
+    }
+
+    /// Each pane followed by those it started (theirs after each), in `order`.
+    private func nest(_ panes: [String], _ order: [String], placed: inout Set<String>) -> [String] {
+        var out: [String] = []
+        func put(_ p: String) {
+            guard placed.insert(p).inserted else { return }
+            out.append(p)
+            for c in order where parent(of: c) == p { put(c) }
+        }
+        panes.forEach(put)
+        return out
+    }
 
     @MainActor mutating func update(_ agents: [AgentInfo], folder: (AgentInfo) -> String, now: Date = Date()) {
         var fresh: [String: AgentInfo] = [:]
         for a in agents where fresh[a.pane] == nil { fresh[a.pane] = a }
         guard !groups.isEmpty else {
             // Opening: waiting first, then working, done, idle; recent first.
-            var order: [String] = []
-            var by: [String: [String]] = [:]
-            for a in Rail.ordered(agents) where fresh[a.pane] != nil {
-                let f = folder(a)
-                if by[f] == nil { order.append(f) }
-                by[f, default: []].append(a.pane)
-            }
-            let singles = Rail.ordered(agents).filter { by[folder($0)]?.count == 1 }.map(\.pane)
-            groups = order.filter { (by[$0]?.count ?? 0) > 1 }.map { Group(folder: $0, panes: by[$0] ?? []) }
-                + (singles.isEmpty ? [] : [Group(folder: nil, panes: singles)])
             info = fresh
             goneAt = [:]
+            let all = Rail.ordered(agents).map(\.pane)
+            var order: [String] = []
+            var seen: Set<String> = []
+            for p in all where seen.insert(p).inserted { order.append(p) }
+            let tops = order.filter { parent(of: $0) == nil }.compactMap { fresh[$0] }
+            var folders: [String] = []
+            var by: [String: [String]] = [:]
+            for a in tops {
+                let f = folder(a)
+                if by[f] == nil { folders.append(f) }
+                by[f, default: []].append(a.pane)
+            }
+            var placed: Set<String> = []
+            groups = folders.filter { (by[$0]?.count ?? 0) > 1 }.map { Group(folder: $0, panes: nest(by[$0] ?? [], order, placed: &placed)) }
+            var singles = nest(tops.filter { by[folder($0)]?.count == 1 }.map(\.pane), order, placed: &placed)
+            // Agents that started each other in a ring: none is under another.
+            singles += order.filter { !placed.contains($0) }
+            if !singles.isEmpty { groups.append(Group(folder: nil, panes: singles)) }
             return
         }
         let known = Set(groups.flatMap(\.panes))
@@ -830,7 +880,10 @@ struct SteadyRows {
             groups.removeAll { $0.panes.isEmpty }
             for p in expired { info[p] = nil; goneAt[p] = nil }
         }
-        for a in Rail.ordered(agents.filter { !known.contains($0.pane) }) {
+        // New ones: into their group, else at the end; one another agent
+        // started, under it (after its earlier ones) once that one is placed.
+        var placed = known.subtracting(expired)
+        func join(_ a: AgentInfo) {
             let f = folder(a)
             if let i = groups.firstIndex(where: { $0.folder == f }) {
                 groups[i].panes.append(a.pane)
@@ -839,7 +892,28 @@ struct SteadyRows {
             } else {
                 groups.append(Group(folder: nil, panes: [a.pane]))
             }
+            placed.insert(a.pane)
         }
+        let new = Rail.ordered(agents.filter { !known.contains($0.pane) })
+        for a in new where parent(of: a.pane) == nil && !placed.contains(a.pane) { join(a) }
+        var waiting = new.filter { parent(of: $0.pane) != nil }
+        while !waiting.isEmpty {
+            let before = waiting.count
+            waiting = waiting.filter { a in
+                guard !placed.contains(a.pane) else { return false }
+                guard let up = parent(of: a.pane), placed.contains(up),
+                      let g = groups.firstIndex(where: { $0.panes.contains(up) }),
+                      let i = groups[g].panes.firstIndex(of: up) else { return true }
+                var at = i + 1
+                while at < groups[g].panes.count, under(groups[g].panes[at], up) { at += 1 }
+                groups[g].panes.insert(a.pane, at: at)
+                placed.insert(a.pane)
+                return false
+            }
+            if waiting.count == before { break }
+        }
+        // (Started by each other in a ring: none is under another.)
+        for a in waiting where !placed.contains(a.pane) { join(a) }
     }
 }
 
@@ -1071,10 +1145,13 @@ struct AgentList: View {
         rows.groups.map { g in (g.folder, g.panes.compactMap { rows.info[$0] }.filter(passes)) }.filter { !$0.1.isEmpty }
     }
 
-    /// A row; one whose session has gone fades and can't be clicked.
-    private func row(_ a: AgentInfo, _ place: String, _ rows: SteadyRows) -> some View {
+    /// A row; one whose session has gone fades and can't be clicked. One an
+    /// agent shown above started is indented under it.
+    private func row(_ a: AgentInfo, _ place: String, _ rows: SteadyRows, among shown: Set<String>) -> some View {
         let gone = rows.gone(a.pane)
         return AgentRow(agent: a, pulse: pulses[a.pane] ?? 0, place: place,
+                        depth: rows.depth(a.pane, among: shown),
+                        startedBy: rows.parent(of: a.pane).flatMap { rows.info[$0] }.map(AgentRow.title),
                         open: { open(a) }, ask: { ask(a) }, reveal: { reveal(a) })
             .opacity(gone ? 0.4 : 1)
             .allowsHitTesting(!gone)
@@ -1088,11 +1165,13 @@ struct AgentList: View {
             header(folder)
             // Its folder always shows: where in the project it is, or the
             // project's own folder (the header is a group, not a place).
-            ForEach(list) { a in row(a, inside(a, projects) ?? a.folder, rows) }
+            let shown = Set(list.map(\.pane))
+            ForEach(list) { a in row(a, inside(a, projects) ?? a.folder, rows, among: shown) }
         }
         if !singles.isEmpty {
             if !multi.isEmpty { header("Other") }
-            ForEach(singles) { a in row(a, a.folder, rows) }
+            let shown = Set(singles.map(\.pane))
+            ForEach(singles) { a in row(a, a.folder, rows, among: shown) }
         }
         if !stoppedShown.isEmpty {
             header("Stopped")
@@ -1236,6 +1315,10 @@ private struct AgentRow: View {
     var pulse: Int
     /// Named under the title: the folder, or where in its project it is.
     var place: String?
+    /// How many agents above started this one, one under the other.
+    var depth: Int = 0
+    /// The title of the agent that started it, if listed.
+    var startedBy: String? = nil
     var open: () -> Void
     var ask: () -> Void
     var reveal: () -> Void
@@ -1259,6 +1342,13 @@ private struct AgentRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
+            if depth > 0 {
+                // Under the agent that started it: a corner from its line.
+                Image(systemName: "arrow.turn.down.right")
+                    .font(.system(size: 8.5, weight: .medium)).foregroundStyle(Ink.dim.opacity(0.7))
+                    .frame(width: 10)
+                    .padding(.leading, CGFloat(depth - 1) * 16 + 2)
+            }
             AgentGlyph(status: agent.status, size: 9, pulse: pulse, machine: agent.machine).frame(width: 12)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 5) {
@@ -1282,7 +1372,7 @@ private struct AgentRow: View {
         .onTapGesture(perform: open)
         .onHover { h in withAnimation(Motion.micro) { hover = h } }
         .contextMenu { OpenInItems(agent: agent, pane: agent.pane) }
-        .help("\(agent.kind) in \(agent.place)")
+        .help("\(agent.kind) in \(agent.place)" + (startedBy.map { ", started by \($0)" } ?? ""))
     }
 
     private func action(_ symbol: String, _ help: String, _ run: @escaping () -> Void) -> some View {

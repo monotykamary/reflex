@@ -28,6 +28,8 @@ type Agent is Data:
     seq: U32,
     session: String,
     screen: String,
+    # The terminal that started it (`hc run` in it), "" for none.
+    parent: String,
   }
 
 # A folder where a new session may start (built by Index from the scan).
@@ -208,7 +210,7 @@ def Action.json(a: Action) -> String:
 
 def Agent.json(a: Agent) -> String:
   match a:
-    case Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       Js.obj([
         Js.kv("pane", Js.str(pane)),
         Js.kv("name", Js.str(name)),
@@ -218,6 +220,7 @@ def Agent.json(a: Agent) -> String:
         Js.kv("title", Js.str(title)),
         Js.kv("seq", Js.num(seq)),
         Js.kv("session", Js.str(session)),
+        Js.kv("parent", Js.str(parent)),
       ])
 
 def Opt.json(o: Opt) -> String:

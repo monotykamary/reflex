@@ -120,6 +120,8 @@ def main():
         # A program called codex that says nothing (a script would show its shell in front).
         (bin_dir / "codex").symlink_to("/bin/sleep")
         hc(env, "run", "--bg", "--no-parent", "--name", "cx", "--", str(bin_dir / "codex"), "300")
+        # An agent another agent started (`hc run` in its terminal): its parent is that terminal.
+        hc(env, "run", "--bg", "--parent", "echo", "--name", "helper", "--", "sh", "-c", R + "r state=working:app=pi; sleep 300")
         for name, (flags, script) in LOST.items():
             hc(env, "run", "--bg", "--no-parent", "--name", name, *flags, "--", "sh", "-c", script)
         time.sleep(1.5)
@@ -136,6 +138,11 @@ def main():
         out = [l for l in run.stdout.splitlines() if l.strip()]
         missing = [e for e in EXPECT if not any(l.startswith(e) for l in out)]
         missing += [f"(not) {n}" for n in NOT if any(l.startswith(n) for l in out)]
+        echo_at = json.loads(hc(env, "get", "--json", "echo").stdout)["address"]
+        for n, want in (("helper", echo_at), ("echo", "")):
+            line = next((l for l in out if l.startswith(f"agent {n} ")), "")
+            if not line.endswith(f" parent={want}"):
+                missing.append(f"agent {n} ... parent={want}")
         if run.returncode or missing:
             raise SystemExit("core adapter regression:\nmissing: " + "\n  ".join(missing) + "\n--- got:\n" + run.stdout + run.stderr)
         # The poll marked the kept agent's shell and unmarked the one whose agent quit.
@@ -166,7 +173,7 @@ def main():
         bad += [f"{n}: shown, shouldn't be" for n in HIDDEN if n in names]
         if not got["ok"] or bad:
             raise SystemExit("stopped agents:\n  " + "\n  ".join(bad) + "\n--- got:\n" + json.dumps(got, indent=1))
-        print(f"herdr-core adapter: {len(EXPECT) + len(NOT) + 2 + len(SHOWN) + len(HIDDEN)} checks passed (build {built - started:.1f}s, run {time.monotonic() - built:.1f}s)")
+        print(f"herdr-core adapter: {len(EXPECT) + len(NOT) + 4 + len(SHOWN) + len(HIDDEN)} checks passed (build {built - started:.1f}s, run {time.monotonic() - built:.1f}s)")
     finally:
         hc(env, "server", "stop", check=False)
         shutil.rmtree(run_dir, ignore_errors=True)

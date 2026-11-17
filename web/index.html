@@ -68,6 +68,8 @@
   .row { position: relative; display: flex; align-items: center; gap: 12px; width: 100%; min-height: 58px; padding: 10px 14px; text-align: left; }
   .row + .row::before { content: ""; position: absolute; top: 0; left: 46px; right: 0; height: 1px; background: var(--hair); }
   .row:active { transform: none; background: var(--raise); }
+  .row.sub { padding-left: var(--in); }
+  .row.sub::after { content: "↳"; position: absolute; left: calc(var(--in) - 18px); top: 50%; transform: translateY(-50%); opacity: .45; font-size: 13px; }
   .row .text { flex: 1; min-width: 0; }
   .row .t1 { font-size: 15px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; letter-spacing: -.005em; }
   .row .t2 { margin-top: 1px; font-size: 13px; color: var(--ink2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -366,11 +368,22 @@
       }).join("") + `</div>`;
     }
 
-    // Agents: waiting, working, done, idle.
+    // Agents: waiting, working, done, idle; one another listed agent started
+    // (`hc run` in its terminal) under it, indented.
     const order = { blocked: 0, working: 1, done: 2, idle: 3 };
-    const agents = [...s.agents].sort((a, b) => order[norm(a.status)] - order[norm(b.status)]);
+    const sorted = [...s.agents].sort((a, b) => order[norm(a.status)] - order[norm(b.status)]);
+    const listed = new Set(sorted.map((a) => a.pane));
+    const up = (a) => (a.parent && a.parent !== a.pane && listed.has(a.parent) ? a.parent : null);
+    const agents = [], depth = {}, placed = new Set();
+    const put = (a, d) => {
+      if (placed.has(a.pane)) return;
+      placed.add(a.pane); agents.push(a); depth[a.pane] = Math.min(d, 3);
+      sorted.filter((c) => up(c) === a.pane).forEach((c) => put(c, d + 1));
+    };
+    sorted.filter((a) => !up(a)).forEach((a) => put(a, 0));
+    sorted.forEach((a) => put(a, 0)); // (started by each other in a ring)
     h += `<div class="section"><div class="label">Agents ${agents.length ? `<span class="n">${agents.length}</span>` : ""}</div>`;
-    h += agents.length ? `<div class="group">` + agents.map((a) => `<button class="row${fresh("a" + a.pane)}" data-open="${esc(a.pane)}">
+    h += agents.length ? `<div class="group">` + agents.map((a) => `<button class="row${fresh("a" + a.pane)}${depth[a.pane] ? " sub" : ""}" data-open="${esc(a.pane)}"${depth[a.pane] ? ` style="--in:${14 + 22 * depth[a.pane]}px"` : ""}>
         ${glyph(norm(a.status))}
         <div class="text"><div class="t1">${esc(a.title || `${a.kind} · ${leaf(a.cwd)}`)}</div>
           <div class="t2">${esc(a.kind)} · ${esc(leaf(a.cwd))} · ${word[norm(a.status)]}</div></div>${chev}</button>`).join("") + `</div>`

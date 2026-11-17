@@ -930,17 +930,17 @@ def source_for(s: M.Status) -> String:
 
 def with_screen(a: M.Agent, r: Result<&1, &1, U32 & String, String>) -> M.Agent:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
-      M.Agent{pane, name, kind, status, cwd, title, seq, session, text_or(r, "")}
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
+      M.Agent{pane, name, kind, status, cwd, title, seq, session, text_or(r, ""), parent}
 
 def screen_for(want: Bool, +cfg: Cfg, a: M.Agent) -> IO(M.Agent):
   match want a:
     case False{} _:
       IO.pure(M.Agent, a)
-    case True{} M.Agent{+pane, name, kind, +status, cwd, title, seq, session, screen}:
+    case True{} M.Agent{+pane, name, kind, +status, cwd, title, seq, session, screen, parent}:
       do IO<M.Agent>:
         r : Result<&1, &1, U32 & String, String> <- Term.read_pane(Cfg.at(cfg, pane), Term.bare(pane), source_for(status), 40)
-        return with_screen(M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, r)
+        return with_screen(M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}, r)
 
 def screens(cur: List<&2, M.Agent>, +cfg: Cfg, +prev: List<&2, M.Agent>) -> IO(List<&2, M.Agent>):
   match cur:
@@ -1038,8 +1038,8 @@ def busy_status(busy: Bool, s: M.Status) -> M.Status:
 
 def mark_busy(a: M.Agent, +busy: List<&2, String>) -> M.Agent:
   match a:
-    case M.Agent{pane, name, +kind, status, cwd, title, seq, +session, screen}:
-      M.Agent{pane, name, kind, busy_status((String.eq(kind, "claude") || String.eq(kind, "pi")) && R.bool_not(String.is_empty(session)) && member(session, busy), status), cwd, title, seq, session, screen}
+    case M.Agent{pane, name, +kind, status, cwd, title, seq, +session, screen, parent}:
+      M.Agent{pane, name, kind, busy_status((String.eq(kind, "claude") || String.eq(kind, "pi")) && R.bool_not(String.is_empty(session)) && member(session, busy), status), cwd, title, seq, session, screen, parent}
 
 def marks(xs: List<&2, M.Agent>, +busy: List<&2, String>) -> List<&2, M.Agent>:
   match xs:
@@ -1326,7 +1326,7 @@ def scope_agents(+m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
 
 def agent_kind(a: M.Agent) -> String:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       kind
 
 def harness_agents.put(keep: Bool, a: M.Agent, rest: List<&2, M.Agent>) -> List<&2, M.Agent>:

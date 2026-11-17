@@ -117,8 +117,8 @@ def pane_on(+m: String, +pane: String) -> String:
 
 def tag(+m: String, a: M.Agent) -> M.Agent:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
-      M.Agent{m ++ "/" ++ pane, name, kind, status, cwd, title, seq, session, screen}
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
+      M.Agent{m ++ "/" ++ pane, name, kind, status, cwd, title, seq, session, screen, parent}
 
 # A machine's agents, as seen from here.
 def tags(+m: String, xs: List<&2, M.Agent>) -> List<&2, M.Agent>:
@@ -137,7 +137,7 @@ def on.put(keep: Bool, a: M.Agent, rest: List<&2, M.Agent>) -> List<&2, M.Agent>
 
 def on.pane(a: M.Agent) -> String:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       pane
 
 # The agents in `xs` on machine `m`.
@@ -167,6 +167,7 @@ def agent_of(+a: J.JSON) -> M.Agent:
     Js.text_at(a, "terminal_title_stripped"),
     Js.as_u32(Js.get(a, "state_change_seq"), 0),
     session_of(a),
+    "",
     "",
   }
 

@@ -91,7 +91,8 @@ law new_blocked_agent_asks:
   for +seq: U32
   for +session: String
   for +screen: String
-  {Core.change(None{}, M.Agent{pane, name, kind, M.Blocked{}, cwd, title, seq, session, screen}) == Core.BecameBlocked{} : Core.Change}
+  for +parent: String
+  {Core.change(None{}, M.Agent{pane, name, kind, M.Blocked{}, cwd, title, seq, session, screen, parent}) == Core.BecameBlocked{} : Core.Change}
 
 # A working agent that becomes ready reports a finished turn.
 law finished_turn_reports:
@@ -104,7 +105,8 @@ law finished_turn_reports:
   for +seq: U32
   for +session: String
   for +screen: String
-  {Core.change(Some{M.Agent{pane, name, kind, M.Working{}, cwd, title, seq, session, screen}}, M.Agent{pane, name, kind, M.Idle{}, cwd, title, seq, session, screen}) == Core.FinishedTurn{} : Core.Change}
+  for +parent: String
+  {Core.change(Some{M.Agent{pane, name, kind, M.Working{}, cwd, title, seq, session, screen, parent}}, M.Agent{pane, name, kind, M.Idle{}, cwd, title, seq, session, screen, parent}) == Core.FinishedTurn{} : Core.Change}
 
 # A question card goes away once its agent is no longer blocked.
 law answered_question_clears:
@@ -116,7 +118,8 @@ law answered_question_clears:
   for +seq: U32
   for +session: String
   for +screen: String
-  {Core.item_live.of(M.IAsk{}, Some{M.Agent{pane, name, kind, M.Working{}, cwd, title, seq, session, screen}}) == False{} : Bool}
+  for +parent: String
+  {Core.item_live.of(M.IAsk{}, Some{M.Agent{pane, name, kind, M.Working{}, cwd, title, seq, session, screen, parent}}) == False{} : Bool}
 
 # Routing
 # -------

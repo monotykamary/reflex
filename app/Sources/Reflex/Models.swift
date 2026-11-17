@@ -11,6 +11,9 @@ struct AgentInfo: Codable, Identifiable, Hashable {
     var title: String
     var seq: Int
     var session: String
+    /// The terminal that started it (an agent's `hc run`), when one did; its
+    /// row goes under that agent's. (Optional: an older reflexd sends none.)
+    var parent: String?
     var id: String { pane }
 
     /// The machine it runs on ("" for this Mac; see Machines).

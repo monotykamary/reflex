@@ -195,6 +195,7 @@ def agent_of(+t: J.JSON) -> M.Agent:
     seq_of(t),
     label(t, "reflex.session"),
     "",
+    Js.text_at(t, "parent"),
   }
 
 def agents_of.put(keep: Bool, a: M.Agent, rest: List<&2, M.Agent>) -> List<&2, M.Agent>:
@@ -259,8 +260,8 @@ def session_in(r: Result<&1, &1, U32 & String, String>) -> String:
 
 def with_session(a: M.Agent, +s: String) -> M.Agent:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
-      M.Agent{pane, name, kind, status, cwd, title, seq, s, screen}
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
+      M.Agent{pane, name, kind, status, cwd, title, seq, s, screen, parent}
 
 def here(+pane: String) -> Bool:
   nb(String.contains(pane, "/"))
@@ -268,7 +269,7 @@ def here(+pane: String) -> Bool:
 # A Claude on this Mac with no session from Reflex: its own file's.
 def fill_session.want(+a: M.Agent) -> Bool:
   match a:
-    case M.Agent{+pane, name, +kind, status, cwd, title, seq, +session, screen}:
+    case M.Agent{+pane, name, +kind, status, cwd, title, seq, +session, screen, parent}:
       String.is_empty(session) && String.eq(kind, "claude") && here(pane)
 
 def fill_session.if(want: Bool, +home: String, +t: J.JSON, a: M.Agent) -> IO(M.Agent):

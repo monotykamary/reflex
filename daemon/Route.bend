@@ -145,7 +145,7 @@ def title_part(+title: String) -> String:
 
 def agent_line(+home: String, +i: Nat, s: Seen) -> String:
   match s:
-    case Seen{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, recent}:
+    case Seen{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}, recent}:
       idx("a", i) ++ ": " ++ kind ++ " agent in " ++ short(home, Ix.place(Ix.pane_machine(pane), cwd)) ++ " (" ++ M.Status.show(status) ++ ")" ++ title_part(title) ++ "\n" ++ indent(String.lines(last_lines(recent, 6n)))
 
 def agents_text(xs: List<&2, Seen>, +home: String, +i: Nat) -> String:
@@ -245,7 +245,7 @@ def state_text(text: String, +home: String, seen: List<&2, Seen>, folders: List<
 
 def agent_choice(+home: String, +i: Nat, s: Seen) -> String:
   match s:
-    case Seen{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, recent}:
+    case Seen{M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}, recent}:
       Js.kv(idx("a", i), Js.str(kind ++ " in " ++ short(home, Ix.place(Ix.pane_machine(pane), cwd)) ++ title_part(title)))
 
 def agent_choices(xs: List<&2, Seen>, +home: String, +i: Nat) -> List<&2, String>:
@@ -627,11 +627,11 @@ def label_agent(+home: String, +kind: String, +cwd: String) -> String:
 
 def side_decision(side: Side, a: M.Agent, +text: String, +home: String, +default: String) -> Decision:
   match side a:
-    case Native{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen}:
+    case Native{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen, parent}:
       Go{M.SideNative{pane, text}, "btw → " ++ label_agent(home, kind, cwd), "side question; native /btw"}
-    case Forked{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen}:
+    case Forked{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen, parent}:
       Go{M.SideFork{pane, kind, cwd, session, text}, "btw → fork of " ++ label_agent(home, kind, cwd), "side question; forked session"}
-    case NoSide{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen}:
+    case NoSide{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen, parent}:
       Choose{"No side channel for " ++ kind ++ ": how should this go?", [
         M.Opt{"1", "send to " ++ label_agent(home, kind, cwd) ++ " as a prompt", M.Prompt{pane, text}},
         M.Opt{"2", "ask a new " ++ default ++ " session in " ++ leaf(cwd), M.Spawn{cwd, default, text}},
@@ -639,9 +639,9 @@ def side_decision(side: Side, a: M.Agent, +text: String, +home: String, +default
 
 def agent_decision(side: Bool, a: M.Agent, +text: String, +home: String, +default: String) -> Decision:
   match side a:
-    case True{} M.Agent{+pane, name, +kind, +status, +cwd, title, seq, session, screen}:
-      side_decision(side_for(kind, status), M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}, side_text(text), home, default)
-    case False{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen}:
+    case True{} M.Agent{+pane, name, +kind, +status, +cwd, title, seq, session, screen, parent}:
+      side_decision(side_for(kind, status), M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}, side_text(text), home, default)
+    case False{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen, parent}:
       Go{M.Prompt{pane, text}, "→ " ++ label_agent(home, kind, cwd), "routed to a live session"}
 
 def spawn_decision(f: M.Folder, +text: String, +home: String, +default: String) -> Decision:
@@ -690,7 +690,7 @@ def seen_ranked(xs: List<&2, Seen>, +all: List<&2, Prob>, +text: String, +home: 
   match xs:
     case Nil{}:
       []
-    case Con{Seen{M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen}, r}, t}:
+    case Con{Seen{M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, screen, parent}, r}, t}:
       Ranked{lookup_bp(all, idx("a", i)), "→ " ++ label_agent(home, kind, cwd), M.Prompt{pane, text}} <> seen_ranked(t, all, text, home, 1n+i)
 
 def folder_ranked(xs: List<&2, M.Folder>, +all: List<&2, Prob>, +new_bp: U32, +text: String, +home: String, +default: String, +i: Nat) -> List<&2, Ranked>:

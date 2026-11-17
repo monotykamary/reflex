@@ -514,17 +514,17 @@ def change.of(was_blocked: Bool, was_working: Bool, same_seq: Bool, now_blocked:
 
 def Agent.pane(a: M.Agent) -> String:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       pane
 
 def Agent.status(a: M.Agent) -> M.Status:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       status
 
 def Agent.seq(a: M.Agent) -> U32:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       seq
 
 def pick_agent(hit: Bool, h: M.Agent, rest: Maybe<&2, M.Agent>) -> Maybe<&2, M.Agent>:
@@ -543,7 +543,7 @@ def find_agent(agents: List<&2, M.Agent>, +pane: String) -> Maybe<&2, M.Agent>:
 
 def Agent.screen(a: M.Agent) -> String:
   match a:
-    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen}:
+    case M.Agent{pane, name, kind, status, cwd, title, seq, session, screen, parent}:
       screen
 
 # The same question as before: same choices — or none readable right now
@@ -587,9 +587,9 @@ def item_for(c: Change, +id: U32, +now: U32, a: M.Agent) -> Maybe<&2, M.Item>:
   match c a:
     case NoChange{} _:
       None{}
-    case BecameBlocked{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, +screen}:
+    case BecameBlocked{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, +screen, parent}:
       Some{M.Item{id, M.IAsk{}, pane, agent_label(kind, cwd), "needs you", tail_lines(screen, 14n), options(screen, pane), now}}
-    case FinishedTurn{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, +screen}:
+    case FinishedTurn{} M.Agent{+pane, name, +kind, status, +cwd, title, seq, session, +screen, parent}:
       Some{M.Item{id, M.IDone{}, pane, agent_label(kind, cwd), "finished", tail_lines(screen, 10n), [], now}}
 
 type Fold is Data:
