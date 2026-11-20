@@ -33,6 +33,8 @@ AGENTS = {
     # report, its state in its window title's glyph — turning while it works, ✳ at rest.
     "titled": "printf '\033]0;◐ Busy with it\007'; exec sleep 300",
     "rested": "printf '\033]0;✳ Had a rest\007'; exec sleep 300",
+    # Antigravity's CLI (agy) reports itself as "antigravity".
+    "agyish": R + "r state=idle:app=antigravity; sleep 300",
     # A plain program: not an agent.
     "plain": "sleep 300",
     # Started by Reflex as Claude, which has since quit to its shell: not an agent now.
@@ -73,6 +75,7 @@ EXPECT = [
     "agent asks kind=claude status=blocked session=",
     "agent broke kind=pi status=done session=",
     "agent cx kind=codex status=unknown session=",
+    "agent agyish kind=agy status=idle session=",
     "agent titled kind=claude status=working session= title=Busy with it",
     "agent rested kind=claude status=idle session= title=Had a rest",
     "agent slow kind=claude status=unknown session= title=",

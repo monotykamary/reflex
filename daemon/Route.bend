@@ -501,7 +501,7 @@ def response(out: String) -> Result<&1, &1, U32 & String, J.JSON>:
 # --------
 
 def harnesses() -> List<&2, String>:
-  ["claude", "codex", "pi", "grok", "opencode", "amp", "gemini", "cursor", "droid", "copilot", "omp", "kimi"]
+  ["claude", "codex", "pi", "grok", "opencode", "amp", "agy", "cursor", "droid", "copilot", "omp", "kimi"]
 
 def mentioned.pick(hit: Bool, t: String, rest: Maybe<&2, String>) -> Maybe<&2, String>:
   match hit:
@@ -836,12 +836,20 @@ def continue_args(codex: Bool) -> List<&2, String>:
     case False{}:
       ["--continue"]
 
+# agy names a conversation to resume with --conversation (it has no fork).
+def resume_args.other(agy: Bool, +claude: Bool, +pi: Bool, +codex: Bool, +mode: String, +id: String) -> List<&2, String>:
+  match agy:
+    case True{}:
+      ["--conversation", id]
+    case False{}:
+      resume_args.pick(claude, pi, codex, mode, id)
+
 def resume_args.go(cont: Bool, +kind: String, +mode: String, +id: String) -> List<&2, String>:
   match cont:
     case True{}:
       continue_args(String.eq(kind, "codex"))
     case False{}:
-      resume_args.pick(String.eq(kind, "claude"), String.eq(kind, "pi"), String.eq(kind, "codex"), mode, id)
+      resume_args.other(String.eq(kind, "agy"), String.eq(kind, "claude"), String.eq(kind, "pi"), String.eq(kind, "codex"), mode, id)
 
 # The agent's own arguments to bring a session back (mode "continue": the
 # folder's latest).

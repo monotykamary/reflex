@@ -60,7 +60,7 @@ final class Onboarding: ObservableObject {
     private(set) var isOpen = false
     private var poll: Timer?
 
-    static let harnesses = ["claude", "codex", "pi", "grok", "opencode", "amp", "gemini"]
+    static let harnesses = ["claude", "codex", "pi", "grok", "opencode", "amp", "agy"]
 
     /// Where `herdr integration install <agent>` puts each agent's hook.
     static let integrationFiles = [

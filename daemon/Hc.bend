@@ -103,7 +103,7 @@ def argv0(v: Maybe<&2, J.JSON>) -> String:
   base(first_text(Js.as_list(v)))
 
 def known.list() -> List<&2, String>:
-  ["claude", "pi", "codex", "grok", "opencode", "gemini", "amp", "droid", "cursor-agent", "copilot", "qwen", "aider", "goose", "crush", "kimi"]
+  ["claude", "pi", "codex", "grok", "opencode", "agy", "amp", "droid", "cursor-agent", "copilot", "qwen", "aider", "goose", "crush", "kimi"]
 
 def known.in(xs: List<&2, String>, +name: String) -> Bool:
   match xs:
@@ -120,8 +120,9 @@ def if_known(+name: String) -> String:
   when(known(name), name, "")
 
 # The word an agent's 7501 report names itself by, as Reflex's kinds have it.
+# (Antigravity's CLI, agy, reports itself as "antigravity".)
 def app_kind(+app: String) -> String:
-  when(String.eq(app, "claude-code"), "claude", when(String.eq(app, "codex-cli"), "codex", app))
+  when(String.eq(app, "claude-code"), "claude", when(String.eq(app, "codex-cli"), "codex", when(String.eq(app, "antigravity"), "agy", app)))
 
 def label(+t: J.JSON, key: String) -> String:
   Js.as_text(Js.path(["labels", key], Some{t}))
