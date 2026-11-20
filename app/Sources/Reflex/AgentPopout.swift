@@ -1185,18 +1185,30 @@ struct AgentPopout: View {
     /// traffic lights.
     private var header: some View {
         HStack(spacing: 8) {
-            AgentGlyph(status: agent?.status ?? "unknown", size: 10, pulse: store.pulses[session.pane] ?? 0, machine: Machines.machine(of: session.pane))
-            Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane)
-                .font(.system(size: 13, weight: .semibold))
-                .lineLimit(1)
-            // Another Mac's agent wears its name here, as in the rail.
-            MachineChip(machine: Machines.machine(of: session.pane))
-            Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
-                .font(.system(size: 12))
-                .opacity(0.55)
-                .lineLimit(1)
-                .contentTransition(.interpolate)
-            Spacer(minLength: 8)
+            // The title bar's own part: a double-click does what System
+            // Settings says (the header covers the real title bar, which
+            // never sees it), and a drag moves the window.
+            HStack(spacing: 8) {
+                AgentGlyph(status: agent?.status ?? "unknown", size: 10, pulse: store.pulses[session.pane] ?? 0, machine: Machines.machine(of: session.pane))
+                Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane)
+                    .font(.system(size: 13, weight: .semibold))
+                    .lineLimit(1)
+                // Another Mac's agent wears its name here, as in the rail.
+                MachineChip(machine: Machines.machine(of: session.pane))
+                Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
+                    .font(.system(size: 12))
+                    .opacity(0.55)
+                    .lineLimit(1)
+                    .contentTransition(.interpolate)
+                Spacer(minLength: 8)
+            }
+            .frame(maxHeight: .infinity)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                if let w = NSApp.windows.first(where: { $0.identifier?.rawValue == "terminal:" + session.pane }) { TitleBarClick.perform(w) }
+            }
+            .gesture(WindowDragGesture())
+            .allowsWindowActivationEvents(true)
             if session.attached && !session.watching && !session.core {
                 Button { session.watch(reason: "let go") } label: {
                     Image(systemName: "rectangle.on.rectangle").font(.system(size: 11, weight: .medium))
@@ -1213,5 +1225,35 @@ struct AgentPopout: View {
         .padding(.leading, 78)
         .padding(.trailing, 10)
         .frame(height: titlebar)
+    }
+}
+
+/// A double-click on a window's title bar, as System Settings › Desktop &
+/// Dock sets it: zoom (the default), fill the screen, minimize, or nothing.
+enum TitleBarClick {
+    /// Frames windows had before Fill, to go back to on the next one.
+    @MainActor private static var unfilled: [ObjectIdentifier: NSRect] = [:]
+
+    static func action(_ d: UserDefaults = .standard) -> String {
+        if let a = d.string(forKey: "AppleActionOnDoubleClick") { return a }
+        return d.bool(forKey: "AppleMiniaturizeOnDoubleClick") ? "Minimize" : "Maximize"
+    }
+
+    @MainActor static func perform(_ w: NSWindow) {
+        switch action() {
+        case "None": return
+        case "Minimize": w.performMiniaturize(nil)
+        case "Fill":
+            guard let screen = w.screen?.visibleFrame else { return w.performZoom(nil) }
+            let id = ObjectIdentifier(w)
+            if let back = unfilled[id], w.frame.equalTo(screen) {
+                unfilled[id] = nil
+                w.setFrame(back, display: true, animate: true)
+            } else {
+                unfilled[id] = w.frame
+                w.setFrame(screen, display: true, animate: true)
+            }
+        default: w.performZoom(nil)
+        }
     }
 }
