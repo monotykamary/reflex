@@ -60,7 +60,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "Font and colours for agent terminals."
         case .routing: return "Jev decides where each request goes. Pick its provider; it learns from your choices."
         case .projects: return "The folders Reflex can start new sessions in."
-        case .machines: return "Your Macs and boat sandboxes, one mesh: their sessions show up here with this Mac's, and move between them."
+        case .machines: return "Your Macs and your boat and instabox sandboxes, one mesh: their sessions show up here with this Mac's, and move between them."
         case .phone: return "Answer your agents from your phone."
         case .setup: return "Everything Reflex needs, checked live."
         case .about: return "Reflex, herdr and Jev."
@@ -75,7 +75,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .terminal: return "font geist mono size theme colour color tokyo night ghostty"
         case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
-        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale remove forget delete boat sandbox template skill move sessions retire approve files commands run trust resume"
+        case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale remove forget delete boat instabox sandbox box template skill move sessions retire approve files commands run trust resume"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
         case .about: return "version"
@@ -958,7 +958,8 @@ private struct MachinesPane: View {
             MachineCardsSection()
             SessionsSection()
             TrustSection()
-            BoatSection()
+            BoatSection(p: .boat)
+            BoatSection(p: .instabox)
             if !machines.rows.isEmpty {
                 Section {
                     DisclosureGroup(isExpanded: $herdrOpen) {
@@ -1001,8 +1002,9 @@ final class MachineKinds: ObservableObject {
         }
     }
 
-    func symbol(_ machine: String, boat: Bool = false) -> String {
-        if boat { return "sailboat.fill" }
+    func symbol(_ machine: String, boat: Bool = false, sandbox: Sandbox? = nil) -> String {
+        if sandbox == .instabox { return "cube.fill" }
+        if boat || sandbox == .boat { return "sailboat.fill" }
         let m = models[machine] ?? ""
         if m.contains("MacBook") { return "laptopcomputer" }
         if m.contains("mini") { return "macmini.fill" }
@@ -1012,8 +1014,9 @@ final class MachineKinds: ObservableObject {
         return "desktopcomputer"
     }
 
-    func tint(_ machine: String, boat: Bool = false) -> Color {
-        if boat { return Color(red: 0.11, green: 0.62, blue: 0.86) }
+    func tint(_ machine: String, boat: Bool = false, sandbox: Sandbox? = nil) -> Color {
+        if sandbox == .instabox { return Color(red: 0.55, green: 0.36, blue: 0.86) }
+        if boat || sandbox == .boat { return Color(red: 0.11, green: 0.62, blue: 0.86) }
         return models[machine] == "Linux" ? Color(red: 0.93, green: 0.55, blue: 0.2) : Color(red: 0.42, green: 0.45, blue: 0.95)
     }
 }
@@ -1092,7 +1095,7 @@ private struct MachineCardsSection: View {
             }
             .padding(.vertical, 4)
             if loaded && rows.isEmpty {
-                Text("No other machine yet: add one below, or move a session to boat with ⛵.")
+                Text("No other machine yet: add one below, or move a session to boat or instabox with the box button in its window.")
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
         } header: {
@@ -1113,7 +1116,7 @@ private struct MachineCardsSection: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(removing.map { Boat.made($0.name) ? "Its boat sandbox is deleted too, with its disk." : "herdr-core forgets the connection; sessions there keep running, and you can add it again." } ?? "")
+            Text(removing.map { Boat.made($0.name) ? "Its \((Sandbox.of($0.name) ?? .boat) == .instabox ? "instabox box" : "boat sandbox") is deleted too, with its disk." : "herdr-core forgets the connection; sessions there keep running, and you can add it again." } ?? "")
         }
         .alert("Couldn't remove it", isPresented: Binding(get: { failure != nil }, set: { if !$0 { failure = nil } })) {
             Button("OK", role: .cancel) { failure = nil }
@@ -1149,7 +1152,9 @@ private struct MachineCardsSection: View {
     private func status(_ m: CoreMachines.Machine, agents: Int) -> (tone: Color, text: String) {
         if lifetime.resuming.contains(m.name) { return (Tone.working, "Resuming…") }
         if lifetime.isDown(m.name) {
-            if lifetime.downWhy[m.name] == "error" { return (Tone.blocked, "boat lost its machine; Resume brings it back") }
+            let svc = Sandbox.of(m.name) ?? .boat
+            if lifetime.downWhy[m.name] == "error" { return (Tone.blocked, "\(svc.rawValue) lost its machine; Resume brings it back") }
+            if svc == .instabox { return (Color.secondary, "Paused after an hour idle; its programs are kept") }
             return (Color.secondary, "Stopped after an hour idle; its disk is kept 14 days")
         }
         if let p = lifetime.problem[m.name] { return (Tone.blocked, p) }
@@ -1192,19 +1197,23 @@ private struct MachineCardsSection: View {
     }
 
     private func subtitle(_ m: CoreMachines.Machine) -> String {
-        if Boat.made(m.name) { return "boat sandbox" }
-        if let from = CoreMachines.sharedFrom(m.name) { return (m.target.contains("boat ssh") ? "boat sandbox" : "ssh \(m.target)") + " · shared from \(from)" }
+        if Boat.made(m.name) { return Sandbox.of(m.name) == .instabox ? "instabox box" : "boat sandbox" }
+        if let from = CoreMachines.sharedFrom(m.name) {
+            let kind = m.target.contains("instabox ssh") ? "instabox box" : m.target.contains("boat ssh") ? "boat sandbox" : "ssh \(m.target)"
+            return kind + " · shared from \(from)"
+        }
         if let model = kinds.models[m.name] { return "\(model) · \(m.host.isEmpty ? m.target : m.host)" }
         return m.temporary ? "temporary · \(m.target)" : "ssh \(m.target)"
     }
 
     private func card(_ m: CoreMachines.Machine) -> some View {
-        let boat = Boat.made(m.name) || (CoreMachines.sharedByReflex(m.name) && m.target.contains("boat ssh"))
+        let svc = Boat.made(m.name) || CoreMachines.sharedByReflex(m.name) ? Sandbox.of(m.name) : nil
         let agents = store.state.agents.filter { $0.machine == m.name }
         let movable = agents.filter { HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
-        let hint = "\(boat ? "boat ssh" : "ssh") \(m.target)" + (m.version.isEmpty ? "" : " · hc \(m.version)")
+        let via = m.target.contains(" ssh ") && svc != nil ? m.target : "ssh \(m.target)"
+        let hint = via + (m.version.isEmpty ? "" : " · hc \(m.version)")
         return MachineCard(name: m.name, title: m.name, subtitle: subtitle(m),
-                           symbol: kinds.symbol(m.name, boat: boat), tint: kinds.tint(m.name, boat: boat),
+                           symbol: kinds.symbol(m.name, sandbox: svc), tint: kinds.tint(m.name, sandbox: svc),
                            status: status(m, agents: agents.count), action: action(m),
                            menu: AnyView(menu(m, movable: movable)), hint: hint)
     }
@@ -1229,7 +1238,7 @@ private struct SessionsSection: View {
         Section {
             Picker(selection: $s.defaultMachine) {
                 Text("This Mac").tag("")
-                if Boat.hasBoat { Text("A new boat machine").tag(Boat.key) }
+                ForEach(Sandbox.available) { p in Text("A new \(p.noun)").tag(p.key) }
                 ForEach(machines.filter { !Boat.made($0) }, id: \.self) { Text($0).tag($0) }
             } label: {
                 Label("Start new sessions on", systemImage: "play.circle")
@@ -1274,15 +1283,15 @@ private struct TrustSection: View {
         Section {
             Picker(selection: $s.moveApproval) {
                 Text("Ask every time").tag("ask")
-                Text("Allow for boat machines").tag("made")
+                Text("Allow for sandboxes Reflex made").tag("made")
                 Text("Always allow").tag("always")
             } label: {
-                Label("Move itself", systemImage: "sailboat")
+                Label("Move itself", systemImage: "shippingbox")
             }
-            .help("reflex move self: its window shows Move and Not Now. Pressing ⛵ is your OK by itself.")
+            .help("reflex move self: its window shows Move and Not Now. Pressing the box button in its window is your OK by itself.")
             Picker(selection: $s.fileApproval) {
                 Text("Ask every time").tag("ask")
-                Text("Allow for boat machines").tag("made")
+                Text("Allow for sandboxes Reflex made").tag("made")
                 Text("Always allow").tag("always")
             } label: {
                 Label("Take files from this Mac", systemImage: "tray.and.arrow.down")
@@ -1299,31 +1308,39 @@ private struct TrustSection: View {
         } header: {
             Text("What sessions elsewhere may do")
         } footer: {
-            Text(s.runApproval == "always" ? "Commands from boat sandboxes run here without asking." : "Commands from boat sandboxes ask, unless you choose Always allow.")
+            Text(s.runApproval == "always" ? "Commands from boat and instabox sandboxes run here without asking." : "Commands from boat and instabox sandboxes ask, unless you choose Always allow.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
     }
 }
 
-/// boat.dev: the template new boat machines start from, and the skill.
+/// boat.dev or instabox: the template new machines there start from, their
+/// size, and (with boat's) the skill.
 private struct BoatSection: View {
+    var p: Sandbox
     @ObservedObject var s = Settings.shared
-    @ObservedObject var template = BoatTemplate.shared
+    @ObservedObject private var boatTemplate = BoatTemplate.shared
+    @ObservedObject private var instaboxTemplate = BoatTemplate.instabox
     @State private var skill = Boat.skillInstalled
+    private var template: BoatTemplate { p == .boat ? boatTemplate : instaboxTemplate }
 
     private var templateText: (title: String, tone: Color, detail: String) {
         switch template.state {
         case .unknown: return ("Checking…", .secondary, "")
-        case .none: return ("No template yet", Tone.working, "The first move to boat asks the agent to build one with the reflex skill: this Mac's tools and settings, saved as a private snapshot in your boat account. Your logins never go in it.")
-        case .current(let built): return ("Up to date", Tone.done, "Built \(Self.day(built)). New boat machines start from it in seconds.")
+        case .none: return ("No template yet", Tone.working, "The first move to \(p.rawValue) asks the agent to build one with the reflex skill: this Mac's tools and settings, saved as a private snapshot in your \(p.rawValue) account. Your logins never go in it.")
+        case .current(let built): return ("Up to date", Tone.done, "Built \(Self.day(built)). New \(p.nouns) start from it in seconds.")
         case .stale(let built, let changed): return ("Changed here", Tone.blocked, "Built \(Self.day(built)); changed here since: \(changed.joined(separator: ", ")). Keep if it doesn't matter to your sandboxes; Rebuild… has an agent build it again.")
         }
     }
 
     var body: some View {
         Section {
-            if !Boat.hasBoat {
-                RowLabel("The boat CLI isn't installed", "Install it from docs.boat.dev and run boat login: then ⛵ moves a session to a new boat machine.")
+            if !p.installed {
+                if p == .boat {
+                    RowLabel("The boat CLI isn't installed", "Install it from docs.boat.dev and run boat login: then the box button in a terminal window moves a session to a new boat machine.")
+                } else {
+                    RowLabel("The instabox CLI isn't installed", "Install it from instabox.sh and run instabox login: then the box button in a terminal window moves a session to a new instabox box.")
+                }
             } else {
                 LabeledContent {
                     HStack(spacing: 8) {
@@ -1356,16 +1373,29 @@ private struct BoatSection: View {
                 }
                 .help(templateText.detail)
             }
-            Picker(selection: $s.boatType) {
-                Text("Default · 4 CPUs, 8 GB").tag("")
-                Text("Large · 8 CPUs, 16 GB, 2× rate").tag("large")
-                Text("Extra large · 16 CPUs, 32 GB").tag("xlarge")
-                Text("Small · 2 CPUs, 4 GB, ½ rate").tag("small")
-            } label: {
-                Label("Machine size", systemImage: "cpu")
+            if p == .boat {
+                Picker(selection: $s.boatType) {
+                    Text("Default · 4 CPUs, 8 GB").tag("")
+                    Text("Large · 8 CPUs, 16 GB, 2× rate").tag("large")
+                    Text("Extra large · 16 CPUs, 32 GB").tag("xlarge")
+                    Text("Small · 2 CPUs, 4 GB, ½ rate").tag("small")
+                } label: {
+                    Label("Machine size", systemImage: "cpu")
+                }
+                .help("For boat machines Reflex makes, and for one it resumes after boat stopped it: a sandbox your lanes keep busy answers slowly over its line (blank windows, slow commands); a bigger one keeps up.")
+            } else if p.installed {
+                Picker(selection: $s.instaboxSize) {
+                    Text("Default · 4 vCPUs, 8 GB").tag("")
+                    Text("2 vCPUs, 4 GB").tag("2x4")
+                    Text("8 vCPUs, 16 GB").tag("8x16")
+                    Text("16 vCPUs, 32 GB").tag("16x32")
+                    Text("32 vCPUs, 64 GB").tag("32x64")
+                } label: {
+                    Label("Box size", systemImage: "cpu")
+                }
+                .help("For instabox boxes Reflex makes (your plan has to offer the size). Reflex pauses a box an hour after its agents go idle, with no window open on it; a pause keeps its programs, and Resume carries on where it left off.")
             }
-            .help("For boat machines Reflex makes, and for one it resumes after boat stopped it: a sandbox your lanes keep busy answers slowly over its line (blank windows, slow commands); a bigger one keeps up.")
-            LabeledContent {
+            if p == .boat { LabeledContent {
                 Button(skill ? "Reinstall" : "Install") {
                     Boat.install()
                     skill = Boat.skillInstalled
@@ -1375,8 +1405,9 @@ private struct BoatSection: View {
                 Label(skill ? "Reflex skill installed" : "Reflex skill", systemImage: "graduationcap")
             }
             .help("Teaches claude, pi and codex to move themselves, say what their work needs, ask home, and build your template. In ~/.claude, ~/.codex and ~/.pi, with reflex in ~/.local/bin.")
+            }
         } header: {
-            Text("boat.dev")
+            Text(p.title)
         }
         .task { await template.refresh() }
     }

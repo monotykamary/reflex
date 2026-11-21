@@ -3,9 +3,12 @@
 # use these steps; so does the reflex skill, which an agent follows to build
 # your template the first time.
 #
-#   reflex machine new [--template | --from SNAPSHOT] [--type T] [--name N]
+#   reflex machine new [--provider boat|instabox] [--template | --from SNAPSHOT]
+#                      [--type T] [--name N]   (instabox's T: VCPUSxGB, "8x16")
 #   reflex machine rm NAME          reflex machine ls
 #   reflex machine extend NAME SECONDS | state NAME | resume NAME
+#   reflex machine lapse NAME       an instabox box past its time, no window
+#                                   open on it anywhere: paused
 #   reflex mesh sync                every machine here, in your other Macs' too
 #                                   its sandbox's lifetime, state, restart
 #   reflex where MACHINE PATH       the path there (~/x here is ~/x there,
@@ -23,7 +26,8 @@
 #   reflex session MACHINE KIND SESSION CWD [--from SRC]
 #                                   again: only what's new since the last time
 #   reflex snapshot MACHINE --manifest FILE
-#   reflex template [--json|--keep] exit 0 current, 1 changed, 2 none
+#   reflex template [--provider P] [--json|--keep]
+#                                   exit 0 current, 1 changed, 2 none
 #                                   (--keep: what's here now is current)
 #   reflex move self --to MACHINE [PATH...]
 #                                   asks Reflex to move this session, and what
@@ -43,14 +47,20 @@
 #   reflex install                  link this script as ~/.local/bin/reflex
 #
 # Machines are herdr-core's (`hc machine ls`); `machine new` makes a boat.dev
-# sandbox and adds it as a temporary one. Nothing here prints a secret.
+# sandbox or an instabox box and adds it as a temporary one. Nothing here
+# prints a secret.
 set -eu
 
 # (boat's installer, and Reflex giving a Mac your login, put it here.)
 [ -d "$HOME/.ascii/bin" ] && case ":$PATH:" in *":$HOME/.ascii/bin:"*) ;; *) PATH="$PATH:$HOME/.ascii/bin" ;; esac
+# (instabox's installer puts it here.)
+[ -d "$HOME/.local/bin" ] && case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) PATH="$PATH:$HOME/.local/bin" ;; esac
 DATA=${REFLEX_DATA:-"$HOME/Library/Application Support/Reflex"}
 DIR="$DATA/boat"
 TEMPLATE=${REFLEX_TEMPLATE:-reflex-template}
+# The service new machines and the template are on: boat (boat.dev, ids
+# bx_...) or instabox (instabox.sh, ids m_...). A machine's own is its id's.
+PROVIDER=${REFLEX_PROVIDER:-boat}
 # (Where this script really is: ~/.local/bin/reflex is a link to it.)
 _self=$0
 while [ -L "$_self" ]; do
@@ -78,6 +88,7 @@ jget() {
 # --------
 
 record() { echo "$DIR/machines/$1"; }
+provider_of_id() { case $1 in m_*) echo instabox ;; *) echo boat ;; esac; }
 boat_id() { [ -f "$(record "$1")" ] && sed -n 1p "$(record "$1")"; }
 ours() { [ -f "$(record "$1")" ]; }
 # How herdr-core here reaches a machine (its --via command).
@@ -86,13 +97,13 @@ target_of() { # target_of NAME
     for (@{ JSON::PP->new->decode($_)->{machines} // [] }) { if ($_->{name} eq $ENV{NAME}) { print $_->{target} // ""; exit 0 } }
     exit 1'
 }
-# A boat sandbox this Mac looks after: one it made, or one another Mac shared
-# (so it stays up, and comes back, with that Mac off). Its boat id.
+# A sandbox this Mac looks after (boat's or instabox's): one it made, or one
+# another Mac shared (so it stays up, and comes back, with that Mac off). Its id.
 sandbox_id() { # sandbox_id NAME
   if ours "$1"; then boat_id "$1"; return; fi
   [ -f "$DIR/shared/$1" ] || return 1
   _st=$(target_of "$1") || return 1
-  printf '%s' "$_st" | perl -ne 'print $1 if /boat ssh (bx_\w+)/' | grep . || return 1
+  printf '%s' "$_st" | perl -ne 'print $1 // $2 if /boat ssh (bx_\w+)|instabox ssh (m_\w+)/' | grep . || return 1
 }
 
 # Run a shell line there, stdin passed through, its exit code back. "."
@@ -156,13 +167,29 @@ connected() {
     for (@{$j->{machines}}) { exit 0 if $_->{name} eq $ARGV[0] && $_->{state} eq "connected" } exit 1' "$1"
 }
 
+# instabox's size as Settings names it ("8x16": vCPUs x GiB): its flags.
+instabox_size() {
+  case $1 in
+    *x*) _v=${1%x*} _g=${1#*x}
+      case $_v$_g in *[!0-9]*|'') die "an instabox size is VCPUSxGB (8x16), not $1" ;; esac
+      printf -- '--vcpus %s --mem-mib %s' "$_v" "$((_g * 1024))" ;;
+    '') ;;
+    *) die "an instabox size is VCPUSxGB (8x16), not $1" ;;
+  esac
+}
+
+# An instabox box's time: until when it stays up (epoch seconds, on the box,
+# so every Mac that looks after it agrees). `machine lapse` pauses it after.
+UNTIL='mkdir -p "$HOME/.reflex" && echo $(( $(date +%s) + $1 )) > "$HOME/.reflex/until"'
+
 machine_new() {
   # An hour: Reflex renews it while an agent there works, so the hour
   # starts when the machine goes idle (and when Reflex isn't watching).
-  from="" type="" name="" ttl=3600
+  from="" type="" name="" ttl=3600 tmpl=0
   while [ $# -gt 0 ]; do
     case $1 in
-      --template) from=$(template_field snapshot) || die "no template yet: build one with the reflex skill"; shift ;;
+      --provider) PROVIDER=$2; shift 2 ;;
+      --template) tmpl=1; shift ;;
       --from) from=$2; shift 2 ;;
       --type) type=$2; shift 2 ;;
       --name) name=$2; shift 2 ;;
@@ -170,24 +197,46 @@ machine_new() {
       *) die "machine new: unknown $1" ;;
     esac
   done
-  command -v boat >/dev/null || die "the boat CLI isn't installed (https://docs.boat.dev/cli-reference)"
+  [ $tmpl = 1 ] && { from=$(template_field snapshot) || die "no $PROVIDER template yet: build one with the reflex skill"; }
   mkdir -p "$DIR/machines"
-  say "Starting a boat sandbox${from:+ from $from}..."
-  out=$(boat new --json --no-update ${from:+--from "$from"} ${type:+--type "$type"} ${ttl:+--ttl "$ttl"} \
-    --name "${name:-reflex}" 2>&1) || die "boat new failed: $(printf '%s' "$out" | tail -n 3)"
-  id=$(printf '%s' "$out" | grep -o '"id":"bx_[A-Za-z0-9]*"' | tail -n 1 | cut -d'"' -f4)
-  [ -n "$id" ] || die "boat new gave no sandbox id: $(printf '%s' "$out" | tail -n 3)"
-  name=${name:-boat-${id#bx_}}
+  case $PROVIDER in
+    instabox)
+      command -v instabox >/dev/null || die "the instabox CLI isn't installed (https://instabox.sh)"
+      sz=$(instabox_size "$type") || exit 1
+      say "Starting an instabox box${from:+ from $from}..."
+      # Its own idle pause stays on (30 minutes): with no Mac connected it
+      # pauses itself; while one is, Reflex pauses it (machine lapse).
+      # shellcheck disable=SC2086
+      # (Its name is unique in the account: yours, else reflex- and 8 hex.)
+      _box=${name:-reflex-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}
+      out=$(instabox create --json --auto-suspend 30m --meta reflex=1 ${from:+--snapshot "$from"} $sz \
+        --name "$_box" 2>/dev/null) || die "instabox create failed: $(printf '%s' "$out" | grep -o '"message": *"[^"]*"' | head -n 1)"
+      id=$(printf '%s' "$out" | jget id 2>/dev/null) || true
+      case $id in m_*) ;; *) die "instabox create gave no box id: $(printf '%s' "$out" | tail -n 3)" ;; esac
+      _short=$(printf '%s' "${id#m_}" | cut -c1-8)
+      name=${name:-instabox-$_short}
+      via="instabox ssh $id --" ;;
+    boat)
+      command -v boat >/dev/null || die "the boat CLI isn't installed (https://docs.boat.dev/cli-reference)"
+      say "Starting a boat sandbox${from:+ from $from}..."
+      out=$(boat new --json --no-update ${from:+--from "$from"} ${type:+--type "$type"} ${ttl:+--ttl "$ttl"} \
+        --name "${name:-reflex}" 2>&1) || die "boat new failed: $(printf '%s' "$out" | tail -n 3)"
+      id=$(printf '%s' "$out" | grep -o '"id":"bx_[A-Za-z0-9]*"' | tail -n 1 | cut -d'"' -f4)
+      [ -n "$id" ] || die "boat new gave no sandbox id: $(printf '%s' "$out" | tail -n 3)"
+      name=${name:-boat-${id#bx_}}
+      via="boat ssh $id" ;;
+    *) die "machine new: no provider $PROVIDER (boat or instabox)" ;;
+  esac
   printf '%s\n%s\n' "$id" "${from:-}" > "$(record "$name")"
   say "Adding $id to herdr-core as $name..."
   # (A sandbox just ready can take a while to answer ssh.)
   a=0
-  until r=$(hc machine add --via "boat ssh $id" --name "$name" --temp --install --json 2>&1); do
+  until r=$(hc machine add --via "$via" --name "$name" --temp --install --json 2>&1); do
     a=$((a + 1))
     if [ $a -ge 4 ]; then
       say "hc machine add failed: $r"
       hc machine rm "$name" >/dev/null 2>&1 || true
-      boat delete --yes "$id" >/dev/null 2>&1 || true
+      delete_sandbox "$id" >/dev/null 2>&1 || true
       rm -f "$(record "$name")"
       exit 1
     fi
@@ -200,11 +249,19 @@ machine_new() {
     [ $i -lt 90 ] || die "$name didn't connect (hc machine ls)"
     sleep 1
   done
+  [ "$PROVIDER" = instabox ] && { rsh_in "$name" "set -- $ttl; $UNTIL" >/dev/null 2>&1 || true; }
   # This version of the skill (a template keeps the one it was built with).
   skill install --on "$name" >/dev/null 2>&1 || say "the reflex skill isn't on $name: reflex skill install --on $name"
   # (Your other Macs see its sessions too.)
   ( mesh_sync ) >/dev/null 2>&1 || true
   echo "$name"
+}
+
+delete_sandbox() { # delete_sandbox ID
+  case $(provider_of_id "$1") in
+    instabox) instabox rm --yes "$1" >/dev/null 2>&1 ;;
+    *) boat delete --yes --no-update "$1" >/dev/null 2>&1 ;;
+  esac
 }
 
 machine_rm() {
@@ -213,16 +270,40 @@ machine_rm() {
   id=$(boat_id "$name")
   hc machine rm "$name" >/dev/null 2>&1 || true
   ( machine_unshare "$name" ) >/dev/null 2>&1 || true
-  boat delete --yes --no-update "$id" >/dev/null 2>&1 || say "boat delete $id failed: delete it with boat delete"
+  delete_sandbox "$id" || say "deleting $id failed: delete it with $(provider_of_id "$id")"
   rm -f "$(record "$name")"
   rm -rf "$DIR/sent/$name"
   echo "removed $name ($id)"
 }
 
-# Its boat sandbox: how long it stays up, its state, and back up again.
+# Its sandbox: how long it stays up, its state, and back up again. boat's
+# own clock stops it; an instabox box's time is a file on it, and Reflex
+# pauses it once that passes (machine lapse): a pause keeps its memory and
+# programs, so it comes back as it was.
 machine_extend() { # machine_extend NAME SECONDS
-  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
-  boat extend "$_id" --ttl "$2" --json --no-update >/dev/null 2>&1 || die "boat extend $_id failed"
+  _id=$(sandbox_id "$1") || die "$1 isn't a sandbox Reflex made or was shared"
+  case $(provider_of_id "$_id") in
+    instabox) rsh "$1" "set -- $(q "$2"); $UNTIL" >/dev/null || die "setting $1's time failed" ;;
+    *) boat extend "$_id" --ttl "$2" --json --no-update >/dev/null 2>&1 || die "boat extend $_id failed" ;;
+  esac
+}
+# An instabox box past its time with no window open on it on any Mac (its
+# holds): paused. Any Mac looking after it may ask; prints what it did.
+# (With no Mac connected, its own idle pause does this.)
+machine_lapse() { # machine_lapse NAME
+  _id=$(sandbox_id "$1") || die "$1 isn't a sandbox Reflex made or was shared"
+  [ "$(provider_of_id "$_id")" = instabox ] || { echo kept; return 0; }
+  _lr=$(rsh "$1" 'u=$(cat "$HOME/.reflex/until" 2>/dev/null); now=$(date +%s)
+    if ls "$HOME/.reflex/held"/* >/dev/null 2>&1; then echo held
+    elif [ -z "$u" ]; then set -- 3600; '"$UNTIL"'; echo kept
+    elif [ "$now" -ge "$u" ]; then echo due
+    else echo "kept $((u - now))"; fi') || { echo unreachable; return 0; }
+  if [ "$_lr" = due ]; then
+    instabox suspend "$_id" >/dev/null 2>&1 || die "instabox suspend $_id failed"
+    echo paused
+  else
+    echo "$_lr"
+  fi
 }
 # Work an agent left running there while it waits (a waiter on a remote run,
 # a build, a loop): the agents look idle, the sandbox isn't. Two kinds:
@@ -289,7 +370,7 @@ CPU_PROBE='if [ -r /proc/stat ]; then
 fi
 '
 machine_busy() { # machine_busy NAME: "none", or the background work there
-  sandbox_id "$1" >/dev/null || die "$1 isn't a boat sandbox Reflex made or was shared"
+  sandbox_id "$1" >/dev/null || die "$1 isn't a sandbox Reflex made or was shared"
   rsh "$1" "$CPU_PROBE$BUSY_PROBE"
 }
 
@@ -373,7 +454,9 @@ machine_terminals() { # machine_terminals NAME: its herdr-core's terminals, as J
   rsh "$1" 'PATH="$HOME/.local/bin:$PATH"; herdr-core ls --json'
 }
 machine_hold() { # machine_hold NAME HOLDER [PANE...]
-  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
+  _id=$(sandbox_id "$1") || die "$1 isn't a sandbox Reflex made or was shared"
+  # (An instabox box needs no loop: machine lapse leaves one that's held.)
+  _keep=1; [ "$(provider_of_id "$_id")" = instabox ] && _keep=0
   _hn=$1 _hh=$2; shift 2
   case $_hh in ''|*/*|.*) die "hold: a holder name" ;; esac
   _hp=""; for _x in "$@"; do _hp="$_hp $(q "$_x")"; done
@@ -382,6 +465,7 @@ machine_hold() { # machine_hold NAME HOLDER [PANE...]
     cat > \"\$HOME/.reflex/reflex-keep\"
     if [ -n $(q "$_hp") ]; then printf '%s\n'$_hp > \"\$d\"/$(q "$_hh"); else rm -f \"\$d\"/$(q "$_hh"); fi
     ls \"\$d\"/* >/dev/null 2>&1 || { systemctl --user stop reflex-keep >/dev/null 2>&1; echo free; exit 0; }
+    [ $_keep = 1 ] || { echo held; exit 0; }
     if command -v systemd-run >/dev/null 2>&1; then
       systemctl --user is-active -q reflex-keep 2>/dev/null || { systemctl --user reset-failed reflex-keep >/dev/null 2>&1; systemd-run --user --unit=reflex-keep --collect sh \"\$HOME/.reflex/reflex-keep\" $(q "$_id") >/dev/null 2>&1; }
     else
@@ -389,14 +473,26 @@ machine_hold() { # machine_hold NAME HOLDER [PANE...]
     fi
     echo held"
 }
-machine_state() { # machine_state NAME: boat's word for it (running, idle, stopped...)
-  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
-  boat info "$_id" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $_id failed"
+# instabox's words as boat's: paused is "suspended", a box whose host
+# stopped answering is "error" (lost), starting and resuming are "starting".
+IB_STATE='my $m = eval { JSON::PP->new->decode(<STDIN>) } or exit 1;
+  my $s = $m->{state} // ""; my $r = $m->{runtime} // {};
+  $s = "error" if $s eq "running" && $r->{hostUnreachable};
+  $s = "suspended" if $s eq "paused";
+  $s = "starting" if $s =~ /^(creating|starting|resuming|restarting)$/;
+  print $s'
+machine_state() { # machine_state NAME: the service's word for it (running, idle, stopped...)
+  _id=$(sandbox_id "$1") || die "$1 isn't a sandbox Reflex made or was shared"
+  case $(provider_of_id "$_id") in
+    instabox) instabox get "$_id" --json 2>/dev/null | perl -MJSON::PP -0777 -e "$IB_STATE" || die "instabox get $_id failed" ;;
+    *) boat info "$_id" --json --no-update 2>/dev/null | jget sandbox state || die "boat info $_id failed" ;;
+  esac
   echo
 }
 machine_resume() { # machine_resume NAME [--type T]: running (at that size) and connected again
-  _id=$(sandbox_id "$1") || die "$1 isn't a boat sandbox Reflex made or was shared"
+  _id=$(sandbox_id "$1") || die "$1 isn't a sandbox Reflex made or was shared"
   _rt=""; [ "${2:-}" = --type ] && _rt=${3:-}
+  [ "$(provider_of_id "$_id")" = instabox ] && { instabox_resume "$1" "$_id"; return; }
   # (Added again the way it was reached, should its herdr-core be a new one.)
   _via=$(target_of "$1" 2>/dev/null || true); [ -n "$_via" ] || _via="boat ssh $_id"
   # (Already running, after all: nothing to resume.)
@@ -462,6 +558,32 @@ machine_resume() { # machine_resume NAME [--type T]: running (at that size) and 
   echo "$1"
 }
 
+# An instabox box back: a paused one resumed (its programs as they were), a
+# stopped one started, one whose host stopped answering power-cycled; then
+# connected again, with an hour's time.
+instabox_resume() { # instabox_resume NAME ID
+  _st=$(machine_state "$1" 2>/dev/null || true)
+  case $_st in
+    running) ;;
+    suspended) say "Resuming $2..."; instabox resume "$2" >/dev/null 2>&1 || die "instabox resume $2 failed" ;;
+    stopped) say "Starting $2..."; instabox start "$2" >/dev/null 2>&1 || die "instabox start $2 failed" ;;
+    error) say "$2's host stopped answering; restarting it..."; instabox restart "$2" >/dev/null 2>&1 || die "instabox restart $2 failed: its host may still be down" ;;
+    *) say "$2 is $_st; waiting for it..." ;;
+  esac
+  i=0
+  until [ "$(machine_state "$1" 2>/dev/null || true)" = running ]; do
+    i=$((i + 1)); [ $i -lt 200 ] || die "$2 hasn't come back after 10 minutes"
+    sleep 3
+  done
+  i=0
+  until connected "$1"; do
+    i=$((i + 1)); [ $i -lt 180 ] || die "$1 is running again but herdr-core hasn't reconnected (hc machine ls)"
+    sleep 1
+  done
+  rsh "$1" "set -- 3600; $UNTIL" >/dev/null 2>&1 || true
+  echo "$1"
+}
+
 # Your other Macs with Reflex (herdr-core's machines that stay, connected).
 peers() {
   hc machine ls --json 2>/dev/null | perl -MJSON::PP -0777 -e '
@@ -474,6 +596,11 @@ BOAT_LOGIN="$HOME/Library/Application Support/ascii/boat/config.json"
 # The boat CLI on PEER when it's logged in there (its path), else nothing.
 peer_boat() { # peer_boat PEER
   rsh "$1" 'b=$(PATH="$HOME/.ascii/bin:$HOME/.local/bin:/opt/homebrew/bin:$PATH" command -v boat) && PATH="$(dirname "$b"):$PATH" boat status --check --no-update >/dev/null 2>&1 && printf %s "$b"' 2>/dev/null || true
+}
+
+# The instabox CLI on PEER when it's signed in there (its path), else nothing.
+peer_instabox() { # peer_instabox PEER
+  rsh "$1" 'b=$(PATH="$HOME/.local/bin:/opt/homebrew/bin:$PATH" command -v instabox) && INSTABOX_NO_UPDATE_CHECK=1 "$b" whoami >/dev/null 2>&1 && printf %s "$b"' 2>/dev/null || true
 }
 
 # Your boat login (and the CLI, if it's missing) on another of your Macs
@@ -498,16 +625,18 @@ give_boat() { # give_boat PEER BOAT
 mesh_sync() {
   _me=$(scutil --get LocalHostName 2>/dev/null || hostname -s)
   _boat=$(command -v boat 2>/dev/null || true)
+  _ib=$(command -v instabox 2>/dev/null || true)
   hc machine ls --json > "$T/mine.json" 2>/dev/null || die "herdr-core isn't answering"
   for p in $(peers); do
     rsh "$p" "[ -d \"\$HOME/Library/Application Support/Reflex\" ]" >/dev/null 2>&1 || continue
     rsh "$p" 'export PATH="$HOME/.local/bin:$PATH"; hc machine ls --json' > "$T/theirs.json" 2>/dev/null || continue
     _from=$(rsh "$p" "cd \"$SHARED\" 2>/dev/null && grep -lx $(q "$_me") * 2>/dev/null; true" 2>/dev/null || true)
     _pb=$(peer_boat "$p")
+    _pi=$(peer_instabox "$p")
     if [ -z "$_pb" ] && [ -n "$_boat" ] && boat status --check --no-update >/dev/null 2>&1; then
       give_boat "$p" "$_boat" && _pb=$(peer_boat "$p")
     fi
-    ME="$_me" PEER="$p" PB="$_pb" BOAT="$_boat" FROM="$_from" perl -MJSON::PP -e '
+    ME="$_me" PEER="$p" PB="$_pb" BOAT="$_boat" PI="$_pi" IB="$_ib" FROM="$_from" perl -MJSON::PP -e '
       sub load { local $/; open my $f, "<", shift or return []; JSON::PP->new->decode(<$f>)->{machines} // [] }
       my @mine = @{ load($ARGV[0]) }; my @theirs = @{ load($ARGV[1]) };
       my %from = map { $_ => 1 } grep { length } split /\n/, $ENV{FROM};
@@ -523,9 +652,11 @@ mesh_sync() {
         next if -e "$ENV{HOME}/Library/Application Support/Reflex/boat/shared/$m->{name}";
         my $t = $theirs{$m->{name}};
         my ($id) = ($m->{target} // "") =~ /^\S*boat ssh (bx_\w+)$/;
-        # A sandbox it reaches through this Mac, now that it has a boat
-        # login: directly (it stays reachable with this Mac off).
-        my $redo = $t && $id && length $ENV{PB} && $from{$m->{name}} && ($t->{target} // "") =~ /\srelay$/;
+        my ($ib) = ($m->{target} // "") =~ /^\S*instabox ssh (m_\w+) --$/;
+        # A sandbox it reaches through this Mac, now that it has a boat (or
+        # instabox) login: directly (it stays reachable with this Mac off).
+        my $own = $id ? $ENV{PB} : $ib ? $ENV{PI} : "";
+        my $redo = $t && length $own && $from{$m->{name}} && ($t->{target} // "") =~ /\srelay$/;
         unless ($redo) {
           # Reached there already, short-lived and not yet marked: its Reflex
           # shows it once marked shared.
@@ -537,6 +668,9 @@ mesh_sync() {
         if ($id) {
           if (length $ENV{PB}) { $via = "$ENV{PB} ssh $id" }
           elsif ($back && length $ENV{BOAT}) { $via = qq{sh -c '"'"'exec ssh -T -o BatchMode=yes $back->{name} $ENV{BOAT} ssh $id "\$(printf %q "\$1")"'"'"' relay} }
+        } elsif ($ib) {
+          if (length $ENV{PI}) { $via = "$ENV{PI} ssh $ib --" }
+          elsif ($back && length $ENV{IB}) { $via = qq{sh -c '"'"'exec ssh -T -o BatchMode=yes $back->{name} $ENV{IB} ssh $ib -- "\$(printf %q "\$1")"'"'"' relay} }
         } elsif ($back && !$m->{via}) {
           $via = qq{sh -c '"'"'exec ssh -T -o BatchMode=yes $back->{name} "ssh -T -o BatchMode=yes $m->{target} \$(printf %q "\$(printf %q "\$1")")"'"'"' relay};
         }
@@ -697,6 +831,10 @@ creds() {
     case $a in --claude) claude=1 ;; --any) any=1 ;; *) die "creds: unknown $a" ;; esac
   done
   ours "$m" || [ $any = 1 ] || die "$m isn't a machine Reflex made: pass --any once the user says to copy their logins there"
+  ours "$m" && PROVIDER=$(provider_of_id "$(boat_id "$m")")
+  # (boat gives a sandbox Claude's login; an instabox box has none: this
+  # Mac's, unless cswap's accounts go there below.)
+  [ "$PROVIDER" = instabox ] && ours "$m" && ! command -v cswap >/dev/null 2>&1 && claude=1
   rh=$(remote_home "$m")
   copied=""
   # The harnesses' logins, and the files the template's manifest calls
@@ -919,9 +1057,11 @@ session() {
 # The template
 # ------------
 
+# Each service has its own template (a snapshot lives in one account).
+template_file() { case $PROVIDER in instabox) echo "$DIR/template-instabox.json" ;; *) echo "$DIR/template.json" ;; esac; }
 template_field() {
-  [ -f "$DIR/template.json" ] || return 1
-  jget "$@" < "$DIR/template.json"
+  [ -f "$(template_file)" ] || return 1
+  jget "$@" < "$(template_file)"
 }
 
 # What a template input amounts to, hashed. A JSON file without what changes
@@ -951,8 +1091,9 @@ snapshot() {
   m=$1 manifest=""
   [ "${2:-}" = --manifest ] && manifest=${3:-}
   [ -n "$manifest" ] && [ -f "$manifest" ] || die "snapshot: --manifest FILE (what you installed, the checks, the inputs)"
-  ours "$m" || die "$m isn't a boat machine Reflex made"
+  ours "$m" || die "$m isn't a sandbox Reflex made"
   jget inputs < "$manifest" >/dev/null || die "the manifest has no \"inputs\" (the files here the setup was built from)"
+  PROVIDER=$(provider_of_id "$(boat_id "$m")")
   if rsh "$m" 'test -e "$HOME/.reflex/creds"' >/dev/null 2>&1; then
     die "$m has your logins on it (reflex creds): build the template on a machine without them"
   fi
@@ -966,16 +1107,30 @@ snapshot() {
     "$manifest" "$TEMPLATE" "$id" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$h")
   printf '%s\n' "$out" | rsh_in "$m" 'mkdir -p "$HOME/.reflex" && cat > "$HOME/.reflex/template.json"'
   say "Saving $id as $TEMPLATE..."
+  if [ "$PROVIDER" = instabox ]; then
+    # (instabox names are one snapshot each: a new name, the old one after.)
+    _old=$(template_field snapshot 2>/dev/null || true)
+    _new="$TEMPLATE-$(date -u +%Y%m%d-%H%M%S)"
+    instabox snapshot save "$id" --name "$_new" >&2 || die "instabox snapshot save failed"
+    out=$(printf '%s' "$out" | perl -MJSON::PP -0777 -e 'my $t = JSON::PP->new->decode(<STDIN>); $t->{snapshot} = $ARGV[0]; print JSON::PP->new->canonical->pretty->encode($t)' "$_new")
+    printf '%s\n' "$out" | rsh_in "$m" 'cat > "$HOME/.reflex/template.json"'
+    mkdir -p "$DIR"
+    printf '%s\n' "$out" > "$(template_file)"
+    [ -n "$_old" ] && [ "$_old" != "$_new" ] && { instabox snapshot rm --yes "$_old" >/dev/null 2>&1 || say "the old template $_old is still there"; }
+    echo "$_new"
+    return
+  fi
   boat snapshot --no-update "$id" "$TEMPLATE" >&2 || die "boat snapshot failed"
   mkdir -p "$DIR"
-  printf '%s\n' "$out" > "$DIR/template.json"
+  printf '%s\n' "$out" > "$(template_file)"
   echo "$TEMPLATE"
 }
 
 # `--keep`: what's here now is what the template stands for (a change that
 # doesn't matter to it).
 template() {
-  [ -f "$DIR/template.json" ] || { [ "${1:-}" = --json ] && echo '{"state":"none"}' || echo "no template"; exit 2; }
+  [ "${1:-}" = --provider ] && { PROVIDER=$2; shift 2; }
+  [ -f "$(template_file)" ] || { [ "${1:-}" = --json ] && echo '{"state":"none"}' || echo "no template"; exit 2; }
   perl -e "$DIGEST"'
     my ($file, $arg) = @ARGV;
     my $t = JSON::PP->new->decode(do { local $/; open my $f, "<", $file or die; <$f> });
@@ -996,7 +1151,7 @@ template() {
     } else {
       print "$t->{snapshot}: $state (built $t->{at})\n"; print "  changed: $_\n" for @changed;
     }
-    exit(@changed ? 1 : 0)' "$DIR/template.json" "${1:-}"
+    exit(@changed ? 1 : 0)' "$(template_file)" "${1:-}"
 }
 
 # Moving, and the line home
@@ -1279,7 +1434,8 @@ case $cmd in
       unshare) machine_unshare "$@" ;;
       extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;; busy) machine_busy "$@" ;;
       hold) machine_hold "$@" ;; terminals) machine_terminals "$@" ;; sessions) machine_sessions "$@" ;;
-      *) die "machine new|rm|ls|extend|state|resume|busy|hold|terminals|sessions" ;;
+      lapse) machine_lapse "$@" ;;
+      *) die "machine new|rm|ls|extend|state|resume|lapse|busy|hold|terminals|sessions" ;;
     esac ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;

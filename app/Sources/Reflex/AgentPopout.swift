@@ -1099,9 +1099,14 @@ struct AgentPopout: View {
                             // boat stopped its machine (an hour idle) or lost it
                             // (unreachable): its disk is kept, and its agents
                             // start again where they were.
+                            // (An instabox box Reflex paused keeps its programs: Resume
+                            // carries on, nothing starts again.)
                             let lost = lifetime.downWhy[machine] == "error"
-                            Text(lost ? "\(machine) stopped answering" : "\(machine) stopped").font(Type.title)
-                            Text(lost ? "boat lost the machine it runs on. Its disk is kept; Resume starts it again with \(agent?.kind ?? "this session") where it was."
+                            let svc = Sandbox.of(machine) ?? .boat
+                            let paused = svc == .instabox && !lost
+                            Text(lost ? "\(machine) stopped answering" : paused ? "\(machine) paused" : "\(machine) stopped").font(Type.title)
+                            Text(lost ? "\(svc.rawValue) lost the machine it runs on. Its disk is kept; Resume starts it again with \(agent?.kind ?? "this session") where it was."
+                                      : paused ? "Reflex pauses an instabox box an hour after its agents go idle. Its programs are kept as they were; Resume carries on with \(agent?.kind ?? "this session") where it left off."
                                       : "boat stops a machine after an hour idle. Its disk is kept for 14 days; Resume starts it again with \(agent?.kind ?? "this session") where it was.")
                                 .font(.system(size: 12)).foregroundStyle(Ink.dim).multilineTextAlignment(.center).frame(maxWidth: 360)
                             if let why = lifetime.problem[machine] {

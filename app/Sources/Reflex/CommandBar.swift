@@ -65,7 +65,7 @@ enum SlashCommand: Equatable, Hashable {
         case .folder: return "Choose any folder to start in"
         case .resume: return "Bring back an earlier session — Claude, pi or Codex"
         case .machine(let m):
-            if m == Boat.key { return "New sessions start on a new boat machine from your template, with this Mac's project" }
+            if let p = Sandbox(rawValue: m) { return "New sessions start on a new \(p.noun) from your template, with this Mac's project" }
             return "Only \(m)'s sessions, folders and earlier sessions; new sessions start there"
         }
     }
@@ -109,15 +109,16 @@ final class CommandModel: ObservableObject {
     @Published var sideForced = false
     @Published var newForced = false
     /// "@work": the request, the search and new sessions stay on that Mac.
-    /// "@boat": new sessions start on a new boat machine; the rest is this Mac's.
+    /// "@boat", "@instabox": new sessions start on a new machine there; the rest is this Mac's.
     @Published var machine: String?
     /// Whose sessions, folders and earlier sessions the list offers: "@work"'s,
     /// or everyone's (with "@boat" too: its projects are this Mac's).
-    private var scope: String? { machine == Boat.key ? nil : machine }
+    private var scope: String? { machine.flatMap(Sandbox.init(rawValue:)) != nil ? nil : machine }
     /// Settings → Machines' default target: the token a fresh bar starts with.
     static var defaultMachine: String? {
         let m = Settings.shared.defaultMachine
-        return m.isEmpty || (m == Boat.key && !Boat.hasBoat) ? nil : m
+        if let p = Sandbox(rawValue: m), !p.installed { return nil }
+        return m.isEmpty ? nil : m
     }
 
     // The list.
@@ -315,9 +316,9 @@ final class CommandModel: ObservableObject {
         let core = CoreMachines.known.map { (key: $0.name, label: $0.name) }
         let herdr = MachinesModel.shared.rows.filter { r in r.link != .off && !core.contains { $0.key == r.key } }
             .map { (key: $0.key, label: $0.label) }
-        // "@boat": a new boat machine each time (scripts/reflex.sh).
-        let boat = Boat.hasBoat ? [(key: Boat.key, label: Boat.key)] : []
-        return boat + core + herdr
+        // "@boat", "@instabox": a new machine there each time (scripts/reflex.sh).
+        let sandboxes = Sandbox.available.map { (key: $0.key, label: $0.key) }
+        return sandboxes + core + herdr
     }
 
     /// The machine "@word" names: its key, or the start of its name.
@@ -1032,7 +1033,7 @@ final class CommandModel: ObservableObject {
     }
 
     private func spawn(in path: String, kind: String, text: String, isNew: Bool = false, open: Bool = false) {
-        if machine == Boat.key, Place.machine(path).isEmpty, !isNew { return spawnOnBoat(in: path, kind: kind, text: text, open: open) }
+        if let p = machine.flatMap(Sandbox.init(rawValue:)), Place.machine(path).isEmpty, !isNew { return spawnOnBoat(in: path, kind: kind, text: text, open: open, on: p) }
         let m = Place.machine(path)
         let label = "\(kind) in \((path as NSString).lastPathComponent)" + (m.isEmpty ? "" : " on \(m)")
         phase = .sending((isNew ? "new folder · " : "") + label)
@@ -1052,19 +1053,19 @@ final class CommandModel: ObservableObject {
         }
     }
 
-    /// "@boat": a new machine from your template, this project and your
-    /// logins copied there, then the agent. Half a minute or so; the bar
-    /// says how far it got, and can be closed meanwhile.
-    private func spawnOnBoat(in path: String, kind: String, text: String, open: Bool) {
+    /// "@boat", "@instabox": a new machine from your template there, this
+    /// project and your logins copied there, then the agent. Half a minute or
+    /// so; the bar says how far it got, and can be closed meanwhile.
+    private func spawnOnBoat(in path: String, kind: String, text: String, open: Bool, on p: Sandbox) {
         let folder = leaf(path), t = ticket
-        phase = .sending("Starting a boat machine for \(kind) in \(folder)")
+        phase = .sending("Starting \(p == .instabox ? "an" : "a") \(p.noun) for \(kind) in \(folder)")
         Task {
             do {
-                await BoatTemplate.shared.refresh(fresh: 0)
-                guard BoatTemplate.shared.exists else {
-                    return fail("No boat template yet: move a session to boat once (⛵ in its window) and its agent builds one.", ticket: t)
+                await p.template.refresh(fresh: 0)
+                guard p.template.exists else {
+                    return fail("No \(p.rawValue) template yet: move a session to \(p.rawValue) once (the box button in its window) and its agent builds one.", ticket: t)
                 }
-                let m = try await Boat.newMachine(template: true)
+                let m = try await Boat.newMachine(template: true, on: p)
                 if t == ticket { phase = .sending("Copying \(folder) to \(m)") }
                 _ = try await Boat.sync(m, path)
                 try await Boat.creds(m)
@@ -1073,7 +1074,7 @@ final class CommandModel: ObservableObject {
                 let p = try await Client.local.spawn(cwd: Place.on(m, cwd), kind: kind, text: text)
                 Sessions.watchStart(p.id, cwd: Place.on(m, cwd), open: open)
                 done("Starting \(kind) in \(folder) on \(m)", ticket: t)
-            } catch { fail("Not started on boat: \(error.localizedDescription)", ticket: t) }
+            } catch { fail("Not started on \(p.rawValue): \(error.localizedDescription)", ticket: t) }
         }
     }
 

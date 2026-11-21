@@ -109,33 +109,35 @@ final class HerdrMove: ObservableObject {
         }
     }
 
-    /// The window's button: a new boat machine. From your template when you
-    /// have one; otherwise the agent builds it with the reflex skill first.
-    /// Either way the agent moves itself (prepare). `rebuild`: build it again.
-    func toBoat(_ a: AgentInfo, rebuild: Bool = false) {
-        notes[a.pane] = "Checking your boat template…"
+    /// The window's button: a new machine on boat or instabox. From your
+    /// template there when you have one; otherwise the agent builds it with
+    /// the reflex skill first. Either way the agent moves itself (prepare).
+    /// `rebuild`: build it again.
+    func toBoat(_ a: AgentInfo, rebuild: Bool = false, on p: Sandbox = .boat) {
+        notes[a.pane] = "Checking your \(p.rawValue) template…"
         problem = nil
         Task {
-            await BoatTemplate.shared.refresh(fresh: 0)
-            let t = BoatTemplate.shared.state
-            if BoatTemplate.shared.exists && !rebuild {
-                notes[a.pane] = "Starting a boat machine from your template…"
+            let template = p.template
+            await template.refresh(fresh: 0)
+            let t = template.state
+            if template.exists && !rebuild {
+                notes[a.pane] = "Starting \(p == .instabox ? "an" : "a") \(p.noun) from your template…"
                 do {
-                    let m = try await Boat.newMachine(template: true)
+                    let m = try await Boat.newMachine(template: true, on: p)
                     _ = await CoreMachines.list(fresh: 0)
                     prepare(a, to: m)
                 } catch {
-                    fail(a.pane, "No boat machine: \(error.localizedDescription)")
+                    fail(a.pane, "No \(p.noun): \(error.localizedDescription)")
                 }
                 return
             }
             Boat.install()
             MoveRequests.shared.expect(a.pane, to: nil)
             let prompt: String
-            if case .stale(_, let changed) = t { prompt = Boat.rebuildPrompt(changed) } else { prompt = Boat.buildPrompt }
+            if case .stale(_, let changed) = t { prompt = Boat.rebuildPrompt(p, changed) } else { prompt = Boat.buildPrompt(p) }
             do {
-                _ = try await Client.local.send(pane: a.pane, text: prompt, label: "build the boat template")
-                notes[a.pane] = "\(a.kind) is building your boat template, then moves…"
+                _ = try await Client.local.send(pane: a.pane, text: prompt, label: "build the \(p.rawValue) template")
+                notes[a.pane] = "\(a.kind) is building your \(p.rawValue) template, then moves…"
             } catch {
                 MoveRequests.shared.forget(a.pane)
                 fail(a.pane, "reflexd didn't take it: \(error.localizedDescription)")

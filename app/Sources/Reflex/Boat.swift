@@ -2,6 +2,51 @@ import AppKit
 import Combine
 import Foundation
 
+/// A service Reflex makes machines on: boat.dev's sandboxes, or instabox's
+/// boxes (a box Reflex pauses when it's done keeps its programs, and comes
+/// back as it was). scripts/reflex.sh tells a machine's by its id.
+enum Sandbox: String, CaseIterable, Identifiable {
+    case boat, instabox
+    var id: String { rawValue }
+    /// "@boat", "@instabox", and the move menu's section.
+    var key: String { rawValue }
+    var title: String { self == .boat ? "boat.dev" : "instabox" }
+    /// What one machine of it is called: "a new boat machine".
+    var noun: String { self == .boat ? "boat machine" : "instabox box" }
+    var nouns: String { self == .boat ? "boat machines" : "instabox boxes" }
+    var symbol: String { self == .boat ? "sailboat" : "cube" }
+
+    @MainActor var size: String { self == .boat ? Settings.shared.boatType : Settings.shared.instaboxSize }
+    /// The size Settings asks for ([] for the service's default).
+    @MainActor var sizeArgs: [String] { size.isEmpty ? [] : ["--type", size] }
+
+    private nonisolated(unsafe) static var found: [Sandbox: (at: Date, yes: Bool)] = [:]
+    /// Its CLI is on the login PATH (looked for at most every 30 s).
+    @MainActor var installed: Bool {
+        if let f = Self.found[self], Date().timeIntervalSince(f.at) < 30 { return f.yes }
+        let path = Daemon.shared.childEnvironment()["PATH"] ?? ""
+        let yes = path.split(separator: ":").contains { FileManager.default.isExecutableFile(atPath: "\($0)/\(rawValue)") }
+        Self.found[self] = (Date(), yes)
+        return yes
+    }
+    @MainActor static var available: [Sandbox] { allCases.filter(\.installed) }
+
+    /// The service a machine Reflex made, or one shared with this Mac, is on:
+    /// its record's id (bx_..., m_...), else how herdr-core reaches it.
+    @MainActor static func of(_ machine: String) -> Sandbox? {
+        let record = Settings.supportDir.appendingPathComponent("boat/machines/\(machine)")
+        if let id = (try? String(contentsOf: record, encoding: .utf8))?.split(separator: "\n").first {
+            return id.hasPrefix("m_") ? .instabox : .boat
+        }
+        let target = CoreMachines.known.first { $0.name == machine }?.target ?? ""
+        if target.contains("instabox ssh m_") { return .instabox }
+        if target.contains("boat ssh bx_") { return .boat }
+        return nil
+    }
+
+    @MainActor var template: BoatTemplate { self == .boat ? .shared : .instabox }
+}
+
 /// Other machines for a session: boat.dev sandboxes Reflex makes, or any
 /// machine herdr-core has added. The steps are scripts/reflex.sh's, the
 /// `reflex` command the reflex skill uses too: make a machine, copy the
@@ -21,15 +66,19 @@ enum Boat {
     static var skill: URL { Daemon.resources.appendingPathComponent("integrations/skills/reflex/SKILL.md") }
 
     /// What the button says to an agent when there's no template yet.
-    static let buildPrompt = "Use the reflex skill to build my boat template, then move this session to boat, with everything this work needs."
-    static func rebuildPrompt(_ changed: [String]) -> String {
-        "Use the reflex skill to rebuild my boat template (changed here: \(changed.joined(separator: ", "))), then move this session to boat, with everything this work needs."
+    static func buildPrompt(_ p: Sandbox) -> String {
+        "Use the reflex skill to build my \(p.rawValue) template\(flag(p)), then move this session to \(p.rawValue), with everything this work needs."
     }
+    static func rebuildPrompt(_ p: Sandbox, _ changed: [String]) -> String {
+        "Use the reflex skill to rebuild my \(p.rawValue) template\(flag(p)) (changed here: \(changed.joined(separator: ", "))), then move this session to \(p.rawValue), with everything this work needs."
+    }
+    /// (boat is the skill's default; instabox is named.)
+    private static func flag(_ p: Sandbox) -> String { p == .boat ? "" : " (--provider \(p.rawValue) on reflex template and reflex machine new)" }
     /// The window's button: only the agent knows what its work needs (other
     /// repositories, worktrees, files from Downloads), so it says, and Reflex
     /// copies them from wherever the agent is. The button was the OK.
     static func movePrompt(_ machine: String, made: Bool) -> String {
-        let what = machine == here ? "this Mac, where Reflex runs" : made ? "a new boat machine made from my template" : "my machine \(machine)"
+        let what = machine == here ? "this Mac, where Reflex runs" : made ? "a new \((Sandbox.of(machine) ?? .boat).noun) made from my template" : "my machine \(machine)"
         return "Move this session to \(machine == here ? "here" : machine) (\(what)) with the reflex skill: work out everything this work needs besides this project, then reflex move self --to \(machine == here ? "here" : machine) PATH..."
     }
 
@@ -38,15 +87,10 @@ enum Boat {
     /// A machine as reflex names it: "." for this Mac ("" in AgentInfo).
     static func name(_ machine: String) -> String { machine.isEmpty ? here : machine }
 
-    private nonisolated(unsafe) static var boatFound: (at: Date, yes: Bool) = (.distantPast, false)
-    /// The boat CLI is on the login PATH (looked for at most every 30 s).
-    static var hasBoat: Bool {
-        if Date().timeIntervalSince(boatFound.at) > 30 {
-            let path = Daemon.shared.childEnvironment()["PATH"] ?? ""
-            boatFound = (Date(), path.split(separator: ":").contains { FileManager.default.isExecutableFile(atPath: "\($0)/boat") })
-        }
-        return boatFound.yes
-    }
+    /// The boat CLI is on the login PATH.
+    static var hasBoat: Bool { Sandbox.boat.installed }
+    /// Some service's CLI is: Reflex can make a machine.
+    static var hasSandbox: Bool { !Sandbox.available.isEmpty }
 
     /// hc's environment (this core's session, the login PATH), and where
     /// Reflex keeps its machines.
@@ -68,14 +112,15 @@ enum Boat {
         return r.out.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// The boat machines Reflex made (and may delete).
+    /// The sandboxes Reflex made (and may delete).
     static func made(_ machine: String) -> Bool { CoreMachines.madeByReflex(machine) }
 
-    /// The size Settings asks for ([] for boat's default).
-    static var typeArgs: [String] { Settings.shared.boatType.isEmpty ? [] : ["--type", Settings.shared.boatType] }
+    /// The size Settings asks for a machine resumed ([] keeps its own; an
+    /// instabox box keeps its own size).
+    static func resumeArgs(_ machine: String) -> [String] { Sandbox.of(machine) == .boat ? Sandbox.boat.sizeArgs : [] }
 
-    static func newMachine(template: Bool) async throws -> String {
-        try await reflex(["machine", "new"] + (template ? ["--template"] : []) + typeArgs, timeout: 300)
+    static func newMachine(template: Bool, on p: Sandbox = .boat) async throws -> String {
+        try await reflex(["machine", "new", "--provider", p.rawValue] + (template ? ["--template"] : []) + p.sizeArgs, timeout: 300)
     }
 
     /// The project around `dir` (on `from`), at the same ~ path there: that path.
@@ -199,7 +244,11 @@ enum Boat {
 /// (stale once one of them changes).
 @MainActor
 final class BoatTemplate: ObservableObject {
-    static let shared = BoatTemplate()
+    static let shared = BoatTemplate(.boat)
+    static let instabox = BoatTemplate(.instabox)
+    /// The service its snapshot is in (each has its own template).
+    let provider: Sandbox
+    private init(_ p: Sandbox) { provider = p }
 
     enum State: Equatable {
         case unknown
@@ -230,7 +279,8 @@ final class BoatTemplate: ObservableObject {
         at = Date()
         let env = ["REFLEX_DATA": Settings.supportDir.path, "HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
         let exe = Boat.script
-        let r = await Blocking.run { MachineSetup.run(env, "/bin/sh", [exe, "template", "--json"], timeout: 10) }
+        let args = [exe, "template", "--provider", provider.rawValue, "--json"]
+        let r = await Blocking.run { MachineSetup.run(env, "/bin/sh", args, timeout: 10) }
         guard let reply = try? JSONDecoder().decode(Reply.self, from: Data(r.out.utf8)) else { return }
         apply(reply)
     }
@@ -248,8 +298,9 @@ final class BoatTemplate: ObservableObject {
     func keep() {
         let env = ["REFLEX_DATA": Settings.supportDir.path, "HOME": NSHomeDirectory(), "PATH": "/usr/bin:/bin"]
         let exe = Boat.script
+        let args = [exe, "template", "--provider", provider.rawValue, "--keep"]
         Task {
-            _ = await Blocking.run { MachineSetup.run(env, "/bin/sh", [exe, "template", "--keep"], timeout: 10) }
+            _ = await Blocking.run { MachineSetup.run(env, "/bin/sh", args, timeout: 10) }
             at = .distantPast
             await refresh(fresh: 0)
         }
@@ -261,7 +312,8 @@ final class BoatTemplate: ObservableObject {
         let changed: [String]
         if case .stale(_, let c) = state { changed = c } else { changed = [] }
         let home = NSHomeDirectory()
-        let prompt = "Use the reflex skill to rebuild my boat template" + (changed.isEmpty ? "" : " (changed here since it was built: \(changed.joined(separator: ", ")))")
+        let named = provider == .boat ? "" : " (--provider \(provider.rawValue) on reflex template and reflex machine new)"
+        let prompt = "Use the reflex skill to rebuild my \(provider.rawValue) template\(named)" + (changed.isEmpty ? "" : " (changed here since it was built: \(changed.joined(separator: ", ")))")
             + ". Don't move this session afterwards; tell me when the new template is saved."
         Boat.install()
         Task {
@@ -413,6 +465,8 @@ final class BoatLifetime: ObservableObject {
     private var ran: [String: [Ran]] = [:]
     private var ranAt: [String: Date] = [:]
     private var recording: Set<String> = []
+    /// When each instabox box was last asked whether its time is up.
+    private var lapsedAt: [String: Date] = [:]
 
     func start() {
         guard timer == nil else { return }
@@ -435,7 +489,7 @@ final class BoatLifetime: ObservableObject {
     private var shared: [String] {
         let dir = Settings.supportDir.appendingPathComponent("boat/shared")
         let names = Set(((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { !$0.hasPrefix(".") })
-        return CoreMachines.known.filter { names.contains($0.name) && $0.target.contains("boat ssh bx_") }.map(\.name)
+        return CoreMachines.known.filter { names.contains($0.name) && ($0.target.contains("boat ssh bx_") || $0.target.contains("instabox ssh m_")) }.map(\.name)
     }
 
     /// Whether the Mac that shared `m` is reachable (it says when it stops).
@@ -469,6 +523,9 @@ final class BoatLifetime: ObservableObject {
                 // Agents idle isn't the sandbox idle: one may be waiting on
                 // work it left running there.
                 if Date().timeIntervalSince(probedAt[m] ?? .distantPast) > 300 { probe(m) }
+                // An instabox box's time is Reflex's to end: past it, with no
+                // window open on it on any Mac, it pauses (its programs kept).
+                if Sandbox.of(m) == .instabox, Date().timeIntervalSince(lapsedAt[m] ?? .distantPast) > 120 { lapse(m) }
             }
             working[m] = now
             erroredAt[m] = nil
@@ -563,6 +620,15 @@ final class BoatLifetime: ObservableObject {
         }
     }
 
+    /// `reflex machine lapse`: paused when its time is up and nothing holds it.
+    private func lapse(_ m: String) {
+        lapsedAt[m] = Date()
+        Task {
+            guard let out = try? await Boat.reflex(["machine", "lapse", m], timeout: 60) else { return }
+            if out == "paused" { NSLog("Reflex: %@ paused (an hour idle, no window open on it)", m) }
+        }
+    }
+
     private func extend(_ m: String, _ why: String) {
         NSLog("Reflex: %@ stays up another hour (%@)", m, why)
         renewed[m] = Date()
@@ -589,12 +655,16 @@ final class BoatLifetime: ObservableObject {
                 down[m] = seen[m] ?? []
                 downWhy[m] = s
                 working[m] = nil
-                NSLog("Reflex: boat %@ %@ (%@), %d agents there", s == "error" ? "lost" : "stopped", m, s, down[m]?.count ?? 0)
+                let svc = Sandbox.of(m) ?? .boat
+                NSLog("Reflex: %@ %@ %@ (%@), %d agents there", svc.rawValue, s == "error" ? "lost" : "stopped", m, s, down[m]?.count ?? 0)
                 // (One Mac says so: the one that made it, else any that sees it.)
                 guard made.contains(m) || !ownerAround(m) else { continue }
                 if s == "error" {
                     MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped answering",
-                                      body: "boat lost the machine it runs on (unreachable for \(Int(Self.errorGrace / 60)) minutes). Its disk is kept: Resume in its window or Settings → Machines brings it back with its sessions.")
+                                      body: "\(svc.rawValue) lost the machine it runs on (unreachable for \(Int(Self.errorGrace / 60)) minutes). Its disk is kept: Resume in its window or Settings → Machines brings it back with its sessions.")
+                } else if svc == .instabox && s == "suspended" {
+                    MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) paused",
+                                      body: "Reflex pauses an instabox box an hour after its agents go idle, with no window open on it. Its programs are kept as they were: Resume in its window or Settings → Machines carries on where it left off.")
                 } else {
                     MachineNotes.post(seen[m]?.first?.pane ?? "", title: "\(m) stopped",
                                       body: "boat stops a sandbox after an hour idle. Its disk is kept 14 days: Resume in its window or Settings → Machines brings it back with its agents.")
@@ -688,7 +758,7 @@ final class BoatLifetime: ObservableObject {
             let were = down[m] ?? []
             do {
                 // (A lost machine's stop can take a while to give up.)
-                _ = try await Boat.reflex(["machine", "resume", m] + Boat.typeArgs, timeout: 2400)
+                _ = try await Boat.reflex(["machine", "resume", m] + Boat.resumeArgs(m), timeout: 2400)
                 NSLog("Reflex: %@ resumed", m)
                 down[m] = nil
                 downWhy[m] = nil

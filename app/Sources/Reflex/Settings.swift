@@ -82,8 +82,11 @@ final class Settings: ObservableObject {
     /// The size of boat machines Reflex makes or resumes: "" (boat's
     /// default, 4 CPUs), "small", "large" or "xlarge".
     @Published var boatType: String { didSet { d.set(boatType, forKey: "boatType") } }
+    /// The size of instabox boxes Reflex makes: "" (instabox's default, 4
+    /// vCPUs and 8 GiB), or VCPUSxGB ("8x16").
+    @Published var instaboxSize: String { didSet { d.set(instaboxSize, forKey: "instaboxSize") } }
     /// Where the ⌥⌥ bar starts new sessions: "" this Mac, a machine's name,
-    /// or "boat" (a new boat machine from your template each time).
+    /// or "boat" / "instabox" (a new machine from your template each time).
     @Published var defaultMachine: String { didSet { d.set(defaultMachine, forKey: "defaultMachine") } }
 
     private init() {
@@ -118,6 +121,7 @@ final class Settings: ObservableObject {
         fileApproval = d.string(forKey: "fileApproval") ?? "ask"
         runApproval = d.string(forKey: "runApproval") ?? "ask"
         boatType = d.string(forKey: "boatType") ?? ""
+        instaboxSize = d.string(forKey: "instaboxSize") ?? ""
         defaultMachine = d.string(forKey: "defaultMachine") ?? ""
         Settings.writeFolders(extraFolders)
     }

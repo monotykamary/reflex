@@ -1,6 +1,6 @@
 ---
 name: reflex
-description: Move this agent session between machines (this Mac, the user's other Macs, a boat.dev sandbox) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on boat, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's boat template, or when a file or folder you need is on the Mac this session came from.
+description: Move this agent session between machines (this Mac, the user's other Macs, a boat.dev sandbox or an instabox box) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on boat, instabox, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's boat or instabox template, or when a file or folder you need is on the Mac this session came from.
 ---
 
 # Moving a session with Reflex
@@ -24,7 +24,12 @@ come back), and write files there with `hc file write --on NAME PATH`.
 reflex template        # exit 0 current, 1 stale (lists what changed here), 2 none
 ```
 
-The template is a saved boat snapshot in the user's own account, private to
+Reflex makes machines on two services, each with its own template: boat
+(boat.dev, the default) and instabox. When Reflex names instabox, add
+`--provider instabox` to `reflex template` and `reflex machine new` in every
+step below; everything else is the same.
+
+The template is a saved snapshot in the user's own account, private to
 them: this machine's tools and configuration, set up once, so later moves
 start from it in seconds. **Current:** skip to step 4 and use
 `reflex machine new --template`. **None or stale:** build it (steps 2 and 3).
@@ -34,6 +39,7 @@ A stale one is rebuilt from scratch in the same way.
 
 ```sh
 NAME=$(reflex machine new)    # a fresh boat sandbox, added to herdr-core
+                              # (--provider instabox: an instabox box)
 ```
 
 Make the new machine work like this one for the user's agents. **Read here,
@@ -163,7 +169,8 @@ they approve it in Reflex. Commit nothing just for the move.
 
 ## After a move
 
-On the other machine `$HOME` may differ (`/home/user` on boat), but what was
+On the other machine `$HOME` may differ (`/home/user` on boat, `/data/home`
+on instabox), but what was
 copied is at the same `~` path and the conversation is the one you had.
 Paths in earlier messages that start with the old home are now under the
 new one. A tool that's missing: install it there.
@@ -177,7 +184,10 @@ go blank while requests to their Mac stall.
 A boat machine's lifetime is Reflex's to keep: it renews it while you work
 or wait on the user, and lets it stop an hour after you go idle (the disk is
 kept; the user resumes it, with you in the same terminal). Don't extend it
-with `boat extend`, and don't ask the user to.
+with `boat extend`, and don't ask the user to. An instabox box is the same,
+except that it pauses rather than stops: its memory and programs are kept,
+and it carries on where it was when the user resumes it. Don't change its
+idle pause (`instabox auto-suspend`) or pause it yourself.
 
 ### Something missing? Ask the Reflex that moved you
 

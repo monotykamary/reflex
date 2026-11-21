@@ -1,20 +1,21 @@
 import SwiftUI
 
-/// The terminal window's move button: this session to a new boat machine, or
-/// to another machine herdr-core reaches. Pressing it is the OK; a session
+/// The terminal window's move button: this session to a new boat machine or
+/// instabox box, or to another machine herdr-core reaches. Pressing it is the OK; a session
 /// mid-turn moves once the turn ends.
 struct MoveButton: View {
     var agent: AgentInfo?
     var tint: Color
     @ObservedObject private var move = HerdrMove.shared
     @ObservedObject private var template = BoatTemplate.shared
+    @ObservedObject private var instabox = BoatTemplate.instabox
     @State private var machines: [CoreMachines.Machine] = CoreMachines.known
 
     var body: some View {
         Menu {
             if let a = agent { items(a) }
         } label: {
-            Image(systemName: "sailboat")
+            Image(systemName: "shippingbox")
         }
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
@@ -24,9 +25,19 @@ struct MoveButton: View {
         .disabled(agent == nil || move.moving.contains(agent?.pane ?? ""))
         .help("Move this session to another machine")
         .task {
-            await BoatTemplate.shared.refresh()
+            for p in Sandbox.available { await p.template.refresh() }
             machines = await CoreMachines.list()
         }
+    }
+
+    /// What changed, short enough for a menu line (a menu is as wide as its
+    /// longest): each file's name once, the first few, then how many more.
+    static func brief(_ changed: [String], shown: Int = 3) -> String {
+        var seen = Set<String>()
+        let names = changed.map { ($0 as NSString).lastPathComponent }.filter { seen.insert($0).inserted }
+        let head = names.prefix(shown).joined(separator: ", ")
+        let rest = changed.count - names.prefix(shown).reduce(0) { n, name in n + changed.filter { ($0 as NSString).lastPathComponent == name }.count }
+        return rest > 0 ? "\(head) and \(rest) more" : head
     }
 
     @ViewBuilder private func items(_ a: AgentInfo) -> some View {
@@ -36,14 +47,16 @@ struct MoveButton: View {
         case .noSession:
             Text("Reflex doesn't know this session's id yet")
         default:
-            if Boat.hasBoat {
-                Section("boat.dev") {
-                    Button(template.exists ? "New Boat Machine" : "New Boat Machine (builds your template first)") { move.toBoat(a) }
-                    if case .stale(_, let changed) = template.state {
-                        Button("Rebuild Template, Then Move") { move.toBoat(a, rebuild: true) }
-                        Text("Changed since the template: " + changed.map { ($0 as NSString).lastPathComponent }.joined(separator: ", "))
-                    } else if template.exists {
-                        Button("Rebuild Template, Then Move") { move.toBoat(a, rebuild: true) }
+            ForEach(Sandbox.available) { p in
+                let t = p == .boat ? template : instabox
+                let new = p == .boat ? "New Boat Machine" : "New instabox Box"
+                Section(p.title) {
+                    Button(t.exists ? new : "\(new) (builds your template first)") { move.toBoat(a, on: p) }
+                    if case .stale(_, let changed) = t.state {
+                        Button("Rebuild Template, Then Move") { move.toBoat(a, rebuild: true, on: p) }
+                        Text("Changed since the template: " + MoveButton.brief(changed))
+                    } else if t.exists {
+                        Button("Rebuild Template, Then Move") { move.toBoat(a, rebuild: true, on: p) }
                     }
                 }
             }
@@ -57,8 +70,8 @@ struct MoveButton: View {
                     }
                 }
             }
-            if !Boat.hasBoat && others.isEmpty && !a.remote {
-                Text("No other machine: install the boat CLI, or add one in Settings → Machines")
+            if !Boat.hasSandbox && others.isEmpty && !a.remote {
+                Text("No other machine: install the boat or instabox CLI, or add one in Settings → Machines")
             }
             if move.readiness(a, to: Boat.key) == .busy {
                 Text("It moves once this turn ends")
@@ -106,7 +119,7 @@ struct MoveBanner: View {
             .help(r.paths.joined(separator: "\n") + "\n\nThe session asked with reflex home. It goes to the same ~ path on its machine. Settings → Machines can allow these for you.")
         } else if let r = requests.request(for: pane) {
             HStack(spacing: 8) {
-                Image(systemName: "sailboat").font(.system(size: 11, weight: .semibold))
+                Image(systemName: "shippingbox").font(.system(size: 11, weight: .semibold))
                 Text("Move to \(r.to == Boat.here ? "this Mac" : r.to)\(r.paths.isEmpty ? "" : " with \(r.paths.count) more")?").font(.system(size: 12, weight: .semibold))
                 Button("Not Now") { requests.decline(r) }.controlSize(.small)
                 Button("Move") { requests.approve(r) }.buttonStyle(.glassProminent).controlSize(.small)
