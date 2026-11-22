@@ -1691,7 +1691,8 @@ skill() {
       put "$m" "$src" "$d/SKILL.md"
     done
     # And this command, for `reflex home` there.
-    put "$m" "$HERE/$(basename "$0")" .local/bin/reflex
+    # ($_self, not $0: run as ~/.local/bin/reflex, $0's name isn't the script's)
+    put "$m" "$HERE/$(basename "$_self")" .local/bin/reflex
     rsh "$m" 'chmod 755 "$HOME/.local/bin/reflex"' >/dev/null
     echo "installed the reflex skill and command on $m"
     return
@@ -1706,7 +1707,7 @@ skill() {
 
 install() {
   mkdir -p "$HOME/.local/bin"
-  ln -sf "$HERE/$(basename "$0")" "$HOME/.local/bin/reflex"
+  ln -sf "$HERE/$(basename "$_self")" "$HOME/.local/bin/reflex"
   echo "linked ~/.local/bin/reflex"
 }
 
