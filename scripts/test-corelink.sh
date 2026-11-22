@@ -20,9 +20,9 @@ unset HC_SOCKET HC_TERMINAL_ID
 cleanup() { "$hc" server stop >/dev/null 2>&1 || true; rm -rf "$work" "$run"; }
 trap cleanup EXIT
 
-swiftc -swift-version 5 -O "$root/app/Tests/CoreLinkHarness/stub.swift" "$root/app/Sources/Reflex/CoreLink.swift" \
+swiftc -swift-version 5 -O "$root/app/Tests/CoreLinkHarness/stub.swift" "$root/app/Sources/Reflex/CoreLink.swift" "$root/app/Sources/Reflex/Blocking.swift" \
   "$root/app/Tests/CoreLinkHarness/main.swift" -o "$work/linktest"
-swiftc -swift-version 5 -O "$root/app/Tests/PhoneLinkHarness/stub.swift" "$root/app/Sources/Reflex/CoreLink.swift" \
+swiftc -swift-version 5 -O "$root/app/Tests/PhoneLinkHarness/stub.swift" "$root/app/Sources/Reflex/CoreLink.swift" "$root/app/Sources/Reflex/Blocking.swift" \
   "$root/app/Sources/Reflex/PhoneLink.swift" "$root/app/Tests/PhoneLinkHarness/main.swift" \
   -I "$products" -o "$work/phonetest" "$products/SwiftTerm.o"
 

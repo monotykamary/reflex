@@ -18,7 +18,7 @@ unset HC_SOCKET HC_TERMINAL_ID
 cleanup() { "$hc" server stop >/dev/null 2>&1 || true; rm -rf "$work" "$run"; }
 trap cleanup EXIT
 
-swiftc -swift-version 5 -O "$root/app/Tests/ResizeHarness/stub.swift" "$root/app/Sources/Reflex/CoreLink.swift" "$root/app/Sources/Reflex/CoreSize.swift" \
+swiftc -swift-version 5 -O "$root/app/Tests/ResizeHarness/stub.swift" "$root/app/Sources/Reflex/CoreLink.swift" "$root/app/Sources/Reflex/Blocking.swift" "$root/app/Sources/Reflex/CoreSize.swift" \
   "$root/app/Tests/ResizeHarness/main.swift" -I "$products" -o "$work/resizetest" "$products/SwiftTerm.o"
 
 [ $# -gt 0 ] || set -- pi
