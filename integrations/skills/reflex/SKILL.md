@@ -1,6 +1,6 @@
 ---
 name: reflex
-description: Move this agent session between machines (this Mac, the user's other Macs, a boat.dev sandbox or an instabox box) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on boat, instabox, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's boat or instabox template, or when a file or folder you need is on the Mac this session came from.
+description: Move this agent session between machines (this Mac, the user's other Macs, a boat.dev sandbox or an instabox box) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on boat, instabox, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's boat or instabox template, when a file or folder you need is on the Mac this session came from, or when some work would be better on a box of its own (a lane: several agents at once, a heavy loop, work kept apart).
 ---
 
 # Moving a session with Reflex
@@ -211,6 +211,51 @@ command rather than many);
 `fetch` waits until the files are here, then prints where they went, and
 `run` exits with the command's exit code. Prefer `fetch` for files and
 reading them here. Don't move back on your own.
+
+## Lanes: a box for work of its own (optional)
+
+Most work needs no machine of its own: a worktree where you are is enough.
+When some doesn't fit here (several agents at once that would fight over
+this machine's CPUs or memory, a long build or test loop, something you
+want kept apart), you can give it a lane: an instabox box of its own. It's
+your call; nothing makes one for you.
+
+```sh
+reflex lane new alg-a --repo ~/VCS/gdp-wired                # worktree ~/VCS/gdp-wired-alg-a on lane/alg-a
+reflex lane new alg-b --repo ~/VCS/gdp-wired-alg-b          # that worktree itself, on its own branch
+reflex lane new perf --repo ~/VCS/gdp-wired --branch fix/x --base origin/main --size 16x32
+```
+
+It prints the machine (`lane-NAME`) and the worktree's path there. On an
+instabox box the lane is a fork of it, so every repository, dependency and
+build is already there at the same paths, in seconds; from a Mac it's a new
+box with the repository copied. From a box with no instabox login, the Reflex
+that moved you makes it, with its own. At most 10 lanes are up at once.
+
+A lane is a machine, not one worktree: start a few agents there, each in a
+worktree of its own, and they show up in Reflex like any machine's:
+
+```sh
+hc exec --on lane-alg-a -- git -C ~/VCS/gdp-wired worktree add ~/VCS/gdp-wired-alg-a2 -b lane/alg-a2
+hc run --on lane-alg-a --cwd ~/VCS/gdp-wired-alg-a --bg --name alg-a claude "$(cat brief-a.md)"
+hc run --on lane-alg-a --cwd ~/VCS/gdp-wired-alg-a2 --bg --name alg-a2 claude "$(cat brief-a2.md)"
+hc wait lane-alg-a/alg-a                                     # rather than sleep
+```
+
+When the work is done:
+
+```sh
+reflex lane fetch alg-a     # every branch the lane made or moved, back into the repository here
+reflex lane rm alg-a        # refused while anything there isn't fetched, pushed or committed
+reflex lane ls
+```
+
+A branch checked out here comes back as `lane-NAME/BRANCH`, to merge like a
+remote's. An idle lane pauses itself after 10 minutes (only its disk costs)
+and comes back in seconds; `reflex machine pause lane-NAME` pauses it now.
+Heavy runs still go through `supercomputer`, from the lane like from
+anywhere. Remove the lanes you made once their work is back; ask before
+`reflex lane rm NAME --force`, which drops what's left.
 
 ## When it fails
 

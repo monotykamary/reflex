@@ -7,6 +7,7 @@
 #      after; boat sandboxes are never touched by it.
 #   3. machine state: instabox's words as boat's (paused, a lost host).
 #   4. machine resume: paused resumed, stopped started, lost restarted.
+#   5. machine pause and off: suspended or stopped now, every Mac's hold let go.
 set -eu
 HERE=$(cd "$(dirname "$0")" && pwd -P)
 W=$(mktemp -d "${TMPDIR:-/tmp}/reflex-ib.XXXXXX")
@@ -28,6 +29,7 @@ case $1 in
     [ "$st" = lost ] && { st=running; un=true; }
     printf '{"id":"%s","state":"%s","runtime":{"hostUnreachable":%s}}\n' "$2" "$st" "$un" ;;
   suspend) echo suspended > "$W/state" ;;
+  stop) echo stopped > "$W/state" ;;
   resume|start|restart) echo running > "$W/state" ;;
   rm) : ;;
 esac
@@ -88,4 +90,15 @@ for st in suspended:resume stopped:start lost:restart; do
   check "${st%%:*}: instabox ${st#*:}" "${st#*:} m_abcdefghijklmnop" "$(grep -v '^get' "$W/calls")"
   check "${st%%:*}: an hour's time again" yes "$([ -s "$W/box/.reflex/until" ] && echo yes || echo no)"
 done
+
+# 5. Paused or turned off now, whatever holds it.
+mkdir -p "$W/box/.reflex/held"; echo t1 > "$W/box/.reflex/held/other-mac"
+echo running > "$W/state"; : > "$W/calls"
+check "pause: paused" paused "$(rx machine pause instabox-abcdefgh)"
+check "pause: instabox suspend" "suspend m_abcdefghijklmnop" "$(cat "$W/calls")"
+check "pause: no Mac holds it any more" none "$(ls "$W/box/.reflex/held" | head -n 1 | grep . || echo none)"
+echo running > "$W/state"; : > "$W/calls"
+check "off: stopped" stopped "$(rx machine off instabox-abcdefgh)"
+check "off: instabox stop" "stop m_abcdefghijklmnop" "$(cat "$W/calls")"
+check "off, then its state" stopped "$(rx machine state instabox-abcdefgh)"
 exit $fail

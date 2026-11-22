@@ -9,6 +9,24 @@
 #   reflex machine extend NAME SECONDS | state NAME | resume NAME
 #   reflex machine lapse NAME       an instabox box past its time, no window
 #                                   open on it anywhere: paused
+#   reflex machine pause NAME       now: an instabox box paused (its programs
+#                                   kept, only its disk costs); a boat sandbox
+#                                   stopped (boat can't pause)
+#   reflex machine off NAME         now: stopped (programs end, its disk stays)
+#   reflex lane new NAME [--repo DIR] [--branch B] [--base REF] [--from M]
+#                  [--size VxG]     a box of its own for one worktree: a fork of
+#                                   M (an instabox box: its disk in seconds, every
+#                                   repo and build as they are), else a new box
+#                                   with the repo; the worktree made there on B
+#                                   (lane/NAME) from REF. Prints the machine
+#                                   (lane-NAME) and the worktree's path.
+#   reflex lane ls | fetch NAME [--into M] | rm NAME [--force]
+#                                   lanes; NAME's branch back into the repo it
+#                                   came from; removed only once its work is
+#                                   back (fetched or pushed) and nothing is
+#                                   left uncommitted, unless --force
+#   (In a session on a box with no instabox login, lane asks the Reflex that
+#   moved it, which makes the box with its own.)
 #   reflex mesh sync                every machine here, in your other Macs' too
 #                                   its sandbox's lifetime, state, restart
 #   reflex where MACHINE PATH       the path there (~/x here is ~/x there,
@@ -185,7 +203,7 @@ UNTIL='mkdir -p "$HOME/.reflex" && echo $(( $(date +%s) + $1 )) > "$HOME/.reflex
 machine_new() {
   # An hour: Reflex renews it while an agent there works, so the hour
   # starts when the machine goes idle (and when Reflex isn't watching).
-  from="" type="" name="" ttl=3600 tmpl=0
+  from="" type="" name="" ttl=3600 tmpl=0 meta="" idle=30m
   while [ $# -gt 0 ]; do
     case $1 in
       --provider) PROVIDER=$2; shift 2 ;;
@@ -194,6 +212,8 @@ machine_new() {
       --type) type=$2; shift 2 ;;
       --name) name=$2; shift 2 ;;
       --ttl) ttl=$2; shift 2 ;;
+      --meta) meta="$meta --meta $2"; shift 2 ;;
+      --idle) idle=$2; shift 2 ;;
       *) die "machine new: unknown $1" ;;
     esac
   done
@@ -209,7 +229,7 @@ machine_new() {
       # shellcheck disable=SC2086
       # (Its name is unique in the account: yours, else reflex- and 8 hex.)
       _box=${name:-reflex-$(od -An -N4 -tx1 /dev/urandom | tr -d ' \n')}
-      out=$(instabox create --json --auto-suspend 30m --meta reflex=1 ${from:+--snapshot "$from"} $sz \
+      out=$(instabox create --json --auto-suspend "$idle" ${meta:---meta reflex=1} ${from:+--snapshot "$from"} $sz \
         --name "$_box" 2>/dev/null) || die "instabox create failed: $(printf '%s' "$out" | grep -o '"message": *"[^"]*"' | head -n 1)"
       id=$(printf '%s' "$out" | jget id 2>/dev/null) || true
       case $id in m_*) ;; *) die "instabox create gave no box id: $(printf '%s' "$out" | tail -n 3)" ;; esac
@@ -227,7 +247,15 @@ machine_new() {
       via="boat ssh $id" ;;
     *) die "machine new: no provider $PROVIDER (boat or instabox)" ;;
   esac
-  printf '%s\n%s\n' "$id" "${from:-}" > "$(record "$name")"
+  machine_join "$name" "$id" "$via" "${from:-}" "$ttl"
+  echo "$name"
+}
+
+# A box or sandbox just made, as a machine of herdr-core's: Reflex's record of
+# it, connected, its time set, the skill there, your other Macs told.
+machine_join() { # machine_join NAME ID VIA FROM TTL
+  name=$1 id=$2 via=$3 from=$4 ttl=$5
+  printf '%s\n%s\n' "$id" "$from" > "$(record "$name")"
   say "Adding $id to herdr-core as $name..."
   # (A sandbox just ready can take a while to answer ssh.)
   a=0
@@ -249,12 +277,11 @@ machine_new() {
     [ $i -lt 90 ] || die "$name didn't connect (hc machine ls)"
     sleep 1
   done
-  [ "$PROVIDER" = instabox ] && { rsh_in "$name" "set -- $ttl; $UNTIL" >/dev/null 2>&1 || true; }
+  [ "$(provider_of_id "$id")" = instabox ] && { rsh_in "$name" "set -- $ttl; $UNTIL" >/dev/null 2>&1 || true; }
   # This version of the skill (a template keeps the one it was built with).
   skill install --on "$name" >/dev/null 2>&1 || say "the reflex skill isn't on $name: reflex skill install --on $name"
   # (Your other Macs see its sessions too.)
   ( mesh_sync ) >/dev/null 2>&1 || true
-  echo "$name"
 }
 
 delete_sandbox() { # delete_sandbox ID
@@ -304,6 +331,23 @@ machine_lapse() { # machine_lapse NAME
   else
     echo "$_lr"
   fi
+}
+# Asked for now, whatever holds it: an instabox box paused (memory and
+# programs kept, only its disk costs) or turned off (stopped: programs end,
+# disks stay); a boat sandbox stopped either way (boat keeps its disk 14
+# days, and has no pause). Every Mac's hold on it goes first, so it doesn't
+# keep itself up. Prints what it is now.
+machine_sleep() { # machine_sleep NAME pause|off
+  _id=$(sandbox_id "$1") || die "$1 isn't a sandbox Reflex made or was shared"
+  if connected "$1"; then
+    rsh "$1" 'rm -f "$HOME/.reflex/held"/* 2>/dev/null; systemctl --user stop reflex-keep >/dev/null 2>&1; true' >/dev/null 2>&1 || true
+  fi
+  case $(provider_of_id "$_id"):$2 in
+    instabox:pause) instabox suspend "$_id" >/dev/null 2>&1 || die "instabox suspend $_id failed"; echo paused ;;
+    instabox:off) instabox stop "$_id" >/dev/null 2>&1 || die "instabox stop $_id failed"; echo stopped ;;
+    boat:pause|boat:off) boat stop "$_id" --json --no-update >/dev/null 2>&1 || die "boat stop $_id failed"; echo stopped ;;
+    *) die "machine pause|off NAME" ;;
+  esac
 }
 # Work an agent left running there while it waits (a waiter on a remote run,
 # a build, a loop): the agents look idle, the sandbox isn't. Two kinds:
@@ -708,6 +752,247 @@ machine_ls() {
     [ -f "$f" ] || continue
     printf '%s\t%s\t%s\n' "$(basename "$f")" "$(sed -n 1p "$f")" "$(sed -n 2p "$f")"
   done
+}
+
+# Lanes
+# -----
+#
+# One worktree, one box. A lead agent gives each piece of work a machine of
+# its own instead of one more worktree beside its own: the work can't step on
+# another's files, CPUs or memory, and the lead's machine stays light. A lane
+# made from an instabox box is a fork of it (its disks copied on its host in
+# seconds: every repository, dependency and build already there, at the same
+# paths); from a Mac or a boat sandbox it's a new box with the repository
+# copied. It pauses itself after 10 idle minutes (instabox's own), costing
+# only its disk, and resumes in seconds. What each box is lives on it
+# (metadata reflex=lane and lane=NAME; ~/.reflex/lane says where its work
+# came from), so any Mac, or an agent on any machine, finds the lanes.
+
+LANE_MAX=${REFLEX_LANE_MAX:-10}
+LANE_IDLE=${REFLEX_LANE_IDLE:-10m}
+
+instabox_ok() { command -v instabox >/dev/null 2>&1 && INSTABOX_NO_UPDATE_CHECK=1 instabox whoami >/dev/null 2>&1; }
+
+# The lanes instabox has, a line each: NAME, box id, state.
+lane_list() {
+  instabox ls --meta reflex=lane --json 2>/dev/null | perl -MJSON::PP -0777 -e '
+    my $l = eval { JSON::PP->new->decode(<STDIN>) } // exit 1;
+    $l = $l->{sandboxes} // $l->{machines} // [] if ref $l eq "HASH";
+    for (@$l) { printf "%s\t%s\t%s\n", $_->{metadata}{lane} // $_->{name}, $_->{id}, $_->{state} }'
+}
+
+# The instabox box a machine is, or nothing.
+box_of() { # box_of MACHINE
+  [ "$1" = . ] && return 1
+  _bi=$(sandbox_id "$1" 2>/dev/null || target_of "$1" 2>/dev/null | perl -ne 'print $1 if /instabox ssh (m_\w+)/' || true)
+  case $_bi in m_*) printf '%s' "$_bi" ;; *) return 1 ;; esac
+}
+
+lane_name() {
+  case $1 in ''|-*|*[!a-z0-9-]*) die "a lane's name is a-z, 0-9 and - (not \"$1\")" ;; esac
+  [ ${#1} -le 26 ] || die "a lane's name is at most 26 characters"
+}
+
+lane_new() {
+  _ln=${1:-}; [ $# -gt 0 ] && shift
+  lane_name "$_ln"
+  _lr="" _lb="" _lbase="" _lsz=""
+  while [ $# -gt 0 ]; do
+    case $1 in
+      --repo) _lr=$2; shift 2 ;;
+      --branch) _lb=$2; shift 2 ;;
+      --base) _lbase=$2; shift 2 ;;
+      --from) from_src "$2"; shift 2 ;;
+      --size) _lsz=$2; shift 2 ;;
+      *) die "lane new: unknown $1" ;;
+    esac
+  done
+  m=lane-$_ln
+  lane_list > "$T/lanes" || die "instabox ls failed"
+  ! cut -f1 "$T/lanes" | grep -qx "$_ln" || die "there's a lane $_ln already (reflex lane ls; a paused one comes back with reflex machine resume $m)"
+  # (A cap on the boxes up at once, whoever asks: paused ones cost only disk.)
+  _live=$(awk -F '\t' '$3 != "paused" && $3 != "suspended" && $3 != "stopped"' "$T/lanes" | wc -l | tr -d ' ')
+  [ "$_live" -lt "$LANE_MAX" ] || die "$_live lanes are up already (at most $LANE_MAX: REFLEX_LANE_MAX); pause or remove one first"
+  if [ -z "$_lr" ]; then [ "$SRC" = . ] || die "lane new --from $SRC: name the repository there (--repo DIR)"; _lr=$PWD; fi
+  case $_lr in ("~") _lr=$S_HOME ;; ("~/"*) _lr="$S_HOME/${_lr#"~/"}" ;; esac
+  [ "$SRC" = . ] && { _lr=$(cd "$_lr" 2>/dev/null && pwd -P) || die "no folder $_lr"; }
+  # The repository there: its main folder, the commit to start from, and,
+  # when DIR is a worktree of it, that worktree and its branch.
+  _info=$(rsh "$SRC" "cd $(q "$_lr") && c=\$(git rev-parse --path-format=absolute --git-common-dir) && g=\$(git rev-parse --path-format=absolute --git-dir) &&
+    printf '%s\n%s\n' \"\$(cd \"\$c/..\" && pwd -P)\" \"\$(git rev-parse --verify $(q "${_lbase:-HEAD}^{commit}"))\" &&
+    if [ \"\$g\" != \"\$c\" ]; then printf '%s\n%s\n' \"\$(git rev-parse --show-toplevel)\" \"\$(git branch --show-current)\"; fi") \
+    || die "no git repository at $_lr on $SRC (or no commit ${_lbase:-HEAD})"
+  _top=$(printf '%s\n' "$_info" | sed -n 1p) _base=$(printf '%s\n' "$_info" | sed -n 2p)
+  _wsrc=$(printf '%s\n' "$_info" | sed -n 3p) _wbr=$(printf '%s\n' "$_info" | sed -n 4p)
+  # Its own worktree there (the repo-NAME beside the repository, on lane/NAME),
+  # unless DIR is a worktree and no branch was named: then that one.
+  if [ -n "$_wsrc" ] && [ -z "$_lb" ]; then _lb=$_wbr; else _wsrc=""; _lb=${_lb:-lane/$_ln}; fi
+  [ -n "$_lb" ] || die "$_lr is a worktree on no branch: name one (--branch B)"
+  _sid=$(box_of "$SRC" || true)
+  if [ -n "$_sid" ]; then
+    sz=$(instabox_size "$_lsz") || exit 1
+    say "Forking $SRC ($_sid) as $m..."
+    # shellcheck disable=SC2086
+    out=$(instabox fork "$_sid" --name "$m" --json --auto-suspend "$LANE_IDLE" --meta reflex=lane --meta lane="$_ln" \
+      --meta from="$SRC" $sz 2>&1) || die "instabox fork failed: $(printf '%s' "$out" | grep -o '"message": *"[^"]*"' | head -n 1)"
+    id=$(printf '%s' "$out" | grep -o '"id": *"m_[a-z0-9]*"' | head -n 1 | grep -o 'm_[a-z0-9]*' || true)
+    [ -n "$id" ] || die "instabox fork gave no box id: $(printf '%s' "$out" | tail -n 3)"
+    # A copy of its source's disk, not of what makes the source itself: its
+    # herdr-core (identity, kept terminals: they'd start the source's agents
+    # here), the Macs holding it, its line home, its id and its time.
+    instabox exec "$id" --timeout 120 -- sh -c 'systemctl --user stop "hc-serve-*.service" >/dev/null 2>&1
+      rm -rf "$HOME/.local/state/herdr-core" "$HOME/.reflex/held" "$HOME/.reflex/bus" "$HOME/.reflex/id" "$HOME/.reflex/until" \
+        "$HOME/.reflex/lane" "$HOME/.reflex/lane-fetched" "$HOME/.reflex/lane-start"; true' >/dev/null 2>&1 || say "couldn't clear $SRC's own state on $m"
+    machine_join "$m" "$id" "instabox ssh $id --" "fork:$SRC" 3600
+    _rtop=$_top
+    _wt=${_wsrc:-$(dirname "$_top")/$(basename "$_top")-$_ln}
+  else
+    _tm=""; PROVIDER=instabox template_field snapshot >/dev/null 2>&1 && _tm=--template
+    ( machine_new --provider instabox $_tm ${_lsz:+--type "$_lsz"} --name "$m" --idle "$LANE_IDLE" \
+      --meta reflex=lane --meta lane="$_ln" --meta from="$SRC" ) >/dev/null || exit 1
+    _rtop=$( ( sync "$m" "$_top" --from "$SRC" ) | tail -n 1) || die "copying $_top to $m failed"
+    if [ -n "$_wsrc" ]; then
+      _wt=$( ( sync "$m" "$_wsrc" --from "$SRC" ) | tail -n 1) || die "copying $_wsrc to $m failed"
+    else
+      _wt=$(dirname "$_rtop")/$(basename "$_rtop")-$_ln
+    fi
+  fi
+  if [ -z "$_wsrc" ]; then
+    # (On a fork the branch may be checked out in the source's worktree: a
+    # copy nobody works in here.)
+    rsh "$m" "cd $(q "$_rtop") && if git show-ref --verify -q $(q "refs/heads/$_lb"); then git worktree add -f $(q "$_wt") $(q "$_lb"); else git worktree add -b $(q "$_lb") $(q "$_wt") $(q "$_base"); fi" >&2 \
+      || die "making the worktree on $m failed ($m is up: reflex lane rm $_ln --force)"
+  fi
+  perl -MJSON::PP -e 'print JSON::PP->new->canonical->encode({ name => $ARGV[0], from => $ARGV[1], repo => $ARGV[2],
+      worktree => $ARGV[3], branch => $ARGV[4], base => $ARGV[5], there => $ARGV[6], repo_there => $ARGV[7] }), "\n"' \
+    "$_ln" "$SRC" "$_top" "$_wsrc" "$_lb" "$_base" "$_wt" "$_rtop" | rsh_in "$m" 'mkdir -p "$HOME/.reflex" && cat > "$HOME/.reflex/lane"'
+  # (How its repository is now: what it changes is told against this.)
+  rsh "$m" "set -- $(q "$_rtop"); { $LANE_STATE; } > \"\$HOME/.reflex/lane-start\"" >/dev/null || die "recording lane-$_ln's start failed"
+  echo "$m"
+  echo "$_wt"
+}
+
+# What a lane says it is (~/.reflex/lane), the lane back up first if it's
+# paused or off.
+# A lane is a box, not one worktree: its agent may start more there (a few
+# agents, each in a worktree of its own, with hc run --on). What a lane
+# changed is told against how its repository was when it was made
+# (~/.reflex/lane-start): each branch's last commit, and what each worktree
+# had uncommitted. ($1: the repository there.)
+LANE_STATE='cd "$1" || exit 1
+git for-each-ref --format="branch %(refname:short) %(objectname)" refs/heads
+git worktree list --porcelain | sed -n "s/^worktree //p" | while IFS= read -r w; do
+  [ -d "$w" ] || continue
+  printf "dirty %s %s\n" "$(git -C "$w" status --porcelain 2>/dev/null | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)" "$w"
+done'
+# What changed since: "branch NAME TIP" for each branch new or moved,
+# "dirty PATH" for each worktree whose uncommitted changes are new (a clean
+# one isn't), "fetched" or "pushed" after a branch once that's where it is.
+LANE_CHANGES='s="$HOME/.reflex/lane-start" f="$HOME/.reflex/lane-fetched"; touch "$f"
+clean=$(printf "" | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-16)
+('"$LANE_STATE"') | while read -r k a b; do
+  case $k in
+    branch) grep -qxF "branch $a $b" "$s" && continue
+      w=""; grep -qxF "$a $b" "$f" && w=" fetched"
+      [ -n "$w" ] || [ -z "$(git -C "$1" for-each-ref --contains "$b" refs/remotes | head -n 1)" ] || w=" pushed"
+      echo "branch $a $b$w" ;;
+    dirty) [ "$a" = "$clean" ] || grep -qxF "dirty $a $b" "$s" || echo "dirty $b" ;;
+  esac
+done'
+
+# What a lane says it is (~/.reflex/lane), the lane back up first if it's
+# paused or off.
+lane_record() { # lane_record NAME
+  connected "lane-$1" || { say "Resuming lane-$1..."; ( machine_resume "lane-$1" ) >/dev/null || die "lane-$1 didn't come back"; }
+  rsh "lane-$1" 'cat "$HOME/.reflex/lane"' 2>/dev/null || die "lane-$1 isn't a lane (no ~/.reflex/lane there)"
+}
+
+# Every branch the lane made or moved, into the repository it came from (or
+# M's): as a branch of the same name, or as lane-NAME/BRANCH when that one is
+# checked out there or has moved on there too, to merge as a remote's.
+lane_fetch() { # lane_fetch NAME [--into M]
+  _ln=${1:-}; [ $# -gt 0 ] && shift; lane_name "$_ln"
+  _into=""; [ "${1:-}" = --into ] && _into=${2:-}
+  _rec=$(lane_record "$_ln")
+  _rt=$(printf '%s' "$_rec" | jget repo_there) _from=$(printf '%s' "$_rec" | jget from) _repo=$(printf '%s' "$_rec" | jget repo)
+  _into=${_into:-$_from}
+  # (Another machine: the same ~ path there.)
+  [ "$_into" = "$_from" ] || { from_src "$_from"; _repo=$(where "$_into" "$_repo"); }
+  _ch=$(rsh "lane-$_ln" "set -- $(q "$_rt"); $LANE_CHANGES") || die "couldn't read lane-$_ln's branches"
+  _brs=$(printf '%s\n' "$_ch" | awk '$1 == "branch" && $4 != "fetched" { print $2 }')
+  printf '%s\n' "$_ch" | awk '$1 == "dirty" { print "  uncommitted (not fetched): " $2 }' >&2
+  [ -n "$_brs" ] || { echo "lane $_ln has nothing new to fetch"; return 0; }
+  # (One bundle: what the branches have that the repository had when the lane was made.)
+  pull "lane-$_ln" "cd $(q "$_rt") && b=\$(mktemp) && git bundle create \"\$b\" $(printf '%s\n' "$_brs" | while read -r x; do printf '%s ' "$(q "refs/heads/$x")"; done) --not \$(awk '\$1 == \"branch\" { print \$3 }' \"\$HOME/.reflex/lane-start\") >/dev/null 2>&1 && cat \"\$b\"; s=\$?; rm -f \"\$b\"; exit \$s" "$T/lane.bundle"
+  [ -s "$T/lane.bundle" ] || die "bundling lane-$_ln's branches failed"
+  if [ "$_into" = . ]; then _bf=$T/lane.bundle
+  else
+    _gz=$(send "$_into" "$T/lane.bundle")
+    _bf=$(rsh "$_into" "b=\$(mktemp) && gunzip -c $(q "$_gz") > \"\$b\" && rm -f $(q "$_gz") && printf %s \"\$b\"") || die "copying the bundle to $_into failed"
+  fi
+  _got=$(rsh "$_into" "cd $(q "$_repo") || exit 1
+    for br in $(printf '%s\n' "$_brs" | while read -r x; do printf '%s ' "$(q "$x")"; done); do
+      if ! git worktree list --porcelain | grep -qxF \"branch refs/heads/\$br\" && git fetch -q $(q "$_bf") \"refs/heads/\$br:refs/heads/\$br\" 2>/dev/null; then echo \"\$br \$br\"
+      elif git fetch -q $(q "$_bf") \"+refs/heads/\$br:refs/remotes/lane-$_ln/\$br\"; then echo \"\$br lane-$_ln/\$br\"
+      else echo \"\$br -\"; fi
+    done
+    [ $(q "$_into") = . ] || rm -f $(q "$_bf")") || die "fetching into $_repo on $_into failed"
+  # (Fetched: marked on the lane, so lane rm knows that work is safe.)
+  printf '%s\n' "$_ch" | awk '$1 == "branch" { print $2, $3 }' | while read -r b t; do
+    printf '%s\n' "$_got" | grep -q "^$b [^-]" && printf '%s %s\n' "$b" "$t"
+  done | rsh_in "lane-$_ln" 'cat >> "$HOME/.reflex/lane-fetched"' >/dev/null
+  printf '%s\n' "$_got" | while read -r b r; do
+    if [ "$r" = - ]; then echo "$b: fetching it failed"; else echo "$b from lane $_ln is $r in $_repo$([ "$_into" = . ] || echo " on $_into")"; fi
+  done
+}
+
+# Gone, once nothing would go with it: no worktree there with new
+# uncommitted changes, and every branch it made or moved fetched (lane
+# fetch) or on a remote (pushed). --force: whatever is left.
+lane_rm() { # lane_rm NAME [--force]
+  _ln=${1:-}; [ $# -gt 0 ] && shift; lane_name "$_ln"
+  _force=0; [ "${1:-}" = --force ] && _force=1
+  m=lane-$_ln
+  _lid=$(lane_list | awk -F '\t' -v n="$_ln" '$1 == n { print $2 }')
+  [ -n "$_lid" ] || ours "$m" || die "no lane $_ln (reflex lane ls)"
+  if [ $_force = 0 ]; then
+    _rt=$(lane_record "$_ln" | jget repo_there)
+    _left=$(rsh "$m" "set -- $(q "$_rt"); $LANE_CHANGES" | awk '
+      $1 == "dirty" { print "uncommitted changes in " $2 }
+      $1 == "branch" && $4 == "" { print $2 " not fetched or pushed" }') || die "couldn't check lane-$_ln's work"
+    [ -z "$_left" ] || die "lane $_ln still has work ($(printf '%s\n' "$_left" | head -n 3 | paste -sd ';' - | sed 's/;/; /g')): reflex lane fetch $_ln, or reflex lane rm $_ln --force"
+  fi
+  if ours "$m"; then machine_rm "$m"; return; fi
+  hc machine rm "$m" >/dev/null 2>&1 || true
+  delete_sandbox "$_lid" || die "deleting $_lid failed: delete it with instabox rm"
+  echo "removed $m ($_lid)"
+}
+
+lane_home() { # lane_home SUB ARGS...
+  _hs=$1; shift
+  _n=$#
+  while [ $_n -gt 0 ]; do
+    a=$1; shift; _n=$((_n - 1))
+    case $a in --force) die "lane rm --force only from a Mac: it can lose work" ;; esac
+    set -- "$@" "$a"
+    if [ "$a" = --repo ] && [ $_n -gt 0 ]; then
+      r=$1; shift; _n=$((_n - 1)); r=$(cd "$r" 2>/dev/null && pwd -P) || die "no folder $r"; set -- "$@" "$r"
+    fi
+  done
+  [ "$_hs" = new ] && { case " $* " in *" --repo "*) ;; *) set -- "$@" --repo "$(git rev-parse --show-toplevel 2>/dev/null || pwd -P)" ;; esac; }
+  ask_home lane 1800 -- "$_hs" "$@"
+}
+
+lane() {
+  _sub=${1:-}; [ $# -gt 0 ] && shift
+  case $_sub in new|ls|fetch|rm) ;; *) die "lane new NAME [--repo DIR] [--branch B] [--base REF] [--from M] [--size VxG] | ls | fetch NAME [--into M] | rm NAME [--force]" ;; esac
+  instabox_ok || { lane_home "$_sub" "$@"; return; }
+  case $_sub in
+    new) lane_new "$@" ;;
+    ls) lane_list | while IFS="$(printf '\t')" read -r _n _i _s; do printf '%s\tlane-%s\t%s\n' "$_n" "$_n" "$_s"; done ;;
+    fetch) lane_fetch "$@" ;;
+    rm) lane_rm "$@" ;;
+  esac
 }
 
 # Files
@@ -1435,8 +1720,11 @@ case $cmd in
       extend) machine_extend "$@" ;; state) machine_state "$@" ;; resume) machine_resume "$@" ;; busy) machine_busy "$@" ;;
       hold) machine_hold "$@" ;; terminals) machine_terminals "$@" ;; sessions) machine_sessions "$@" ;;
       lapse) machine_lapse "$@" ;;
-      *) die "machine new|rm|ls|extend|state|resume|lapse|busy|hold|terminals|sessions" ;;
+      pause) [ $# -eq 1 ] || die "machine pause NAME"; machine_sleep "$1" pause ;;
+      off) [ $# -eq 1 ] || die "machine off NAME"; machine_sleep "$1" off ;;
+      *) die "machine new|rm|ls|extend|state|resume|pause|off|lapse|busy|hold|terminals|sessions" ;;
     esac ;;
+  lane) lane "$@" ;;
   where) where "$@"; echo ;;
   sync) sync "$@" ;;
   fixgit) fixgit "$1" "$(where "$1" "$(cd "${2:-$PWD}" && pwd -P)")" ;;

@@ -467,6 +467,45 @@ final class BoatLifetime: ObservableObject {
     private var recording: Set<String> = []
     /// When each instabox box was last asked whether its time is up.
     private var lapsedAt: [String: Date] = [:]
+    /// Being paused or turned off now (Settings → Machines).
+    @Published private(set) var sleeping: Set<String> = []
+    /// Paused or turned off by you: down until you resume it, even with a
+    /// window open on it here, and when.
+    @Published private(set) var putDown: [String: Date] = [:]
+
+    /// Paused (an instabox box: its programs kept, only its disk costs) or
+    /// turned off (stopped; a boat sandbox can only be this), now.
+    func sleep(_ m: String, off: Bool) {
+        guard !sleeping.contains(m), !resuming.contains(m), down[m] == nil else { return }
+        sleeping.insert(m)
+        problem[m] = nil
+        Task {
+            defer { sleeping.remove(m) }
+            do {
+                let s = try await Boat.reflex(["machine", off ? "off" : "pause", m], timeout: 600)
+                putDown[m] = Date()
+                down[m] = seen[m] ?? Store.shared.state.agents.filter { $0.machine == m }
+                downWhy[m] = s == "paused" ? "suspended" : "stopped"
+                working[m] = nil
+                held[m] = nil
+                NSLog("Reflex: %@ %@ (asked here)", m, s)
+            } catch {
+                problem[m] = error.localizedDescription
+            }
+        }
+    }
+
+    /// Every sandbox up, paused (boat's stopped): the quick way to stop paying for them.
+    func sleepAll() {
+        let up = Set(CoreMachines.known.filter { $0.state == "connected" }.map(\.name))
+        for m in made + shared where up.contains(m) && down[m] == nil { sleep(m, off: Sandbox.of(m) == .boat) }
+    }
+
+    /// Up, and Reflex's or shared with this Mac: what Pause All would pause.
+    var awake: [String] {
+        let up = Set(CoreMachines.known.filter { $0.state == "connected" }.map(\.name))
+        return (made + shared).filter { up.contains($0) && down[$0] == nil }
+    }
 
     func start() {
         guard timer == nil else { return }
@@ -537,6 +576,9 @@ final class BoatLifetime: ObservableObject {
         // not stopped any more, and its windows reattach. Its sessions again,
         // from the Mac that made it (one Mac, not each).
         for m in Array(down.keys) where up.contains(m) && !resuming.contains(m) {
+            // (Just paused here: herdr-core takes a moment to see it gone.)
+            if let at = putDown[m], Date().timeIntervalSince(at) < 120 { continue }
+            putDown[m] = nil
             NSLog("Reflex: %@ is connected again", m)
             let were = down[m] ?? []
             down[m] = nil
@@ -590,7 +632,8 @@ final class BoatLifetime: ObservableObject {
             let panes = (open[m] ?? []).sorted()
             if !panes.isEmpty {
                 if down[m] != nil {
-                    if !resuming.contains(m), Date().timeIntervalSince(autoResumed[m] ?? .distantPast) > 300 {
+                    // (One you paused stays paused: Resume brings it back.)
+                    if putDown[m] == nil, !resuming.contains(m), Date().timeIntervalSince(autoResumed[m] ?? .distantPast) > 300 {
                         autoResumed[m] = Date()
                         NSLog("Reflex: %@ stopped with a window open on it here; resuming it", m)
                         resume(m)
@@ -760,6 +803,7 @@ final class BoatLifetime: ObservableObject {
                 // (A lost machine's stop can take a while to give up.)
                 _ = try await Boat.reflex(["machine", "resume", m] + Boat.resumeArgs(m), timeout: 2400)
                 NSLog("Reflex: %@ resumed", m)
+                putDown[m] = nil
                 down[m] = nil
                 downWhy[m] = nil
                 erroredAt[m] = nil

@@ -284,6 +284,15 @@ enum CoreMachines {
         return FileManager.default.fileExists(atPath: Settings.supportDir.appendingPathComponent("boat/machines/\(name)").path, isDirectory: &dir) && !dir.boolValue
     }
 
+    /// What a machine Reflex made was made from (its record's second line:
+    /// a template snapshot, or "fork:MACHINE" for a lane forked from one).
+    static func madeFrom(_ name: String) -> String {
+        guard madeByReflex(name) else { return "" }
+        let url = Settings.supportDir.appendingPathComponent("boat/machines/\(name)")
+        let lines = ((try? String(contentsOf: url, encoding: .utf8)) ?? "").split(separator: "\n", omittingEmptySubsequences: false)
+        return lines.count > 1 ? String(lines[1]) : ""
+    }
+
     /// Forget the saved connection, not the terminals running on that Mac.
     static func remove(_ name: String) async throws {
         let r = await Blocking.run { HerdrCore.run(["machine", "rm", name, "--json"], timeout: 10) }

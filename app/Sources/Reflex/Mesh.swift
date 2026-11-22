@@ -100,9 +100,29 @@ final class Bus {
         case "run":
             HomeRequests.shared.add(.init(id: r.id, machine: m, pane: pane, op: "run", paths: [], origin: origin, until: r.until ?? 0,
                                           command: r.command ?? "", dir: r.dir ?? "~", timeout: Int(r.timeout ?? "") ?? 120))
+        case "lane":
+            // `reflex lane` from a box with no instabox login: this Mac's
+            // makes it (capped: REFLEX_LANE_MAX lanes up at once), from the
+            // machine that asked unless it named another. Never --force:
+            // that can lose work, so only from a Mac.
+            var args = r.paths ?? []
+            guard let sub = args.first, ["new", "ls", "fetch", "rm"].contains(sub), !args.contains("--force") else {
+                await Boat.reply(m, r.id, ok: false, message: "reflex lane new|ls|fetch|rm (rm --force only from a Mac)")
+                return
+            }
+            if sub == "new", !args.contains("--from") { args += ["--from", m] }
+            // (A fork takes a minute: the next request needn't wait for it.)
+            Task {
+                do {
+                    let out = try await Boat.reflex(["lane"] + args, timeout: 1500)
+                    await Boat.reply(m, r.id, ["ok": 1, "output": out])
+                } catch {
+                    await Boat.reply(m, r.id, ok: false, message: error.localizedDescription)
+                }
+            }
         case "machines":
             let up = CoreMachines.known.filter { $0.state == "connected" }.map(\.name)
-            let list = (["here (\(Host.current().localizedName ?? "this Mac"), where Reflex runs)"] + up.map { $0 + (Boat.made($0) ? " (boat sandbox)" : "") })
+            let list = (["here (\(Host.current().localizedName ?? "this Mac"), where Reflex runs)"] + up.map { $0 + (Boat.made($0) ? " (\(($0.hasPrefix("lane-") ? "instabox lane" : Sandbox.of($0)?.noun) ?? "sandbox"))" : "") })
             await Boat.reply(m, r.id, ok: true, message: "Machines Reflex reaches:", output: list.joined(separator: "\n"))
         default:
             await Boat.reply(m, r.id, ok: false, message: "Reflex doesn't know \(r.op)")

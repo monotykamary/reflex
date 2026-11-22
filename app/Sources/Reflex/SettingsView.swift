@@ -1099,7 +1099,15 @@ private struct MachineCardsSection: View {
                     .font(.system(size: 11.5)).foregroundStyle(.secondary)
             }
         } header: {
-            Text("Your machines")
+            HStack {
+                Text("Your machines")
+                Spacer()
+                if !lifetime.awake.isEmpty {
+                    Button("Pause All") { lifetime.sleepAll() }
+                        .controlSize(.small)
+                        .help("Every instabox box paused (programs kept, only disk costs) and every boat sandbox turned off (disk kept 14 days). Resume brings each back.")
+                }
+            }
         } footer: {
             Text("herdr-core keeps an ssh line to each. Their sessions join the rail, the inbox and the ⌥⌥ bar with the machine's name, and every Reflex listens on the others for a session asking home.")
                 .font(Type.meta).foregroundStyle(.secondary)
@@ -1151,8 +1159,13 @@ private struct MachineCardsSection: View {
 
     private func status(_ m: CoreMachines.Machine, agents: Int) -> (tone: Color, text: String) {
         if lifetime.resuming.contains(m.name) { return (Tone.working, "Resuming…") }
+        if lifetime.sleeping.contains(m.name) { return (Tone.working, "Pausing…") }
         if lifetime.isDown(m.name) {
             let svc = Sandbox.of(m.name) ?? .boat
+            if lifetime.putDown[m.name] != nil {
+                return (Color.secondary, lifetime.downWhy[m.name] == "suspended" ? "Paused; its programs are kept, only its disk costs"
+                                                                          : svc == .boat ? "Turned off; its disk is kept 14 days" : "Turned off; its disk is kept")
+            }
             if lifetime.downWhy[m.name] == "error" { return (Tone.blocked, "\(svc.rawValue) lost its machine; Resume brings it back") }
             if svc == .instabox { return (Color.secondary, "Paused after an hour idle; its programs are kept") }
             return (Color.secondary, "Stopped after an hour idle; its disk is kept 14 days")
@@ -1192,11 +1205,27 @@ private struct MachineCardsSection: View {
                 .disabled(m.state != "connected" || FileAccess.shared.remote[m.name] == true)
                 .help("Opens Full Disk Access on \(m.name)'s screen with herdr-core shown in Finder: someone there (or Parsec) drags it in.")
         }
+        // A sandbox up: paused now (an instabox box keeps its programs and
+        // costs only its disk) or turned off (stopped; all boat can do).
+        if let svc = Sandbox.of(m.name), Boat.made(m.name) || CoreMachines.sharedByReflex(m.name) {
+            let busy = lifetime.isDown(m.name) || lifetime.sleeping.contains(m.name) || lifetime.resuming.contains(m.name)
+            Divider()
+            if svc == .instabox {
+                Button("Pause") { lifetime.sleep(m.name, off: false) }.disabled(busy)
+                    .help("Its memory and programs are kept and it costs only its disk; Resume carries on in seconds.")
+            }
+            Button(svc == .boat ? "Turn Off (Disk Kept 14 Days)" : "Turn Off") { lifetime.sleep(m.name, off: true) }.disabled(busy)
+                .help("Its programs end; its disk is kept. Resume starts it again with its sessions.")
+        }
         Divider()
         Button("Remove…", role: .destructive) { removing = m }
     }
 
     private func subtitle(_ m: CoreMachines.Machine) -> String {
+        if Boat.made(m.name), m.name.hasPrefix("lane-") {
+            let from = CoreMachines.madeFrom(m.name)
+            return "instabox lane" + (from.hasPrefix("fork:") ? " · from \(String(from.dropFirst(5)) == Boat.here ? "this Mac" : String(from.dropFirst(5)))" : "")
+        }
         if Boat.made(m.name) { return Sandbox.of(m.name) == .instabox ? "instabox box" : "boat sandbox" }
         if let from = CoreMachines.sharedFrom(m.name) {
             let kind = m.target.contains("instabox ssh") ? "instabox box" : m.target.contains("boat ssh") ? "boat sandbox" : "ssh \(m.target)"
