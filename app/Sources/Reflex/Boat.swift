@@ -2,11 +2,12 @@ import AppKit
 import Combine
 import Foundation
 
-/// A service Reflex makes machines on: boat.dev's sandboxes, or instabox's
-/// boxes (a box Reflex pauses when it's done keeps its programs, and comes
-/// back as it was). scripts/reflex.sh tells a machine's by its id.
+/// A service Reflex makes machines on: instabox's boxes (the default: a box
+/// Reflex pauses when it's done keeps its programs, and comes back as it
+/// was), or boat.dev's sandboxes, offered only while the boat CLI is installed.
+/// scripts/reflex.sh tells a machine's by its id.
 enum Sandbox: String, CaseIterable, Identifiable {
-    case boat, instabox
+    case instabox, boat
     var id: String { rawValue }
     /// "@boat", "@instabox", and the move menu's section.
     var key: String { rawValue }
@@ -72,8 +73,8 @@ enum Boat {
     static func rebuildPrompt(_ p: Sandbox, _ changed: [String]) -> String {
         "Use the reflex skill to rebuild my \(p.rawValue) template\(flag(p)) (changed here: \(changed.joined(separator: ", "))), then move this session to \(p.rawValue), with everything this work needs."
     }
-    /// (boat is the skill's default; instabox is named.)
-    private static func flag(_ p: Sandbox) -> String { p == .boat ? "" : " (--provider \(p.rawValue) on reflex template and reflex machine new)" }
+    /// (instabox is the skill's default; boat is named.)
+    private static func flag(_ p: Sandbox) -> String { p == .instabox ? "" : " (--provider \(p.rawValue) on reflex template and reflex machine new)" }
     /// The window's button: only the agent knows what its work needs (other
     /// repositories, worktrees, files from Downloads), so it says, and Reflex
     /// copies them from wherever the agent is. The button was the OK.
@@ -119,7 +120,7 @@ enum Boat {
     /// instabox box keeps its own size).
     static func resumeArgs(_ machine: String) -> [String] { Sandbox.of(machine) == .boat ? Sandbox.boat.sizeArgs : [] }
 
-    static func newMachine(template: Bool, on p: Sandbox = .boat) async throws -> String {
+    static func newMachine(template: Bool, on p: Sandbox = .instabox) async throws -> String {
         try await reflex(["machine", "new", "--provider", p.rawValue] + (template ? ["--template"] : []) + p.sizeArgs, timeout: 300)
     }
 
@@ -312,7 +313,7 @@ final class BoatTemplate: ObservableObject {
         let changed: [String]
         if case .stale(_, let c) = state { changed = c } else { changed = [] }
         let home = NSHomeDirectory()
-        let named = provider == .boat ? "" : " (--provider \(provider.rawValue) on reflex template and reflex machine new)"
+        let named = provider == .instabox ? "" : " (--provider \(provider.rawValue) on reflex template and reflex machine new)"
         let prompt = "Use the reflex skill to rebuild my \(provider.rawValue) template\(named)" + (changed.isEmpty ? "" : " (changed here since it was built: \(changed.joined(separator: ", ")))")
             + ". Don't move this session afterwards; tell me when the new template is saved."
         Boat.install()

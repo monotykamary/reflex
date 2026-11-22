@@ -113,7 +113,7 @@ final class HerdrMove: ObservableObject {
     /// template there when you have one; otherwise the agent builds it with
     /// the reflex skill first. Either way the agent moves itself (prepare).
     /// `rebuild`: build it again.
-    func toBoat(_ a: AgentInfo, rebuild: Bool = false, on p: Sandbox = .boat) {
+    func toBoat(_ a: AgentInfo, rebuild: Bool = false, on p: Sandbox = .instabox) {
         notes[a.pane] = "Checking your \(p.rawValue) template…"
         problem = nil
         Task {

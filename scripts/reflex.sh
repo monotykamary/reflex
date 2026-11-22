@@ -64,8 +64,8 @@
 #   reflex skill install [--on MACHINE]
 #   reflex install                  link this script as ~/.local/bin/reflex
 #
-# Machines are herdr-core's (`hc machine ls`); `machine new` makes a boat.dev
-# sandbox or an instabox box and adds it as a temporary one. Nothing here
+# Machines are herdr-core's (`hc machine ls`); `machine new` makes an instabox
+# box (or, --provider boat, a boat.dev sandbox) and adds it as a temporary one. Nothing here
 # prints a secret.
 set -eu
 
@@ -76,9 +76,10 @@ set -eu
 DATA=${REFLEX_DATA:-"$HOME/Library/Application Support/Reflex"}
 DIR="$DATA/boat"
 TEMPLATE=${REFLEX_TEMPLATE:-reflex-template}
-# The service new machines and the template are on: boat (boat.dev, ids
-# bx_...) or instabox (instabox.sh, ids m_...). A machine's own is its id's.
-PROVIDER=${REFLEX_PROVIDER:-boat}
+# The service new machines and the template are on: instabox (instabox.sh,
+# ids m_..., the default) or boat (boat.dev, ids bx_...). A machine's own is
+# its id's.
+PROVIDER=${REFLEX_PROVIDER:-instabox}
 # (Where this script really is: ~/.local/bin/reflex is a link to it.)
 _self=$0
 while [ -L "$_self" ]; do

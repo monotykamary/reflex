@@ -958,8 +958,9 @@ private struct MachinesPane: View {
             MachineCardsSection()
             SessionsSection()
             TrustSection()
-            BoatSection(p: .boat)
             BoatSection(p: .instabox)
+            // (boat only while its CLI is installed: instabox is where Reflex makes machines)
+            if Sandbox.boat.installed { BoatSection(p: .boat) }
             if !machines.rows.isEmpty {
                 Section {
                     DisclosureGroup(isExpanded: $herdrOpen) {
