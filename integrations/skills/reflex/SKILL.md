@@ -1,6 +1,6 @@
 ---
 name: reflex
-description: Move this agent session between machines (this Mac, the user's other Macs, an instabox box) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on instabox, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's instabox template, when a file or folder you need is on the Mac this session came from, or when some work would be better on a box of its own (a lane: several agents at once, a heavy loop, work kept apart).
+description: Move this agent session between machines (this Mac, the user's other Macs, an instabox box) with Reflex, keeping the conversation, and fetch files from the Mac that moved it. Use when the user asks to move, send or continue this session on instabox, a sandbox, a VM or another machine, when Reflex asks you to move or to build the user's instabox template, when a file or folder you need is on the Mac this session came from, or when some work would be better on a box of its own (a lane: several agents at once, a heavy loop, work kept apart). Also use it before starting another agent (hc run, a helper, a lane's agents) and whenever the user names a harness profile like claude[work]: agents start in a profile with `reflex profile run`.
 ---
 
 # Moving a session with Reflex
@@ -228,8 +228,8 @@ worktree of its own, and they show up in Reflex like any machine's:
 
 ```sh
 hc exec --on lane-alg-a -- git -C ~/VCS/gdp-wired worktree add ~/VCS/gdp-wired-alg-a2 -b lane/alg-a2
-hc run --on lane-alg-a --cwd ~/VCS/gdp-wired-alg-a --bg --name alg-a claude "$(cat brief-a.md)"
-hc run --on lane-alg-a --cwd ~/VCS/gdp-wired-alg-a2 --bg --name alg-a2 claude "$(cat brief-a2.md)"
+hc run --on lane-alg-a --cwd ~/VCS/gdp-wired-alg-a --bg --name alg-a reflex profile run "${REFLEX_HARNESS_PROFILE:-claude}" "$(cat brief-a.md)"
+hc run --on lane-alg-a --cwd ~/VCS/gdp-wired-alg-a2 --bg --name alg-a2 reflex profile run "${REFLEX_HARNESS_PROFILE:-claude}" "$(cat brief-a2.md)"
 hc wait lane-alg-a/alg-a                                     # rather than sleep
 ```
 
@@ -247,6 +247,52 @@ and comes back in seconds; `reflex machine pause lane-NAME` pauses it now.
 Heavy runs still go through `supercomputer`, from the lane like from
 anywhere. Remove the lanes you made once their work is back; ask before
 `reflex lane rm NAME --force`, which drops what's left.
+
+## Profiles: which account an agent runs in
+
+The user may have more than one account per harness, each a profile named
+like `claude[work]` or `codex[personal]` (bare `claude` with no profile is
+their own login in their home folder). A profile has its own login and its
+own sessions; settings, skills, repositories, ssh and gh are shared. Reflex
+keeps every profile signed in on every machine. You can see which one you
+run in:
+
+```sh
+echo "$REFLEX_HARNESS_PROFILE"   # claude[work], or claude[] for the user's own login; empty if Reflex didn't start you
+reflex profile ls                # the profiles on this machine, and which one is its default
+```
+
+Start every agent through `reflex profile run`, never by calling the harness
+directly, so it gets the right account:
+
+```sh
+# Same account as you (the usual choice for helpers on the same work):
+hc run --cwd ~/VCS/app --bg --name helper reflex profile run "${REFLEX_HARNESS_PROFILE:-claude}" "$(cat brief.md)"
+# An account the user named:
+hc run --cwd ~/VCS/app --bg --name review reflex profile run codex[work] "$(cat brief.md)"
+# On another machine (the profiles are there too):
+hc run --on mini --cwd ~/VCS/app --bg --name build reflex profile run claude[work] "$(cat brief.md)"
+```
+
+`reflex profile run claude` with no brackets uses that machine's default
+profile (the user picks it in Reflex's Settings › Profiles); `claude[]` is
+always their own login. `${REFLEX_HARNESS_PROFILE:-claude}` falls back to
+the machine's default Claude when Reflex didn't start you; use another
+harness's name there (`codex`, `agy`) when that is the one you want.
+
+Rules:
+- Stay in your profile's account for the work you were given. Use another
+  profile only when the user names it.
+- Profiles are kept apart on purpose (a client's work in one, personal work
+  in another): don't read another profile's sessions or history, and don't
+  copy files between profiles' folders (`~/.reflex/profiles/`). When work
+  needs to cross, hand it off: write what the other side needs into a brief
+  in the project, and start that agent in its profile with the brief.
+- Never copy, print or move logins or tokens (`auth.json`, `.credentials.json`,
+  Keychain items). Reflex keeps them current everywhere; `reflex keys status`
+  shows who keeps each and where it is current.
+- Never sign a profile in or out, or make or remove one, unless the user
+  asks (`reflex profile login`, `reflex profile rm`).
 
 ## When it fails
 
