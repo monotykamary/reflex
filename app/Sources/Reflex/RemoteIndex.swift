@@ -51,14 +51,19 @@ final class RemoteIndex: @unchecked Sendable {
         _ = Self.waitCoreMachines()
         let (machines, env) = Machines.shared.reachable()
         let keys = Set(machines.map(\.key))
-        // A machine that went away: its sessions can't be brought back from here.
-        for gone in known.subtracting(keys) {
-            read[gone] = nil
-            sessionsAt[gone] = nil
-            foldersAt[gone] = nil
-            DispatchQueue.main.async { SessionArchive.shared.setRemote(gone, []) }
+        // One out of reach now (paused, asleep, its tunnel down) keeps its
+        // sessions as last read, and is read again as soon as it is back.
+        for away in known.subtracting(keys) {
+            sessionsAt[away] = nil
+            foldersAt[away] = nil
         }
         known = keys
+        // One forgotten (no longer in herdr or herdr-core): its sessions go.
+        if let saved = Machines.shared.saved(), CoreMachines.listed {
+            let all = saved.union(CoreMachines.known.map(\.name))
+            for m in read.keys where !all.contains(m) { read[m] = nil }
+            DispatchQueue.main.async { SessionArchive.shared.keepRemote(all) }
+        }
         let now = Date()
         for m in machines where !busy.contains(m.key) {
             let sessions = now.timeIntervalSince(sessionsAt[m.key] ?? .distantPast) >= 60
@@ -89,7 +94,7 @@ final class RemoteIndex: @unchecked Sendable {
         guard let script = script("reflex-remote.sh") else { return nil }
         let knownLines = cached.map { "\($0.value.mtime)\t\($0.key)" }.joined(separator: "\n")
         let input = script + (script.hasSuffix("\n") ? "" : "\n") + knownLines + "\n"
-        guard let out = run(m, #"f=$(mktemp -t reflex); cat > "$f"; sh "$f" "$f"; rm -f "$f""#, input: input, env: env, timeout: 90) else { return nil }
+        guard let out = run(m, #"f=$(mktemp "${TMPDIR:-/tmp}/reflex.XXXXXX"); cat > "$f"; sh "$f" "$f"; rm -f "$f""#, input: input, env: env, timeout: 90) else { return nil }
         var next: [String: (mtime: String, session: PastSession?)] = [:]
         var open = Set<String>()
         var background = Set<String>()
@@ -137,7 +142,7 @@ final class RemoteIndex: @unchecked Sendable {
             return "$HOME" + r.dropFirst(home.count)
         }
         let list = roots.isEmpty ? "$HOME/VCS" : roots.joined(separator: ":")
-        let cmd = #"f=$(mktemp -t reflex-scan); cat > "$f"; chmod +x "$f"; REFLEX_ROOTS="\#(list)" "$f"; rm -f "$f""#
+        let cmd = #"f=$(mktemp "${TMPDIR:-/tmp}/reflex-scan.XXXXXX"); cat > "$f"; chmod +x "$f"; REFLEX_ROOTS="\#(list)" "$f"; rm -f "$f""#
         guard let out = run(m, cmd, input: script, env: env, timeout: 240) else { return }
         // How often sessions started in each of its folders, from here.
         let usage = (try? String(contentsOf: Settings.supportDir.appendingPathComponent("usage.tsv"), encoding: .utf8)) ?? ""

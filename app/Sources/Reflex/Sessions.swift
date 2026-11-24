@@ -42,8 +42,20 @@ enum Sessions {
     /// Bring an earlier session back; open its terminal once it has started
     /// when `open` is set. Returns the dispatch, or throws.
     @MainActor @discardableResult
-    static func resume(_ p: PastSession, mode: String? = nil, text: String = "", open: Bool) async throws -> PendingInfo {
+    static func resume(_ p: PastSession, mode: String? = nil, text: String = "", open: Bool) async throws -> PendingInfo? {
         var how = mode ?? p.mode
+        // One from a machine that is paused or stopped: up first. Coming back
+        // may start it again by itself (what that machine ran is brought
+        // back): then it is that terminal, never a second writer.
+        if !p.machine.isEmpty, Sandbox.of(p.machine) != nil {
+            try await BoatLifetime.shared.wake(p.machine)
+            await Store.shared.refresh()
+            if let a = Store.shared.state.agents.first(where: { $0.session == p.id }) {
+                if open { AppDelegate.current?.showPane(a.pane) }
+                guard !text.isEmpty else { return nil }
+                return try await Client.local.send(pane: a.pane, text: text, label: "\(p.agent) · \(p.title.prefix(40))")
+            }
+        }
         // A stopped `claude --bg` session won't take --resume (Claude prints
         // "Resume this session with…" and exits): restart it, then attach.
         if p.agent == "claude", p.state == .background, how == "resume" {

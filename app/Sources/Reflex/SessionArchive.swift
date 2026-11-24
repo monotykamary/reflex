@@ -12,8 +12,8 @@ import Foundation
 // Each file is read only at its start and end, and again only when it
 // changes, so even thousands of sessions stay cheap.
 
-struct PastSession: Identifiable, Hashable {
-    enum State: String { case past, background, running, elsewhere }
+struct PastSession: Identifiable, Hashable, Codable {
+    enum State: String, Codable { case past, background, running, elsewhere }
     var agent: String
     var id: String
     var cwd: String
@@ -59,8 +59,16 @@ final class SessionArchive: ObservableObject {
     private var indexedSessionFolders: Set<String> = []
 
     static var file: URL { Settings.supportDir.appendingPathComponent("sessions.tsv") }
+    /// Other machines' sessions as last read from each, so a machine that is
+    /// paused, asleep or out of reach (or was when Reflex started) still lists
+    /// its earlier sessions; resuming one wakes it first.
+    static var remoteFile: URL { Settings.supportDir.appendingPathComponent("remote-sessions.json") }
 
     func start() {
+        if let data = try? Data(contentsOf: Self.remoteFile),
+           let saved = try? JSONDecoder().decode([String: [PastSession]].self, from: data) {
+            remote = saved
+        }
         refresh()
         timer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.refresh() }
@@ -71,11 +79,27 @@ final class SessionArchive: ObservableObject {
     private var here: [PastSession] = []
     private var remote: [String: [PastSession]] = [:]
 
-    /// A machine's sessions, read again (or [] once it is gone).
+    /// A machine's sessions, read again.
     func setRemote(_ machine: String, _ found: [PastSession]) {
         guard remote[machine] != found else { return }
         remote[machine] = found.isEmpty ? nil : found
+        saveRemote()
         publish()
+    }
+
+    /// Only these machines' sessions: any other was forgotten (removed from
+    /// herdr or herdr-core), and its sessions go with it.
+    func keepRemote(_ machines: Set<String>) {
+        let gone = remote.keys.filter { !machines.contains($0) }
+        guard !gone.isEmpty else { return }
+        for m in gone { remote[m] = nil }
+        saveRemote()
+        publish()
+    }
+
+    private func saveRemote() {
+        guard let data = try? JSONEncoder().encode(remote) else { return }
+        try? data.write(to: Self.remoteFile, options: .atomic)
     }
 
     func refresh() {

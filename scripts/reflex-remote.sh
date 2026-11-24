@@ -1,7 +1,8 @@
 #!/bin/sh
-# reflex-remote: the agent sessions saved on another Mac, for Reflex's resume
-# list there. The app sends this script over ssh (nothing is installed on
-# that Mac) and reads the sessions with the same code it reads its own with.
+# reflex-remote: the agent sessions saved on another machine (a Mac, or a
+# Linux sandbox), for Reflex's resume list there. The app sends this script
+# over ssh (nothing is installed there) and reads the sessions with the same
+# code it reads its own with. POSIX sh, BSD or GNU tools.
 #
 #   sh reflex-remote.sh <this file>
 #
@@ -19,14 +20,21 @@
 set -u
 self=${1:-$0}
 tab=$(printf '\t')
-known=$(mktemp -t reflex-known)
+# (GNU mktemp wants the X's; BSD's -t adds its own.)
+known=$(mktemp "${TMPDIR:-/tmp}/reflex-known.XXXXXX")
 trap 'rm -f "$known"' EXIT
 sed -n '/^__KNOWN__$/,$p' "$self" | sed 1d > "$known"
 
+# GNU stat (Linux) or BSD stat (macOS).
+if stat -c %Y / >/dev/null 2>&1; then gnu=1; else gnu=""; fi
+
 list() {
   [ -d "$1" ] || return 0
-  find "$1" -maxdepth "$2" -type f -name '*.jsonl' -exec stat -f "$3$tab%m$tab%N" {} + 2>/dev/null \
-    | sort -t "$tab" -k2,2nr | head -n 40
+  if [ -n "$gnu" ]; then
+    find "$1" -maxdepth "$2" -type f -name '*.jsonl' -exec stat -c "$3$tab%Y$tab%n" {} + 2>/dev/null
+  else
+    find "$1" -maxdepth "$2" -type f -name '*.jsonl' -exec stat -f "$3$tab%m$tab%N" {} + 2>/dev/null
+  fi | sort -t "$tab" -k2,2nr | head -n 40
 }
 
 {
@@ -38,7 +46,7 @@ list() {
     printf 'F\t%s\t%s\t%s\t\t\n' "$agent" "$m" "$p"
     continue
   fi
-  size=$(stat -f %z "$p" 2>/dev/null || echo 0)
+  if [ -n "$gnu" ]; then size=$(stat -c %s "$p" 2>/dev/null || echo 0); else size=$(stat -f %z "$p" 2>/dev/null || echo 0); fi
   h=$(head -c 65536 "$p" | base64 | tr -d '\n')
   t=""
   [ "$size" -gt 65536 ] && t=$(tail -c 131072 "$p" | base64 | tr -d '\n')

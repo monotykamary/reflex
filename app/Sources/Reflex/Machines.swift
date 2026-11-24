@@ -89,6 +89,7 @@ final class Machines: @unchecked Sendable {
     private var env: [String: String] = [:]
     private var listed = ""
     private var all: [Profile] = []
+    private var profilesRead = false
     /// How long a machine whose tunnel dropped stays in `list`: reflexd keeps
     /// its agents meanwhile, so a blip (sleep, Wi-Fi) isn't agents vanishing
     /// and coming back as new.
@@ -177,6 +178,12 @@ final class Machines: @unchecked Sendable {
         }
     }
 
+    /// Every machine herdr has (its tunnel up or not), once herdr has said:
+    /// nil before that.
+    func saved() -> Set<String>? {
+        q.sync { profilesRead ? Set(tunnels.keys) : nil }
+    }
+
     /// The tunnels' ssh processes, readable off `q`: quitting must not wait
     /// behind a slow probe of a machine that's away.
     private let lock = NSLock()
@@ -208,6 +215,7 @@ final class Machines: @unchecked Sendable {
     private func tick() {
         guard let profiles = profiles() else { return }
         all = profiles
+        profilesRead = true
         var want: [String: Profile] = [:]
         for p in profiles where p.enabled { want[Self.key(p, taken: want)] = p }
         for (key, t) in tunnels where want[key] != t.profile {

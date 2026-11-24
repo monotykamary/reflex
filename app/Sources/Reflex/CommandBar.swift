@@ -835,8 +835,9 @@ final class CommandModel: ObservableObject {
         case .elsewhere: state = " · open elsewhere — forks"
         case .past: state = ""
         }
+        let away = !p.machine.isEmpty && BoatLifetime.shared.isDown(p.machine) ? " · \(p.machine) is down — resuming starts it first" : ""
         return Candidate(id: "r:" + p.id, kind: .resume, title: p.title,
-                         detail: "\(p.agent) · \(p.folder) · \(p.ago)" + state, bp: bp, path: p.cwd, past: p)
+                         detail: "\(p.agent) · \(p.folder) · \(p.ago)" + state + away, bp: bp, path: p.cwd, past: p)
     }
 
     var selected: Candidate? { rows.first { $0.id == selection } ?? rows.first }

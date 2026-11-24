@@ -720,6 +720,26 @@ final class BoatLifetime: ObservableObject {
 
     func isDown(_ machine: String) -> Bool { down[machine] != nil }
 
+    private var resumes: [String: Task<Void, Never>] = [:]
+
+    struct WakeFailed: LocalizedError {
+        let machine: String, why: String
+        var errorDescription: String? { "\(machine) didn't come back: \(why)" }
+    }
+
+    /// Up before something starts there: a sandbox that is paused, stopped
+    /// or out of reach is resumed first, and waited for (its agents brought
+    /// back too). Anything else, or one connected, at once.
+    func wake(_ m: String) async throws {
+        guard !m.isEmpty, Sandbox.of(m) != nil else { return }
+        if down[m] == nil, !resuming.contains(m),
+           await CoreMachines.list(fresh: 0).first(where: { $0.name == m })?.state == "connected" { return }
+        NSLog("Reflex: %@ isn't up; resuming it first", m)
+        resume(m)
+        await resumes[m]?.value
+        if let why = problem[m] { throw WakeFailed(machine: m, why: why) }
+    }
+
     private static func ranFile(_ m: String) -> URL {
         Settings.supportDir.appendingPathComponent("boat/sessions").appendingPathComponent(m + ".json")
     }
@@ -797,8 +817,8 @@ final class BoatLifetime: ObservableObject {
         guard !resuming.contains(m) else { return }
         resuming.insert(m)
         problem[m] = nil
-        Task {
-            defer { resuming.remove(m) }
+        resumes[m] = Task {
+            defer { resuming.remove(m); resumes[m] = nil }
             let were = down[m] ?? []
             do {
                 // (A lost machine's stop can take a while to give up.)

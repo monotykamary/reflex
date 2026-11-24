@@ -243,6 +243,8 @@ enum CoreMachines {
 
     /// The last list read, without waiting.
     static var known: [Machine] { lock.withLock { cached } }
+    /// Whether herdr-core has given its list at least once.
+    static var listed: Bool { lock.withLock { at != .distantPast } }
 
     /// The list, read again when it is more than `fresh` seconds old.
     static func list(fresh: TimeInterval = 10) async -> [Machine] {

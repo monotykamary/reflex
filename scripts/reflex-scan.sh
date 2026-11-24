@@ -64,7 +64,7 @@ scan_one() {
   if [ -n "$ct" ]; then
     age=$(( (now - ct) / 3600 ))
   else
-    m=$(stat -f %m "$d" 2>/dev/null || echo "$now")
+    m=$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || echo "$now")
     age=$(( (now - m) / 3600 ))
   fi
   head=$(cat "$d/.git/HEAD" 2>/dev/null || true)
@@ -94,7 +94,7 @@ scan_parent() {
   newest=0
   newest=$(printf '%s\n' "$held" | while IFS= read -r r; do git -C "$r" log -1 --format=%ct 2>/dev/null; done | sort -n | tail -1)
   newest=${newest:-0}
-  [ "$newest" -eq 0 ] && newest=$(stat -f %m "$d" 2>/dev/null || echo "$now")
+  [ "$newest" -eq 0 ] && newest=$(stat -c %Y "$d" 2>/dev/null || stat -f %m "$d" 2>/dev/null || echo "$now")
   uses=0
   if [ -n "$usage" ] && [ -f "$usage" ]; then
     uses=$(grep -cxF "$d" "$usage" 2>/dev/null || true)
