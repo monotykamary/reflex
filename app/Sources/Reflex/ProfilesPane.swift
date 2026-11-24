@@ -427,7 +427,7 @@ private struct FlowLayout: Layout {
 
 /// A machine and, per harness it has profiles for, the one a bare agent starts in.
 private struct PlaceRow: View {
-    static let pickerWidth: CGFloat = 146
+    static let pickerWidth: CGFloat = 104
     @ObservedObject private var model = ProfilesModel.shared
     let place: ProfilesModel.Place
     let symbol: String
@@ -491,8 +491,8 @@ private struct PlaceRow: View {
             }
         } label: {
             HStack(spacing: 5) {
+                // (The logo and colour say which harness: only the profile is written.)
                 HarnessLogo(harness: h, size: 14, tile: false)
-                Text(h).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
                 Text(current.isEmpty ? "own" : current).font(.system(size: 11, weight: current.isEmpty ? .regular : .bold)).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(current.isEmpty ? Color.secondary : HarnessLook.tint(h))
                 Spacer(minLength: 2)
@@ -508,5 +508,6 @@ private struct PlaceRow: View {
         .fixedSize()
         .disabled(!place.connected || busy)
         .help(current.isEmpty ? "A bare \(h) here uses your own login" : "A bare \(h) here starts as \(h)[\(current)]")
+        .accessibilityLabel("\(h) default: \(current.isEmpty ? "your own login" : current)")
     }
 }
