@@ -5,7 +5,7 @@ import Foundation
 
 func check(_ ok: Bool, _ what: String) { print((ok ? "ok   " : "FAIL ") + what); if !ok { exit(1) } }
 
-/// One JSON line to the app's socket, as daemon/Link.bend sends it.
+/// One JSON line to the app's socket, as daemon/src/link.ts sends it.
 func ask(_ method: String, _ params: [String: Any]) -> [String: Any] {
     let fd = socket(AF_UNIX, SOCK_STREAM, 0)
     var addr = sockaddr_un()

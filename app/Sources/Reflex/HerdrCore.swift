@@ -4,7 +4,7 @@ import Foundation
 // herdr-core (`hc`): the terminal runtime Reflex's agents live in by
 // default. herdr (the TUI) still works alongside it while people move over:
 // reflexd lists both, and a pane id says which one an agent is in (herdr's
-// hold a ':', the core's are "t7" or "box/t7"; see daemon/Term.bend).
+// hold a ':', the core's are "t7" or "box/t7"; see daemon/src/term.ts).
 //
 // Two ways in, as the core's API docs describe:
 // - plain JSON-RPC over its socket, one request per connection (`call`):

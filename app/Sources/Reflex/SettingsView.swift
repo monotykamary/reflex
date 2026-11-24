@@ -654,7 +654,7 @@ private struct TerminalPreview: View {
         let font = Font(Themes.font(family, size: size))
         VStack(alignment: .leading, spacing: 3) {
             (Text("~/VCS/jev-fabric ").foregroundColor(c(4)) + Text("main ").foregroundColor(c(5)) + Text("❯ ").foregroundColor(c(2)) + Text("claude"))
-            (Text("● ").foregroundColor(c(2)) + Text("Read ").bold() + Text("src/follow.bend").foregroundColor(c(6)))
+            (Text("● ").foregroundColor(c(2)) + Text("Read ").bold() + Text("src/follow.ts").foregroundColor(c(6)))
             (Text("  + ").foregroundColor(c(2)) + Text("fuel loop bounded at 64").foregroundColor(c(2)))
             if !compact {
                 (Text("  - ").foregroundColor(c(1)) + Text("unbounded retry").foregroundColor(c(1)))
@@ -1872,7 +1872,7 @@ private struct AboutPane: View {
                     Text("Reflex").font(.system(size: 22, weight: .bold))
                     Text("Version \(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "dev") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "–") · \(Bundle.main.object(forInfoDictionaryKey: "ReflexCommit") as? String ?? "dev"))")
                         .font(.system(size: 12)).foregroundStyle(.secondary)
-                    Text("One reflex to every coding agent in herdr. Routing by Jev, decisions in reflexd — written in Bend, with its laws proved.")
+                    Text("One reflex to every coding agent in herdr. Routing by Jev, decisions in reflexd — TypeScript, with its laws proven by gdp-wired.")
                         .font(.system(size: 12.5)).foregroundStyle(.secondary).multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity).padding(.vertical, 10)

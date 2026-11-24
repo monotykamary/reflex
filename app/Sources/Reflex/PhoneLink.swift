@@ -9,7 +9,7 @@ import SwiftTerm
 // So the app attaches for the phone, keeps the screen in a terminal emulator
 // that draws nothing (SwiftTerm, as the windows use), and reflexd asks it
 // for that screen — for these agents, /api/pane, /api/text and /api/term
-// come here (see daemon/Link.bend) over <support>/link.sock: one JSON line
+// come here (see daemon/src/link.ts) over <support>/link.sock: one JSON line
 // asked, one answered, per connection.
 //
 //   screen  {terminal}                    → {text}: the screen as ANSI

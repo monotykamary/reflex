@@ -5,7 +5,7 @@ import Foundation
 // forwards its herdr's two sockets into <support>/machines: `<key>.sock` (the
 // API, which reflexd polls) and `<key>-client.sock` (terminals: herdr derives
 // it from HERDR_SOCKET_PATH). `list` there names the machines with a tunnel,
-// and an agent on one has the pane "<key>/<pane>" (see daemon/Herdr.bend).
+// and an agent on one has the pane "<key>/<pane>" (see daemon/src/herdr.ts).
 // SSH is yours: your ~/.ssh/config, keys and agent; nothing is stored here.
 
 /// What the UI shows of each herdr machine: Settings → Machines lists them,

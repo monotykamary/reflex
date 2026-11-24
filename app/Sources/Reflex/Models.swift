@@ -1,6 +1,6 @@
 import Foundation
 
-// Wire types of reflexd's JSON API (see daemon/Model.bend for the source of truth).
+// Wire types of reflexd's JSON API (see daemon/src/model.ts for the source of truth).
 
 struct AgentInfo: Codable, Identifiable, Hashable {
     var pane: String
@@ -34,7 +34,7 @@ struct AgentInfo: Codable, Identifiable, Hashable {
 }
 
 /// An agent herdr-core lost, not one you ended: a restart, a lost holder
-/// or a signal took it (`/api/stopped`; daemon/Hc.bend). Shown until you
+/// or a signal took it (`/api/stopped`; daemon/src/hc.ts). Shown until you
 /// resume or dismiss it.
 struct StoppedInfo: Codable, Identifiable, Hashable {
     var pane: String
@@ -80,7 +80,7 @@ struct StoppedResponse: Codable {
 
 /// A folder or an earlier session on another Mac has the path
 /// "<machine>:<path>" ("work:/Users/you/VCS/app"); one on this Mac has its
-/// plain absolute path. reflexd reads it the same way (daemon/Index.bend):
+/// plain absolute path. reflexd reads it the same way (daemon/src/folders.ts):
 /// a session started there starts in that Mac's herdr.
 enum Place {
     /// The machine a path is on, "" for this Mac.

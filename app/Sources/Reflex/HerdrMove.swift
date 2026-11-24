@@ -45,7 +45,7 @@ final class HerdrMove: ObservableObject {
         case notHere
     }
 
-    /// The agents Reflex resumes by id (Route.bend's resume_args).
+    /// The agents Reflex resumes by id (daemon/src/route.ts's resumeArgs).
     static let kinds: Set = ["claude", "pi", "codex"]
 
     static func inHerdr(_ a: AgentInfo) -> Bool { !HerdrCore.isCore(a.pane) }
