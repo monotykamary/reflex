@@ -11,19 +11,17 @@
 // Placeholder: `refreshToken` left out. Claude never refreshes without one
 // ("no_refresh_token"); "" would mean logged out.
 //
-// Refresh: `claude auth login` with CLAUDE_CODE_OAUTH_REFRESH_TOKEN and
-// CLAUDE_CODE_OAUTH_SCOPES exchanges the refresh token without a browser and stores the
-// result (in the env, never argv). It is a full sign-in: it rereads the profile, asks for
-// a long-lived access token, revokes any stored `designOauth` token, and drops the login's
-// end, which reflex-keys puts back (a refresh doesn't extend it). It takes no refresh lock,
-// so reflex-keys holds Claude's around it.
+// Refresh: Claude's own daemon (`claude daemon run`, which `reflex-keys watch` keeps running
+// on the holder with the profile's env) refreshes about 4 minutes before the access token
+// ends, under Claude's own locks; watch sees the store change and pushes it. reflex-keys
+// never makes Claude refresh any other way.
 import {rmSync} from 'node:fs'
 import {join} from 'node:path'
 import * as kc from '../keychain'
 import {dirLock} from '../lock'
 import {claudeAccount, claudeDir, claudeService, keychainStore, type Profile} from '../profile'
-import {clone, fail, now, readJson, target, writeJson} from '../util'
-import {fp, margin, run, type Content, type Store} from './store'
+import {clone, fail, readJson, target, writeJson} from '../util'
+import {fp, type Content, type Store} from './store'
 
 export function claudeStore(p: Profile): Store {
   const dir = claudeDir(p), file = join(dir, '.credentials.json')
@@ -63,30 +61,9 @@ export function claudeStore(p: Profile): Store {
     expiry: (c: Content) => c?.claudeAiOauth?.expiresAt ?? null,
     loginEnd: (c: Content) => c?.claudeAiOauth?.refreshTokenExpiresAt ?? null,
     fingerprint: (c: Content) => fp(c?.claudeAiOauth?.accessToken, c?.claudeAiOauth?.refreshToken, c?.claudeAiOauth?.expiresAt),
-    due: (c: Content) => (s.expiry(c) ?? 0) - now() < margin('claude', 2 * 3_600_000),
+    due: () => false,
     guard: refreshLocks,
-    async refresh(c: Content) {
-      return refreshLocks(async () => {
-        const cur = await s.read()
-        if (!cur || !s.usable(cur)) fail('no usable Claude login here to refresh')
-        if (s.fingerprint(cur) !== s.fingerprint(c)) return 'changed meanwhile'
-        const o = cur.claudeAiOauth
-        const scopes = Array.isArray(o.scopes) ? o.scopes.join(' ') : ''
-        if (!scopes) fail('the stored Claude login names no scopes')
-        await run(p, ['claude', 'auth', 'login'], {CLAUDE_CODE_OAUTH_REFRESH_TOKEN: o.refreshToken, CLAUDE_CODE_OAUTH_SCOPES: scopes},
-          {timeout: 180_000, drop: ['CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY']})
-        const after = await s.read()
-        if (!after || !s.usable(after) || s.fingerprint(after) === s.fingerprint(cur)) fail('claude auth login stored no new login')
-        // A refresh doesn't extend the login: keep its end.
-        const end = o.refreshTokenExpiresAt, got = after.claudeAiOauth.refreshTokenExpiresAt
-        if (typeof end === 'number' && !(typeof got === 'number' && got <= end))
-          await storageLock(async () => {
-            const all = readAll()
-            if (all?.claudeAiOauth?.refreshToken === after.claudeAiOauth.refreshToken) writeAll({...all, claudeAiOauth: {...all.claudeAiOauth, refreshTokenExpiresAt: end}})
-          })
-        return 'refreshed'
-      })
-    },
+    refresh: async () => "Claude's daemon refreshes it (reflex-keys watch runs it on the holder)",
   }
   return s
 }

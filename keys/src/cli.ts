@@ -10,6 +10,9 @@
 //                         [--force]       ... when the holder is gone for good: MACHINE, signed in
 //                                         again, takes it over at a higher epoch
 //   reflex-keys status [--json]           per profile: holder, epoch, generation, expiry, who's current
+//   reflex-keys watch [--quiet]           the service (a LaunchAgent, KeepAlive): pushes a change within
+//                                         ~15 s, ticks every ~10 min, runs Claude's daemon for the
+//                                         Claude profiles this Mac holds; logs to ~/.reflex/keys/watch.log
 //
 // Between reflex-keys processes (stdin/stdout JSON, never argv):
 //   receive                               apply a copy from stdin
@@ -21,9 +24,10 @@
 // SPEC: claude, claude[NAME], codex[NAME], pi[NAME], agy[NAME], opencode[NAME], amp[NAME], grok[NAME].
 import {exportCopy, hold, meta, receive, release, seed, status, statusText, takeover, tick, VERSION} from './ops'
 import {myId} from './state'
+import {watch} from './watch'
 import {Fail, redact} from './util'
 
-const usage = 'usage: reflex-keys seed SPEC | tick | hold SPEC --on MACHINE [--force] | status [--json] | receive | export SPEC | meta | release SPEC --to ID | takeover SPEC'
+const usage = 'usage: reflex-keys seed SPEC | tick | watch [--quiet] | hold SPEC --on MACHINE [--force] | status [--json] | receive | export SPEC | meta | release SPEC --to ID | takeover SPEC'
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv
@@ -39,6 +43,7 @@ async function main(argv: string[]): Promise<number> {
       if (!on || rest.length !== 1) break
       print(await hold(rest[0], on, force)); return 0
     }
+    case 'watch': { await watch({quiet: has('--quiet')}); return 0 }
     case 'status': {
       const j = has('--json'), xs = await status()
       if (j) json(xs); else process.stdout.write(statusText(xs) + '\n')

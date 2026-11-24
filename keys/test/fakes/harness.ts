@@ -13,8 +13,31 @@ const writeJ = (f: string, v: unknown) => { mkdirSync(dirname(f), {recursive: tr
 const die = (m: string) => { process.stderr.write(m + '\n'); process.exit(1) }
 const log = (m: string) => { if (process.env.FAKE_LOG) writeFileSync(process.env.FAKE_LOG, m + '\n', {flag: 'a'}) }
 
-if (tool === 'claude') {
-  if (args[0] !== 'auth' || args[1] !== 'login') die('fake claude: only auth login')
+if (tool === 'claude' && args[0] === 'daemon') {
+  // status: running only when the test says one runs; run: refresh ~4 min before expiry, as Claude's daemon does
+  const world = process.env.WORLD!
+  if (args[1] === 'status') {
+    let running = false
+    try { readFileSync(join(world, 'daemon-running')); running = true } catch {}
+    process.stdout.write(running ? 'pid 1, version fake\n' : 'not running\n')
+    process.exit(running ? 0 : 1)
+  }
+  if (args[1] !== 'run') die('fake claude daemon: status or run')
+  const f = join(process.env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), '.credentials.json')
+  writeFileSync(join(world, `daemon-${process.env.SELF}.pid`), String(process.pid))
+  log(`daemon ${process.pid} up for ${f}`)
+  const margin = Number(process.env.FAKE_DAEMON_MARGIN_MS ?? 240_000)
+  setInterval(() => {
+    const all = readJ(f), o = all?.claudeAiOauth
+    if (!o?.refreshToken || o.expiresAt - Date.now() > margin) return
+    const got = refresh(o.refreshToken)
+    if (!got) { log(`daemon ${process.pid}: invalid_grant`); return }
+    writeJ(f, {...all, claudeAiOauth: {...o, accessToken: got.access, refreshToken: got.refresh, expiresAt: Date.now() + 8 * 3_600_000}})
+    log(`daemon ${process.pid} refreshed ${f}`)
+  }, 200)
+  process.on('SIGTERM', () => { log(`daemon ${process.pid} stopped`); process.exit(0) })
+} else if (tool === 'claude') {
+  if (args[0] !== 'auth' || args[1] !== 'login') die('fake claude: only daemon, auth login')
   const rt = process.env.CLAUDE_CODE_OAUTH_REFRESH_TOKEN ?? die('no refresh token')
   if (!process.env.CLAUDE_CODE_OAUTH_SCOPES) die('CLAUDE_CODE_OAUTH_SCOPES is required')
   const f = join(process.env.CLAUDE_CONFIG_DIR ?? join(home, '.claude'), '.credentials.json')

@@ -231,6 +231,31 @@ export async function tick(): Promise<string[]> {
   return lines
 }
 
+// ---- watch's quick path ---------------------------------------------------------------
+
+// The profiles this machine holds now.
+export const heldHere = () => known().filter(k => load(k).lease.holder === myId())
+
+// On the holder: the store changed (its harness, or Claude's daemon, refreshed): a new
+// generation, pushed straight away.
+export async function noticeChange(key: string, lines: string[]): Promise<boolean> {
+  const p = parse(key), store = storeFor(p), me = myId()
+  const changed = await withProfile(key, async () => {
+    const st = load(key)
+    if (st.lease.holder !== me || outbox(key)) return false
+    const c = await store.read()
+    if (!c || !store.usable(c)) return false
+    const f = store.fingerprint(c)
+    if (f === st.fp) return false
+    st.lease = L.renumber(st.lease); st.fp = f
+    save(key, st)
+    lines.push(`${key}: the login changed here: gen ${st.lease.gen}`)
+    return true
+  })
+  if (changed) await push(p, store, await survey(), lines)
+  return changed
+}
+
 // ---- seed, hold ----------------------------------------------------------------------
 
 const leasesOf = (key: string, metas: Map<string, Meta>) => [load(key).lease, ...[...metas.values()].map(m => m.profiles[key]).filter(Boolean)] as L.Lease[]

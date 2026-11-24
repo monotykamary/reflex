@@ -1,7 +1,7 @@
 // End to end: three machines (two Macs, a Linux box) through a fake hc, the real CLI on
 // each, fake harnesses refreshing against a fake server whose refresh tokens work once.
 import {afterAll, describe, expect, test} from 'bun:test'
-import {account, jwt, signIn} from './fakes/server'
+import {account, jwt, refresh, signIn} from './fakes/server'
 import {readJ, world, writeJ, type World} from './world'
 
 const H = 3_600_000
@@ -52,29 +52,34 @@ describe('claude[work]', () => {
     expect(r.err).toContain('already held by work')
   })
 
-  test('the holder refreshes when due, keeps the login end, pushes; others never refresh', () => {
+  // What Claude's daemon does on the holder: refresh, keeping everything else.
+  const daemonRefresh = (w: World, m: string) => {
+    const all = readJ(claudeFile(w, m)), got = refresh(all.claudeAiOauth.refreshToken)!
+    writeJ(claudeFile(w, m), {...all, claudeAiOauth: {...all.claudeAiOauth, accessToken: got.access, refreshToken: got.refresh, expiresAt: Date.now() + 8 * H}})
+  }
+
+  test("a refresh on the holder is a new generation, pushed; tick never makes Claude refresh; a box away catches up", () => {
     const w = setup()
-    signInClaude(w, 'work', 'cat', 1 * H)       // due (margin 2 h)
-    const end = readJ(claudeFile(w, 'work')).claudeAiOauth.refreshTokenExpiresAt
+    signInClaude(w, 'work', 'cat', 1 * H)
     ok(w.run('work', ['seed', 'claude[work]']))
     w.down('box')
-    ok(w.run('studio', ['tick']))              // not the holder: nothing to refresh
-    expect(account('cat').refreshes).toBe(0)
+    ok(w.run('studio', ['tick']))
+    ok(w.run('work', ['tick']))
+    expect(account('cat').refreshes).toBe(0)     // Claude refreshes itself (its daemon); tick doesn't
+    daemonRefresh(w, 'work')
     const t = ok(w.run('work', ['tick']))
-    expect(t.err).toContain('refreshed, gen 2')
-    expect(account('cat')).toMatchObject({refreshes: 1, spent: 0})
+    expect(t.err).toContain('the login changed here: gen 2')
     const held = readJ(claudeFile(w, 'work')).claudeAiOauth
-    expect(held.refreshToken).toBe(account('cat').current)
-    expect(held.refreshTokenExpiresAt).toBe(end)              // a refresh doesn't extend the login
     expect(readJ(claudeFile(w, 'work')).designOauth).toEqual({keep: true})
     expect(readJ(claudeFile(w, 'studio')).claudeAiOauth.accessToken).toBe(held.accessToken)
+    expect('refreshToken' in readJ(claudeFile(w, 'studio')).claudeAiOauth).toBe(false)
     // the box was away: on the next tick it catches up
     expect(readJ(claudeFile(w, 'box')).claudeAiOauth.accessToken).toBe('at:cat:0')
     w.up('box')
     ok(w.run('work', ['tick']))
     expect(readJ(claudeFile(w, 'box')).claudeAiOauth.accessToken).toBe(held.accessToken)
     expect(status(w, 'work')[0]).toMatchObject({gen: 2, current: ['box', 'studio']})
-    expect(account('cat').refreshes).toBe(1)  // nothing due any more
+    expect(account('cat')).toMatchObject({refreshes: 1, spent: 0})
     noSecrets(w)
   })
 
@@ -88,11 +93,9 @@ describe('claude[work]', () => {
     expect(readJ(claudeFile(w, 'studio')).claudeAiOauth.refreshToken).toBe(account('dan').current)
     expect(status(w, 'studio')[0]).toMatchObject({here: 'holder', epoch: 2, gen: 1, login: 'usable'})
     expect(status(w, 'work')[0]).toMatchObject({here: 'receiver', epoch: 2, holder: 'studio'})
-    // the old holder never refreshes again; the new one does
-    const due = {REFLEX_KEYS_MARGIN_CLAUDE: String(9 * 3600)}
-    ok(w.run('work', ['tick'], undefined, due))
-    expect(account('dan').refreshes).toBe(0)
-    ok(w.run('studio', ['tick'], undefined, due))
+    // the new holder's refresh works (it has the newest token) and reaches the old holder
+    daemonRefresh(w, 'studio')
+    ok(w.run('studio', ['tick']))
     expect(account('dan')).toMatchObject({refreshes: 1, spent: 0})
     expect(readJ(claudeFile(w, 'work')).claudeAiOauth.accessToken).toBe(readJ(claudeFile(w, 'studio')).claudeAiOauth.accessToken)
     noSecrets(w)
@@ -113,7 +116,7 @@ describe('claude[work]', () => {
     expect(status(w, 'studio')[0]).toMatchObject({here: 'holder', epoch: 2})
     w.up('work')
     // work comes back due for a refresh: it sees epoch 2 first and stops, spending nothing
-    const t = ok(w.run('work', ['tick'], undefined, {REFLEX_KEYS_MARGIN_CLAUDE: String(9 * 3600)}))
+    const t = ok(w.run('work', ['tick']))
     expect(t.err).toContain('took')
     expect(status(w, 'work')[0]).toMatchObject({here: 'receiver', epoch: 2, login: 'placeholder'})
     expect(account('eve').spent).toBe(0)
@@ -125,7 +128,7 @@ describe('claude[work]', () => {
     ok(w.run('work', ['seed', 'claude[work]']))
     const old = JSON.parse(ok(w.run('work', ['export', 'claude[work]'])).out)
     expect(JSON.stringify(old)).not.toContain('rt:')   // an export carries no refresh token
-    ok(w.run('work', ['tick']))                          // gen 2
+    daemonRefresh(w, 'work'); ok(w.run('work', ['tick']))   // gen 2
     const res = JSON.parse(ok(w.run('box', ['receive'], JSON.stringify(old))).out)
     expect(res).toMatchObject({kind: 'ignore', lease: {gen: 2}})
     expect(readJ(claudeFile(w, 'box')).claudeAiOauth.accessToken).not.toBe('at:fay:0')

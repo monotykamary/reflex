@@ -81,7 +81,8 @@ reached with `hc exec --on M -i` running `~/.local/bin/reflex-keys` there, paylo
 stdout only.
 
     reflex-keys seed SPEC               this Mac, where SPEC is signed in, holds it (epoch 1)
-    reflex-keys tick                    every few minutes on each Mac
+    reflex-keys watch [--quiet]         the service on every Mac (a LaunchAgent, KeepAlive)
+    reflex-keys tick                    one pass of what watch does every ~10 min
     reflex-keys hold SPEC --on M        handover: the holder stops, sends its newest copy, epoch + 1
     reflex-keys hold SPEC --on M --force    the holder gone for good: M, signed in again, takes over
     reflex-keys status [--json]         holder, epoch, generation, expiry, login end, who's current
@@ -104,18 +105,27 @@ Holder triggers, read from each harness's source on 2026-11-24:
 
 | | How the holder makes it refresh | When |
 |---|---|---|
-| Claude | `claude auth login` with `CLAUDE_CODE_OAUTH_REFRESH_TOKEN` and `CLAUDE_CODE_OAUTH_SCOPES` (the stored scopes) in its env; Claude's refresh locks held around it | under 2 h left |
+| Claude | its own daemon, `claude daemon run --log-file ~/.reflex/keys/claude-SPEC.log` with the profile's env, kept running by `watch` on the holder | about 4 min before expiry |
 | Codex | `codex app-server`: `initialize`, `initialized`, `account/read {refreshToken: true}` | under a day left, or a day since the last |
 | pi | `pi auth print-bearer-token --provider X --min-expiry 120m` | under 2 h left |
 | opencode, grok | none (they refresh themselves when used on the holder) | - |
 | agy, amp, Copilot | don't rotate: copied as they are | - |
 
-Notes on the Claude trigger:
-- **It is a full sign-in.** It refetches the profile and roles, asks for a one-year access
-  token (what the server grants is unconfirmed), and revokes any stored `designOauth` token.
-- **It drops `refreshTokenExpiresAt`.** reflex-keys puts the old login end back.
-- **No other trigger was found.** There is no early-refresh command or env var. The margin is
-  hard-coded at 5 minutes. The daemon refreshes only 4 minutes before expiry and isn't one-shot.
+`watch` runs these pieces:
+- **Change check, every ~15 s.** It reads the stores of the profiles this Mac holds. A change is
+  a new generation, pushed straight away.
+- **Full tick, every ~10 min,** also at start and after a sleep. Codex and pi are refreshed when
+  due, newer copies are taken, and machines that are behind are brought up to date.
+- **Claude daemons.** One `claude daemon run` runs per Claude profile held here.
+  - None is started if `claude daemon status` says one already runs for that config.
+  - It is restarted with backoff (5 s doubling to 10 min) when it exits.
+  - It is stopped by its PID when this Mac stops holding the profile.
+  - A small sh guard kills it when `watch` is gone, even after a SIGKILL.
+- **Log:** `~/.reflex/keys/watch.log`, rotated at 256 KB into `watch.log.1`.
+
+Receivers get Claude's new token at most about 4 minutes before the old one ends. A Claude
+started fresh on a receiver in the last 5 minutes of a token may count itself signed out until
+the push lands.
 
 Codex's `account/read` refresh is a forced refresh through its own guarded reload and locks.
 
