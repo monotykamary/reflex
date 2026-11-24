@@ -1,0 +1,24 @@
+trust:
+  1 No, exit  =>  {"type":"press","pane":"p","key":"enter"}
+  2 Yes, I trust this folder  =>  {"type":"press","pane":"p","key":"down enter"}
+
+multi:
+  1 [✔] Apple  =>  {"type":"press","pane":"p","key":"1"}
+  2 [ ] Banana  =>  {"type":"press","pane":"p","key":"2"}
+  3 [ ] Cherry  =>  {"type":"press","pane":"p","key":"3"}
+  4 [ ] Type something  =>  {"type":"press","pane":"p","key":"4"}
+  5 Chat about this  =>  {"type":"press","pane":"p","key":"5"}
+  ⇥ Next — keep these choices  =>  {"type":"press","pane":"p","key":"tab"}
+
+review:
+  1 Submit answers  =>  {"type":"press","pane":"p","key":"1"}
+  2 Cancel  =>  {"type":"press","pane":"p","key":"2"}
+
+idle:
+
+below:
+  1 Alpha  =>  {"type":"press","pane":"p","key":"up up enter"}
+  2 Beta  =>  {"type":"press","pane":"p","key":"up enter"}
+  3 Gamma  =>  {"type":"press","pane":"p","key":"enter"}
+  4 Delta  =>  {"type":"press","pane":"p","key":"down enter"}
+

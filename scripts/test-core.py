@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Test reflexd's herdr-core adapter (daemon/Hc.bend, daemon/Term.bend) against a real,
+"""Test reflexd's herdr-core adapter (daemon/src/hc.ts, daemon/src/term.ts) against a real,
 disposable core with fake agents: no live agent, no API calls, never your own core.
 
-Needs Bend, a C compiler and hc (on PATH, or REFLEX_TEST_HC=/path/to/herdr-core).
+Needs Bun and hc (on PATH, or REFLEX_TEST_HC=/path/to/herdr-core).
 """
 
 import json
@@ -14,6 +14,17 @@ import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+BUN = os.environ.get("BUN") or shutil.which("bun") or str(Path.home() / ".bun/bin/bun")
+
+
+def build(entry, out):
+    """The program under test: REFLEX_TEST_BIN if given (a binary built elsewhere), else `entry` compiled with Bun."""
+    given = os.environ.get("REFLEX_TEST_BIN")
+    if given:
+        return given
+    subprocess.run([BUN, "build", "--compile", entry, "--outfile", str(out)], cwd=ROOT / "daemon", check=True,
+                   timeout=300, capture_output=True, text=True)
+    return str(out)
 HC = os.environ.get("REFLEX_TEST_HC") or shutil.which("hc") or shutil.which("herdr-core")
 
 # Fake agents: `r <report>` sends an OSC 7501 status report, as an agent would.
@@ -111,9 +122,7 @@ def main():
     home = Path(work) / "home"
     try:
         started = time.monotonic()
-        subprocess.run(["bend", "daemon/tests/core.bend", "-o", f"{work}/core"], cwd=ROOT, check=True,
-                       timeout=300, capture_output=True, text=True,
-                       env={**os.environ, "BEND_NO_TELEMETRY": "1"})
+        core = build("tests/core.ts", f"{work}/core")
         built = time.monotonic()
         for name, script in AGENTS.items():
             labels = [x for l in LABELS.get(name, []) for x in ("--label", l)]
@@ -136,7 +145,7 @@ def main():
         pid = got["foreground"]["pid"]
         (home / ".claude" / "sessions").mkdir(parents=True)
         (home / ".claude" / "sessions" / f"{pid}.json").write_text(json.dumps({"pid": pid, "sessionId": "s-from-file"}))
-        run = subprocess.run([f"{work}/core"], cwd=ROOT, timeout=60, capture_output=True, text=True,
+        run = subprocess.run([core], cwd=ROOT, timeout=60, capture_output=True, text=True,
                              env={**os.environ, "REFLEX_TEST_CORE": sock, "REFLEX_TEST_HOME": str(home)})
         out = [l for l in run.stdout.splitlines() if l.strip()]
         missing = [e for e in EXPECT if not any(l.startswith(e) for l in out)]
@@ -163,7 +172,7 @@ def main():
             raise SystemExit(f"the restart didn't give kept a new shell: {again['state']} pid {again['pid']}")
         hc(env, "run", "--bg", "--no-parent", "--name", "dup", "--", "sleep", "300")
         hc(env, "run", "--bg", "--no-parent", "--name", "carrier", "--label", "reflex.session=s-carried", "--", "sleep", "300")
-        after = subprocess.run([f"{work}/core"], cwd=ROOT, timeout=60, capture_output=True, text=True,
+        after = subprocess.run([core], cwd=ROOT, timeout=60, capture_output=True, text=True,
                                env={**os.environ, "REFLEX_TEST_CORE": sock, "REFLEX_TEST_HOME": str(home), "REFLEX_TEST_PHASE": "after"})
         line = next((l for l in after.stdout.splitlines() if l.startswith("stopped-json ")), "")
         if after.returncode or not line:

@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Test the real Bend status adapter against a disposable Unix socket, not live agents."""
+"""Test the real status adapter (daemon/src/herdr.ts) against a disposable Unix socket, not live agents."""
 
 import json
 import os
 from pathlib import Path
+import shutil
 import socketserver
 import subprocess
 import tempfile
@@ -11,6 +12,17 @@ import threading
 import time
 
 ROOT = Path(__file__).resolve().parent.parent
+BUN = os.environ.get("BUN") or shutil.which("bun") or str(Path.home() / ".bun/bin/bun")
+
+
+def build(entry, out):
+    """The program under test: REFLEX_TEST_BIN if given (a binary built elsewhere), else `entry` compiled with Bun."""
+    given = os.environ.get("REFLEX_TEST_BIN")
+    if given:
+        return given
+    subprocess.run([BUN, "build", "--compile", entry, "--outfile", str(out)], cwd=ROOT / "daemon", check=True,
+                   timeout=300, capture_output=True, text=True)
+    return str(out)
 STATUSES = {
     "w1:p1": {"agent": {"agent_status": "idle"}},
     "w1:p2": {"agent": {"agent_status": "working"}},
@@ -48,12 +60,8 @@ def main():
                 errors.append(str(error))
 
     with tempfile.TemporaryDirectory(prefix="reflex-agent-status-") as work:
-        binary = str(Path(work) / "status")
         started = time.monotonic()
-        subprocess.run(
-            ["bend", "daemon/tests/status.bend", "-o", binary],
-            cwd=ROOT, check=True, timeout=120, capture_output=True, text=True,
-        )
+        binary = build("tests/status.ts", Path(work) / "status")
         built = time.monotonic()
         socket_path = str(Path(work) / "herdr.sock")
         with socketserver.UnixStreamServer(socket_path, Handler) as server:

@@ -1,0 +1,8 @@
+typed: typed yes, missing no
+sent: typed no, missing no
+lost: typed no, missing yes
+lost, done: typed no, missing yes
+pasted: typed yes, missing no
+wrapped: typed yes, missing no
+working: typed no, missing no
+no box: typed yes, missing no

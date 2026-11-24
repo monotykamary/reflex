@@ -1,0 +1,12 @@
+w1:p1  =>  machine , pane w1:p1, socket /local/herdr.sock
+work/w1:p1  =>  machine work, pane w1:p1, socket /data/machines/work.sock
+  =>  machine , pane , socket /local/herdr.sock
+tagged: work/w1:p1 work/w2:p3 
+kept on work: work/w1:p1 work/w2:p3 
+/Users/me/VCS/app  =>  machine , path /Users/me/VCS/app, reads ~/VCS/app, pane w3:p1
+work:/Users/you/VCS/app  =>  machine work, path /Users/you/VCS/app, reads work:~/VCS/app, pane work/w3:p1
+work:/opt/work  =>  machine work, path /opt/work, reads work:/opt/work, pane work/w3:p1
+  =>  machine , path , reads , pane w3:p1
+agent pane work/w1:p2 on: work, w1:p2 on: []
+here: /Users/me/a 
+on work: work:/Users/you/b work:/d 

@@ -4,7 +4,7 @@ own), no herdr anywhere. Its API lists the core's agents, a prompt reaches one a
 answered, a session starts there (pi, with no request: nothing is sent to any model) with
 the session id Reflex chose, and closing it ends it.
 
-Needs Bend, a C compiler, pi, and hc (on PATH, or REFLEX_TEST_HC=/path/to/herdr-core).
+Needs Bun, pi, and hc (on PATH, or REFLEX_TEST_HC=/path/to/herdr-core).
 """
 
 import json
@@ -18,6 +18,17 @@ import time
 import urllib.request
 
 ROOT = Path(__file__).resolve().parent.parent
+BUN = os.environ.get("BUN") or shutil.which("bun") or str(Path.home() / ".bun/bin/bun")
+
+
+def build(entry, out):
+    """The program under test: REFLEX_TEST_BIN if given (a binary built elsewhere), else `entry` compiled with Bun."""
+    given = os.environ.get("REFLEX_TEST_BIN")
+    if given:
+        return given
+    subprocess.run([BUN, "build", "--compile", entry, "--outfile", str(out)], cwd=ROOT / "daemon", check=True,
+                   timeout=300, capture_output=True, text=True)
+    return str(out)
 HC = os.environ.get("REFLEX_TEST_HC") or shutil.which("hc") or shutil.which("herdr-core")
 TOKEN = "rxtest-token"
 R = r"""r(){ printf '\033]7501;%s\033\\' "$1"; }; """
@@ -60,14 +71,13 @@ def main():
     daemon = None
     port = free_port()
     try:
-        subprocess.run(["bend", "daemon/main.bend", "-o", f"{work}/reflexd"], cwd=ROOT, check=True, timeout=600,
-                       capture_output=True, env={**os.environ, "BEND_NO_TELEMETRY": "1"})
+        reflexd = build("src/main.ts", work / "reflexd")
         subprocess.run([HC, "run", "--bg", "--no-parent", "--name", "echo", "--", "sh", "-c", ECHO],
                        env=core_env, check=True, capture_output=True, timeout=30)
         (work / "data").mkdir()
         (work / "roots" / "proj").mkdir(parents=True)
         log = open(work / "reflexd.log", "w")
-        daemon = subprocess.Popen([f"{work}/reflexd"], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env={
+        daemon = subprocess.Popen([reflexd], cwd=ROOT, stdout=log, stderr=subprocess.STDOUT, env={
             **core_env, "REFLEX_TOKEN": TOKEN, "REFLEX_PORT": str(port), "REFLEX_BIND": "127.0.0.1",
             "REFLEX_DATA": f"{work}/data", "REFLEX_WEB": str(ROOT / "web"), "REFLEX_SCAN": str(ROOT / "scripts/reflex-scan.sh"),
             "REFLEX_FORK": str(ROOT / "scripts/reflex-fork.sh"), "REFLEX_ROOTS": f"{work}/roots",

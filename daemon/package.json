@@ -1,0 +1,18 @@
+{
+  "name": "reflexd",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build --compile --minify --target=bun-darwin-arm64 src/main.ts --outfile ../build/reflexd",
+    "build:linux": "bun build --compile --minify --target=bun-linux-x64 src/main.ts --outfile ../build/reflexd-linux-x64",
+    "typecheck": "tsc --noEmit -p .",
+    "laws": "bun run laws/run.ts",
+    "test": "bun test tests"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "gdp-wired": "^0.59.0",
+    "gdp-wired-cli": "^0.59.0",
+    "typescript": "^7.0.2"
+  }
+}
