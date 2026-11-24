@@ -74,6 +74,8 @@
 #     login SPEC [PROVIDER]         sign it in (pi: which provider)
 #     run SPEC [ARG...]             the harness in it;  exec SPEC COMMAND...
 #     ls                            rm SPEC --yes (its sessions and login go)
+#     default SPEC                  what a bare harness starts as on this machine
+#                                   (claude[] again: your own)
 #
 # Machines are herdr-core's (`hc machine ls`); `machine new` makes an instabox
 # box (or, --provider boat, a boat.dev sandbox) and adds it as a temporary one. Nothing here
@@ -1726,10 +1728,21 @@ skill() {
 PROFILES=${REFLEX_PROFILES:-"$HOME/.reflex/profiles"}
 PROFILE_KEYCHAIN="Reflex profile keychain"
 
+prof_default() { # prof_default HARNESS: this machine's default profile for it, or nothing
+  [ -f "$PROFILES/defaults" ] && awk -v h="$1" '$1 == h { print $2; exit }' "$PROFILES/defaults" || true
+}
+
+prof_set_default() { # prof_set_default HARNESS NAME: NAME "" clears it
+  mkdir -p "$PROFILES"
+  { [ -f "$PROFILES/defaults" ] && awk -v h="$1" '$1 != h' "$PROFILES/defaults"; [ -z "$2" ] || printf '%s %s\n' "$1" "$2"; } > "$PROFILES/defaults.new"
+  mv "$PROFILES/defaults.new" "$PROFILES/defaults"
+}
+
 prof_parse() { # prof_parse SPEC: PH the harness, PN the name ("" for your own), P its folder
   case $1 in
     *\[*\]) PH=${1%%\[*}; PN=${1#*\[}; PN=${PN%\]} ;;
-    *) PH=$1; PN= ;;
+    # Bare: this machine's default profile for it, if it has one (claude[]: your own).
+    *) PH=$1; PN=$(prof_default "$1") ;;
   esac
   case $PH in claude|codex|pi|agy|opencode|amp|grok) ;; *) die "profile: no harness $PH (claude, codex, agy, pi, opencode, amp or grok)" ;; esac
   case $PN in *[!a-z0-9._-]*|.*) die "profile: a name is lowercase letters, digits, '.', '_' or '-'" ;; esac
@@ -1902,7 +1915,17 @@ profile() {
   sub=${1:-}; [ $# -gt 0 ] && shift
   case $sub in
     ls)
-      for _d in "$PROFILES"/*/*; do [ -d "$_d" ] || continue; _n=${_d##*/}; _h=${_d%/*}; printf '%s[%s]\n' "${_h##*/}" "$_n"; done ;;
+      for _d in "$PROFILES"/*/*; do
+        [ -d "$_d" ] || continue; _n=${_d##*/}; _h=${_d%/*}; _h=${_h##*/}
+        if [ "$(prof_default "$_h")" = "$_n" ]; then printf '%s[%s]\tdefault here\n' "$_h" "$_n"; else printf '%s[%s]\n' "$_h" "$_n"; fi
+      done ;;
+    default)
+      [ $# -eq 1 ] || die "profile default SPEC (claude[NAME]; claude[] for your own)"
+      case $1 in *\[*\]) ;; *) die "profile default: name it, ${1}[NAME] (or ${1}[] for your own)" ;; esac
+      prof_parse "$1"
+      [ -z "$PN" ] || [ -d "$P" ] || die "profile default: no profile $1 here (reflex profile login $1)"
+      prof_set_default "$PH" "$PN"
+      if [ -n "$PN" ]; then echo "$PH here starts as ${PH}[$PN]"; else echo "$PH here starts as your own"; fi ;;
     new) [ $# -eq 1 ] || die "profile new SPEC"; prof_parse "$1"; [ -n "$PN" ] || die "profile new: give it a name, ${PH}[NAME]"
       prof_make; echo "${PH}[$PN]: $P" ;;
     login) [ $# -ge 1 ] || die "profile login SPEC [PROVIDER]"; prof_parse "$1"; shift; prof_make; prof_login "$@" ;;
@@ -1919,8 +1942,9 @@ profile() {
                security delete-generic-password -s "$PROFILE_KEYCHAIN" -a "$PH/$PN" >/dev/null 2>&1 || true ;;
         esac
       fi
+      [ "$(prof_default "$PH")" = "$PN" ] && prof_set_default "$PH" ""
       rm -rf "$P"; echo "removed ${PH}[$PN]" ;;
-    *) die "profile new|login|run|exec|ls|rm" ;;
+    *) die "profile new|login|run|exec|ls|default|rm" ;;
   esac
 }
 

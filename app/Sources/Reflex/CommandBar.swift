@@ -71,7 +71,7 @@ enum SlashCommand: Equatable, Hashable {
     }
 
     @MainActor static var all: [SlashCommand] {
-        [.resume] + Onboarding.harnesses.map { .harness($0) } + [.newFolder, .btw, .folder]
+        [.resume] + Onboarding.harnesses.map { .harness($0) } + Profiles.local().map { .harness($0) } + [.newFolder, .btw, .folder]
     }
 }
 
@@ -634,7 +634,7 @@ final class CommandModel: ObservableObject {
     // MARK: Rows
 
     /// The live sessions the bar offers: all of them, or "@work"'s.
-    private var agents: [AgentInfo] { Store.shared.state.agents.filter { (scope == nil || $0.machine == scope) && (harness == nil || $0.kind == harness) } }
+    private var agents: [AgentInfo] { Store.shared.state.agents.filter { (scope == nil || $0.machine == scope) && (harness == nil || Profiles.matches(harness!, kind: $0.kind, profile: $0.profile)) } }
 
     private func leaf(_ path: String) -> String { (path as NSString).lastPathComponent }
 
@@ -837,7 +837,7 @@ final class CommandModel: ObservableObject {
         }
         let away = !p.machine.isEmpty && BoatLifetime.shared.isDown(p.machine) ? " · \(p.machine) is down — resuming starts it first" : ""
         return Candidate(id: "r:" + p.id, kind: .resume, title: p.title,
-                         detail: "\(p.agent) · \(p.folder) · \(p.ago)" + state + away, bp: bp, path: p.cwd, past: p)
+                         detail: "\(p.spec) · \(p.folder) · \(p.ago)" + state + away, bp: bp, path: p.cwd, past: p)
     }
 
     var selected: Candidate? { rows.first { $0.id == selection } ?? rows.first }
@@ -914,13 +914,13 @@ final class CommandModel: ObservableObject {
 
     private func resume(_ p: PastSession, mode: String?, text: String, open: Bool) {
         let how = (mode ?? p.mode) == "fork" ? "Forking" : ((mode ?? p.mode) == "attach" ? "Attaching" : "Resuming")
-        phase = .sending("\(how) \(p.agent) · \(p.title.prefix(40))")
+        phase = .sending("\(how) \(p.spec) · \(p.title.prefix(40))")
         let t = ticket, started = Date()
         Task {
             do {
                 try await Sessions.resume(p, mode: mode, text: text, open: open)
                 Diag.slow("resume", since: started)
-                done("\(how) \(p.agent) in \(p.folder)", ticket: t)
+                done("\(how) \(p.spec) in \(p.folder)", ticket: t)
             } catch { fail("reflexd did not answer — \(error.localizedDescription)", ticket: t) }
         }
     }
@@ -946,7 +946,7 @@ final class CommandModel: ObservableObject {
             return "a new project folder"
         case .resume:
             guard let p = c.past else { return c.title }
-            return "the earlier \(p.agent) conversation \"\(p.title)\" in \(Memory.short(Place.path(p.cwd)))" + (p.machine.isEmpty ? "" : " on \(p.machine)")
+            return "the earlier \(p.spec) conversation \"\(p.title)\" in \(Memory.short(Place.path(p.cwd)))" + (p.machine.isEmpty ? "" : " on \(p.machine)")
         default:
             return c.title
         }

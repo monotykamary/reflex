@@ -63,7 +63,7 @@ struct Client {
     /// folders and earlier sessions.
     func candidates(_ text: String, harness: String?, machine: String? = nil) async throws -> CandidatesResponse {
         var body: [String: Any] = ["text": text, "memory": await Memory.shared.context(for: text)]
-        if let harness { body["harness"] = harness }
+        if let harness { let (k, profile) = Profiles.split(harness); body["harness"] = k; body["profile"] = profile }
         if let machine { body["machine"] = machine }
         return try await post("/api/candidates", body, as: CandidatesResponse.self)
     }
@@ -76,8 +76,10 @@ struct Client {
         try await post("/api/side", ["pane": pane, "text": text], as: RouteResponse.self)
     }
 
+    /// `kind` may name a profile: "claude[tom]" (see Profiles).
     func spawn(cwd: String, kind: String, text: String) async throws -> PendingInfo {
-        try await post("/api/spawn", ["cwd": cwd, "kind": kind, "text": text], as: PendingInfo.self)
+        let (k, profile) = Profiles.split(kind)
+        return try await post("/api/spawn", ["cwd": cwd, "kind": k, "profile": profile, "text": text], as: PendingInfo.self)
     }
 
     func answer(item: Int, key: String) async { await post("/api/answer", ["item": item, "key": key]) }
@@ -92,8 +94,8 @@ struct Client {
     /// Bring an earlier session back in a new herdr workspace (resume, fork
     /// or attach), then submit `text` there if it is not empty.
     func resume(_ p: PastSession, mode: String, text: String) async throws -> PendingInfo {
-        try await post("/api/resume", ["cwd": p.cwd, "kind": p.agent, "session": p.id, "mode": mode, "text": text,
-                                       "label": "\(p.agent) · \(p.title.prefix(40))"], as: PendingInfo.self)
+        try await post("/api/resume", ["cwd": p.cwd, "kind": p.agent, "profile": p.profile ?? "", "session": p.id, "mode": mode, "text": text,
+                                       "label": "\(p.spec) · \(p.title.prefix(40))"], as: PendingInfo.self)
     }
 
     /// A live agent's own session, brought back where new sessions start

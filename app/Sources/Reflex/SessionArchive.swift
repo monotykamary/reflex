@@ -21,6 +21,18 @@ struct PastSession: Identifiable, Hashable, Codable {
     var last: String
     var modified: Date
     var state: State
+    /// The harness profile it was saved in (`reflex profile`: claude[tom]), nil for your own.
+    var profile: String? = nil
+
+    /// How Reflex names its harness: "claude", or "claude[tom]" in a profile.
+    var spec: String { Profiles.spec(agent, profile) }
+
+    /// The profile a session file belongs to, from its path (…/.reflex/profiles/<harness>/<name>/…).
+    static func profile(of path: String) -> String? {
+        guard let r = path.range(of: "/.reflex/profiles/") else { return nil }
+        let parts = path[r.upperBound...].split(separator: "/")
+        return parts.count >= 2 ? String(parts[1]) : nil
+    }
 
     var folder: String { (Place.path(cwd) as NSString).lastPathComponent }
     /// The Mac it was saved on, "" for this one.
@@ -136,7 +148,7 @@ final class SessionArchive: ObservableObject {
         out.sort { $0.modified > $1.modified }
         sessions = Array(out.prefix(400))
         let tsv = sessions.map { s in
-            [s.agent, s.id, s.cwd, s.title, s.last, String(s.ageHours), s.state.rawValue].map(SessionArchive.clean).joined(separator: "\t")
+            [s.agent, s.id, s.cwd, s.title, s.last, String(s.ageHours), s.state.rawValue, s.profile ?? ""].map(SessionArchive.clean).joined(separator: "\t")
         }.joined(separator: "\n") + "\n"
         do {
             try tsv.write(to: SessionArchive.file, atomically: true, encoding: .utf8)
@@ -160,8 +172,8 @@ final class SessionArchive: ObservableObject {
         let words = query.lowercased().split(whereSeparator: \.isWhitespace).map(String.init)
         return Array(sessions.lazy.filter { s in
             if let machine, s.machine != machine { return false }
-            if let harness, s.agent != harness { return false }
-            let hay = "\(s.title) \(s.last) \(s.folder) \(s.agent) \(s.machine)".lowercased()
+            if let harness, !Profiles.matches(harness, kind: s.agent, profile: s.profile) { return false }
+            let hay = "\(s.title) \(s.last) \(s.folder) \(s.spec) \(s.machine)".lowercased()
             return words.allSatisfy { hay.contains($0) }
         }.prefix(limit))
     }
@@ -190,6 +202,12 @@ final class SessionArchive: ObservableObject {
         collect("claude", home + "/.claude/projects", depth: 2)
         collect("pi", home + "/.pi/agent/sessions", depth: 2)
         collect("codex", home + "/.codex/sessions", depth: 4)
+        // Each profile's (reflex profile), read the same way.
+        let profiles = home + "/.reflex/profiles"
+        for (agent, sub, depth) in [("claude", "claude/projects", 2), ("pi", "pi/sessions", 2), ("codex", "codex/sessions", 4)] {
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: "\(profiles)/\(agent)")) ?? []
+            for n in names where !n.hasPrefix(".") { collect(agent, "\(profiles)/\(agent)/\(n)/\(sub)", depth: depth) }
+        }
 
         var out: [PastSession] = []
         var seen = Set<String>()
@@ -227,11 +245,14 @@ final class SessionArchive: ObservableObject {
     nonisolated static func read(agent: String, url: URL, head: Data, tail: Data, modified: Date) -> PastSession? {
         let headLines = lines(head, dropFirst: false)
         let tailLines = tail.isEmpty ? headLines : lines(tail, dropFirst: true)
+        var s: PastSession?
         switch agent {
-        case "claude": return claude(url: url, head: headLines, tail: tailLines, modified: modified)
-        case "pi": return pi(head: headLines, tail: tailLines, modified: modified)
-        default: return codex(head: headLines, tail: tailLines, modified: modified)
+        case "claude": s = claude(url: url, head: headLines, tail: tailLines, modified: modified)
+        case "pi": s = pi(head: headLines, tail: tailLines, modified: modified)
+        default: s = codex(head: headLines, tail: tailLines, modified: modified)
         }
+        s?.profile = PastSession.profile(of: url.path)
+        return s
     }
 
     nonisolated static func lines(_ d: Data, dropFirst: Bool) -> [[String: Any]] {

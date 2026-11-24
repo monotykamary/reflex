@@ -41,6 +41,10 @@ list() {
   list "$HOME/.claude/projects" 2 claude
   list "$HOME/.pi/agent/sessions" 2 pi
   list "$HOME/.codex/sessions" 4 codex
+  # Profiles' (reflex profile): which one is read off the path.
+  for d in "$HOME"/.reflex/profiles/claude/*/claude/projects; do list "$d" 2 claude; done
+  for d in "$HOME"/.reflex/profiles/pi/*/pi/sessions; do list "$d" 2 pi; done
+  for d in "$HOME"/.reflex/profiles/codex/*/codex/sessions; do list "$d" 4 codex; done
 } | while IFS="$tab" read -r agent m p; do
   if grep -qxF "$m$tab$p" "$known"; then
     printf 'F\t%s\t%s\t%s\t\t\n' "$agent" "$m" "$p"

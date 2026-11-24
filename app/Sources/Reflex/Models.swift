@@ -14,13 +14,18 @@ struct AgentInfo: Codable, Identifiable, Hashable {
     /// The terminal that started it (an agent's `hc run`), when one did; its
     /// row goes under that agent's. (Optional: an older reflexd sends none.)
     var parent: String?
+    /// The harness profile it runs in (`reflex profile`), nil for your own.
+    /// (Optional: an older reflexd sends none.)
+    var profile: String?
     var id: String { pane }
+    /// "claude", or "claude[tom]" in a profile.
+    var spec: String { Profiles.spec(kind, profile) }
 
     /// The machine it runs on ("" for this Mac; see Machines).
     var machine: String { Machines.machine(of: pane) }
     var remote: Bool { !machine.isEmpty }
     /// "claude · reflex", or "claude · reflex on work" for another Mac's.
-    var label: String { "\(kind) · \(folder)" + (remote ? " on \(machine)" : "") }
+    var label: String { "\(spec) · \(folder)" + (remote ? " on \(machine)" : "") }
     var place: String {
         guard !machine.isEmpty else { return cwd.abbreviatingHome }
         return "\(machine): \(Place.tilde(cwd))"
