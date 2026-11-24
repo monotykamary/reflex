@@ -1,5 +1,6 @@
 #!/bin/sh
-# Build reflexd (Bend) and Reflex.app (Swift), then assemble build/Reflex.app.
+# Build reflexd (TypeScript, one native binary by Bun) and Reflex.app (Swift),
+# then assemble build/Reflex.app.
 #
 #   scripts/build-app.sh            # daemon + app
 #   scripts/build-app.sh --app      # app only (reuse build/reflexd)
@@ -9,20 +10,19 @@ cd "$(dirname "$0")/.."
 root=$PWD
 mode=${1:-all}
 
-export BEND_NO_TELEMETRY=1
-# Bend's code generator runs on Bun's JavaScriptCore. Capping the heap JSC
-# assumes it may use keeps its footprint in RAM instead of swap (see
-# docs/bend-build-speed.md); output is byte-identical.
-export BUN_JSC_forceRAMSize=${BUN_JSC_forceRAMSize:-4294967296}
-
 if [ "$mode" != --app ]; then
+  bun=$(command -v bun || echo "$HOME/.bun/bin/bun")
+  [ -x "$bun" ] || { echo "reflexd needs Bun: curl -fsSL https://bun.sh/install | bash"; exit 1; }
   mkdir -p build
-  echo "reflexd: checking pure modules"
-  for m in Core Route Index Http Model Js; do
-    bend "daemon/$m.bend" --check-only >/dev/null
-  done
-  echo "reflexd: building"
-  bend daemon/main.bend -o build/reflexd
+  (
+    cd daemon
+    PATH="$(dirname "$bun"):$PATH"
+    "$bun" install --frozen-lockfile >/dev/null
+    echo "reflexd: types, laws and tests"
+    "$bun" run check >/dev/null 2>&1 || { "$bun" run check; exit 1; }
+    echo "reflexd: building"
+    "$bun" run build >/dev/null
+  )
 fi
 [ "$mode" = --daemon ] && exit 0
 
@@ -97,7 +97,7 @@ cat > "$app/Contents/Info.plist" <<EOF
 </plist>
 EOF
 codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
-codesign --force --sign - "$app/Contents/Resources/reflexd"
+codesign --force --sign - --entitlements scripts/bun.entitlements "$app/Contents/Resources/reflexd"
 codesign --force --sign - --entitlements scripts/bun.entitlements "$app/Contents/Resources/reflex-keys"
 codesign --force --sign - "$app"
 echo "built $app"

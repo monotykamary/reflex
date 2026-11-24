@@ -9,7 +9,7 @@
 #
 # NOTARY_PROFILE is a notarytool keychain profile, stored once with:
 #   xcrun notarytool store-credentials reflex --apple-id you@example.com --team-id TEAMID
-# REFLEX_SKIP_DAEMON=1 reuses build/reflexd (the Bend build takes minutes).
+# REFLEX_SKIP_DAEMON=1 reuses build/reflexd (skips its laws, tests and build).
 # PUBLISH=1 creates the GitHub release v<VERSION> with the DMG (gh), after
 # which committing and pushing site/appcast.xml offers it to every Reflex.
 # The appcast is signed with the Sparkle EdDSA key in your login keychain
@@ -30,7 +30,7 @@ fw="$app/Contents/Frameworks/Sparkle.framework/Versions/B"
 codesign --force --options runtime $stamp --sign "$identity" "$fw/Autoupdate"
 codesign --force --options runtime $stamp --sign "$identity" "$fw/Updater.app"
 codesign --force --options runtime $stamp --sign "$identity" "$app/Contents/Frameworks/Sparkle.framework"
-codesign --force --options runtime $stamp --sign "$identity" "$app/Contents/Resources/reflexd"
+codesign --force --options runtime $stamp --entitlements scripts/bun.entitlements --sign "$identity" "$app/Contents/Resources/reflexd"
 codesign --force --options runtime $stamp --entitlements scripts/bun.entitlements --sign "$identity" "$app/Contents/Resources/reflex-keys"
 codesign --force --options runtime $stamp --entitlements scripts/Reflex.entitlements --sign "$identity" "$app"
 codesign --verify --deep --strict "$app"
