@@ -6,7 +6,7 @@ import SwiftUI
 // agent in (`reflex profile default`).
 
 /// One profile's login, as `reflex-keys status --json` reports it.
-struct ProfileLogin: Decodable, Identifiable, Hashable {
+struct ProfileLogin: Codable, Identifiable, Hashable {
     let profile: String
     let holder: String
     let here: String
@@ -27,7 +27,7 @@ final class ProfilesModel: ObservableObject {
     static let shared = ProfilesModel()
 
     /// A machine and the profiles on it: which harnesses have one, and its defaults.
-    struct Place: Identifiable, Hashable {
+    struct Place: Identifiable, Hashable, Codable {
         /// herdr-core's name, "" for this Mac.
         let name: String
         let title: String
@@ -40,8 +40,10 @@ final class ProfilesModel: ObservableObject {
         var id: String { name.isEmpty ? "." : name }
     }
 
-    @Published private(set) var logins: [ProfileLogin] = []
-    @Published private(set) var places: [Place] = []
+    // Opened with what it showed last (kept on disk), refreshed in the background:
+    // each machine's row changes as that machine answers, never emptied while loading.
+    @Published private(set) var logins: [ProfileLogin] = ViewCache.load("profile-logins") ?? []
+    @Published private(set) var places: [Place] = ViewCache.load("profile-places") ?? []
     @Published private(set) var busy: Set<String> = []
     @Published var failure: String?
     @Published private(set) var loaded = false
@@ -50,28 +52,51 @@ final class ProfilesModel: ObservableObject {
     nonisolated static let harnesses = ["claude", "codex", "agy", "pi", "opencode", "amp", "grok"]
 
     func load() async {
-        let logins = await Blocking.run { Self.keysStatus() }
+        let fresh = await Blocking.run { Self.keysStatus() }
+        // (reflex-keys not answering keeps the accounts shown.)
+        if let fresh, fresh != logins { logins = fresh; ViewCache.save("profile-logins", fresh) }
         let script = Boat.script
         let here = await Blocking.run { Self.run(script, ["profile", "ls"]) }
-        var next = [Self.place("", Host.current().localizedName ?? "This Mac", connected: true, ls: here)]
-        for m in await CoreMachines.list(fresh: 5) {
-            let up = m.state == "connected"
-            let prior = places.first { $0.name == m.name }
-            guard up else {
-                var p = prior ?? Place(name: m.name, title: m.name, connected: false)
-                p.connected = false
-                next.append(p)
-                continue
-            }
-            let out = await Blocking.run {
-                CoreMachines.exec(m.name, #"PATH="$HOME/.local/bin:$PATH"; reflex profile ls"#, input: "", timeout: 20)
-            }
-            if let out { next.append(Self.place(m.name, m.name, connected: true, ls: out)) }
-            else { next.append(prior ?? Place(name: m.name, title: m.name, connected: true)) }
+        if here != nil || !places.contains(where: { $0.name.isEmpty }) {
+            put(Self.place("", Host.current().localizedName ?? "This Mac", connected: true, ls: here), at: 0)
         }
-        self.logins = logins
-        self.places = next
+        let machines = await CoreMachines.list(fresh: 5)
+        // Machines gone from herdr-core leave; the rest keep their row while they are read.
+        if CoreMachines.listed {
+            let names = Set(machines.map(\.name))
+            places.removeAll { !$0.name.isEmpty && !names.contains($0.name) }
+        }
+        await withTaskGroup(of: Place?.self) { group in
+            for m in machines {
+                let prior = places.first { $0.name == m.name }
+                guard m.state == "connected" else {
+                    var p = prior ?? Place(name: m.name, title: m.name, connected: false)
+                    p.connected = false
+                    put(p)
+                    continue
+                }
+                group.addTask {
+                    let out = await Blocking.run {
+                        CoreMachines.exec(m.name, #"PATH="$HOME/.local/bin:$PATH"; reflex profile ls"#, input: "", timeout: 20)
+                    }
+                    return out.map { Self.place(m.name, m.name, connected: true, ls: $0) }
+                }
+            }
+            for await p in group { if let p { put(p) } }
+        }
+        ViewCache.save("profile-places", places)
         loaded = true
+    }
+
+    /// One machine's row, replaced where it is (or added: this Mac first, the rest in order).
+    private func put(_ p: Place, at index: Int? = nil) {
+        if let i = places.firstIndex(where: { $0.id == p.id }) {
+            if places[i] != p { places[i] = p }
+        } else if let index {
+            places.insert(p, at: min(index, places.count))
+        } else {
+            places.append(p)
+        }
     }
 
     /// `reflex profile ls`: "claude[tom]" a line, "\tdefault here" after a machine's default.
@@ -125,10 +150,10 @@ final class ProfilesModel: ObservableObject {
         }
     }
 
-    nonisolated static func keysStatus() -> [ProfileLogin] {
+    nonisolated static func keysStatus() -> [ProfileLogin]? {
         let bin = NSHomeDirectory() + "/.local/bin/reflex-keys"
         guard let out = run(bin, ["status", "--json"]),
-              let xs = try? JSONDecoder().decode([ProfileLogin].self, from: Data(out.utf8)) else { return [] }
+              let xs = try? JSONDecoder().decode([ProfileLogin].self, from: Data(out.utf8)) else { return nil }
         return xs.sorted { (harnessOrder($0.harness), $0.name) < (harnessOrder($1.harness), $1.name) }
     }
 

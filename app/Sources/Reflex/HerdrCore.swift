@@ -221,7 +221,7 @@ enum CoreServer {
 /// through the core itself, addressed "box/t7", with no tunnel of Reflex's.
 /// Kept fresh by Settings → Machines and by RemoteIndex's rounds.
 enum CoreMachines {
-    struct Machine: Hashable {
+    struct Machine: Hashable, Codable {
         let name: String
         let target: String
         /// "connected", "connecting", "needs_login", "needs_update", ...

@@ -1089,7 +1089,8 @@ private struct MachineCardsSection: View {
     @ObservedObject private var lifetime = BoatLifetime.shared
     @ObservedObject private var kinds = MachineKinds.shared
     @ObservedObject private var access = FileAccess.shared
-    @State private var rows: [CoreMachines.Machine] = []
+    // What it showed last (this run's list, else the last one saved) until the core answers.
+    @State private var rows: [CoreMachines.Machine] = CoreMachines.listed ? CoreMachines.known : (ViewCache.load("machines") ?? [])
     @State private var loaded = false
     @State private var removing: CoreMachines.Machine?
     @State private var failure: String?
@@ -1146,7 +1147,10 @@ private struct MachineCardsSection: View {
     }
 
     private func load() async {
-        rows = await CoreMachines.list(fresh: 2)
+        let fresh = await CoreMachines.list(fresh: 2)
+        // (An answer that didn't come keeps what is shown.)
+        guard CoreMachines.listed else { return }
+        if fresh != rows { rows = fresh; ViewCache.save("machines", fresh) }
         loaded = true
         for m in rows where m.state == "connected" && !Boat.made(m.name) {
             kinds.look(m.name)
