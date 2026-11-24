@@ -123,6 +123,19 @@ const isPinned = (toks: string[], s: Scored) => {
 // recent — its newest repo would put it on top of every request.
 const isCollection = (s: Scored) => s.folder.desc.startsWith('A collection of')
 
+// Whether a list that kept n so far keeps one more, within k.
+export const takes = (n: number, k: number): boolean => n < k
+
+// The first k of xs.
+export function take<T>(xs: readonly T[], k: number): T[] {
+  const out: T[] = []
+  for (const x of xs) {
+    if (!takes(out.length, k)) break
+    out.push(x)
+  }
+  return out
+}
+
 export function rankWords(ws: string[], fs: readonly Folder[], k: number): Folder[] {
   const scored = fs.map((f) => score(expand(ws), f))
   const pinned: Scored[] = []
@@ -141,7 +154,7 @@ export function rankWords(ws: string[], fs: readonly Folder[], k: number): Folde
       byAgeLe,
     ),
   ].map((s) => s.folder)
-  return all.slice(0, Math.max(0, k))
+  return take(all, k)
 }
 
 // The k best folders for a request: named folders (the best match first),

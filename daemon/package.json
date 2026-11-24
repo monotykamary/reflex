@@ -7,7 +7,8 @@
     "build:linux": "bun build --compile --minify --target=bun-linux-x64 src/main.ts --outfile ../build/reflexd-linux-x64",
     "typecheck": "tsc --noEmit -p .",
     "laws": "bun run laws/run.ts",
-    "test": "bun test tests"
+    "test": "bun test tests",
+    "check": "tsc --noEmit -p . && bun test tests"
   },
   "devDependencies": {
     "@types/bun": "^1.4.5",

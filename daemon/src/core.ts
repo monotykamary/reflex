@@ -35,7 +35,14 @@ export function fire(pending: readonly Dispatch[], now: number): Split {
 }
 
 // Undo: the pending list without dispatch `id`.
-export const cancel = (pending: readonly Dispatch[], id: number): Dispatch[] => pending.filter((d) => d.id !== id)
+// One element of `cancel`: a dispatch kept in front of the rest, or left out.
+export const keepDispatch = (keep: boolean, d: Dispatch, rest: Dispatch[]): Dispatch[] => (keep ? [d, ...rest] : rest)
+
+export function cancel(pending: readonly Dispatch[], id: number): Dispatch[] {
+  let out: Dispatch[] = []
+  for (let i = pending.length - 1; i >= 0; i--) out = keepDispatch(pending[i]!.id !== id, pending[i]!, out)
+  return out
+}
 
 export const hasDispatch = (pending: readonly Dispatch[], id: number): boolean => pending.some((d) => d.id === id)
 
