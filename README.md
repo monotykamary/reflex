@@ -19,16 +19,18 @@ two deliberate differences:
   delivered verbatim. Reflex decides *where* and *when*; your agents decide
   *what*.
 
-The routing and dispatch core is written in [Bend](https://bend-lang.com) and
-its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
+The routing and dispatch daemon is written in TypeScript and ships as one
+native binary built by [Bun](https://bun.sh). Its safety rules are stated as
+laws and proven with [gdp-wired](https://github.com/monotykamary/gdp-wired)
+(`daemon/laws/`).
 
 ```text
  Reflex.app (Swift)                          phone (web page)
  edge tab · rail · ⌥⌥ bar · inbox · terminals  paired once by QR, over Tailscale
           │  HTTP + bearer token                  │
           └──────────────┬────────────────────────┘
-                 reflexd (Bend, native)
-     actor ── Core.step(State, Msg) → (State, dispatches)   ← pure, proven
+            reflexd (TypeScript, one native binary)
+     actor ── core.step(State, Msg) → (State, dispatches)   ← pure, proven
        │ ticker · poller · indexer · http · exec
        ├── herdr-core socket (terminals, status, prompts, keys, machines)
        ├── herdr socket (agents still running there, while you move over)
@@ -105,7 +107,7 @@ its safety rules are stated as laws and machine-checked (`daemon/LAWS.bend`).
 
 ## Build and run
 
-Building also needs Bend 2.0.37 (`curl -fsSL https://bend-lang.com/install.sh | sh`)
+Building also needs [Bun](https://bun.sh) 1.3 or later (`curl -fsSL https://bun.sh/install | bash`)
 and Xcode / Swift 6 with its Metal Toolchain (SwiftTerm compiles a shader:
 `xcodebuild -downloadComponent MetalToolchain`).
 
@@ -140,17 +142,25 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   invoking `swift build` or `swift test` directly; preparation is idempotent
   and stops if the patch no longer matches the dependency.
 
-- `bend daemon/PROOF.bend --check-only` — every law (`ALL PROOFS CHECK`).
-- `daemon/tests/asks.bend` — the answers read off captured Claude Code screens
-  (numbered, multi-select, review, arrow menu, idle).
-- `daemon/tests/sent.bend` — whether a sent prompt sits typed but unsent in
-  the agent's input box, or never arrived (both are put right after sending).
-- `python3 scripts/test-agent-status.py` — the real Bend status adapter against
-  a disposable socket (needs Bend and a C compiler, not herdr or a live agent).
+- `cd daemon && bun run check` — types, then `bun test tests`: every law
+  proven (`ALL LAWS PROVEN`; `bun run laws` prints the table), and the tests
+  below. `scripts/build-app.sh` runs it before every daemon build.
+- `daemon/tests/screens.test.ts` — the answers read off captured Claude Code
+  screens (numbered, multi-select, review, arrow menu, idle); whether a sent
+  prompt sits typed but unsent in the agent's input box, or never arrived
+  (both are put right after sending); which herdr an agent on another Mac is
+  reached through, its agents kept while the tunnel reconnects, and places
+  there (`work:/Users/you/VCS/app`): their machine, path, how Jev reads them
+  and which a request scoped to one machine may start in; earlier sessions by
+  harness. Held to what the Bend daemon printed for the same cases
+  (`daemon/tests/golden`).
+- `python3 scripts/test-agent-status.py` — the real status adapter
+  (`daemon/src/herdr.ts`) against a disposable socket (needs Bun, not herdr or
+  a live agent).
   Checks `agent.get {target}` and its response shape: unlike `pane.get`, this
   advances background launches to readiness without opening a terminal.
-- `python3 scripts/test-core.py` — the herdr-core adapter (`daemon/Hc.bend`,
-  `daemon/Term.bend`) against a real, disposable core (its own `HC_SESSION`
+- `python3 scripts/test-core.py` — the herdr-core adapter (`daemon/src/hc.ts`,
+  `daemon/src/term.ts`) against a real, disposable core (its own `HC_SESSION`
   and state, never yours) with fake agents that report OSC 7501: which
   terminals are agents and what they are, status words, sessions from labels
   and from Claude's session file, a prompt refused while starting or blocked,
@@ -188,10 +198,6 @@ DEVELOPER_ID="Developer ID Application: Name (TEAMID)" NOTARY_PROFILE=reflex \
   window taking the size (this one follows at it, then takes it back) and
   that window leaving, the view must match the core's screen row for row.
   These four take `REFLEX_TEST_HC=/path/to/herdr-core` when `hc` isn't on PATH.
-- `daemon/tests/machines.bend` — which herdr an agent on another Mac is
-  reached through, its agents kept while the tunnel reconnects, and places
-  there (`work:/Users/you/VCS/app`): their machine, path, how Jev reads them
-  and which a request scoped to one machine may start in.
 - `REFLEX_PROFILE=<folder> build/Reflex.app/Contents/MacOS/Reflex` — Reflex as
   a new user meets it: its own settings, support folder, Keychain entry and
   port. Add `REFLEX_PATH=/usr/bin:/bin` to see it with nothing installed.
@@ -245,7 +251,7 @@ Every call except health and pair needs the token.
    started sessions there; and their parents: a plain folder holding two or
    more repos, like `~/VCS/work/acme`, described by what it holds, for work that
    spans them; past twelve it is a collection, offered only when named or
-   matched), ranked by `daemon/Index.bend`: folders you name
+   matched), ranked by `daemon/src/folders.ts`: folders you name
    (or the start of whose name you write) are pinned first, the best match on
    top, then lexical matches, then recent activity. A joined word is one name:
    `pi-fabric` names pi-fabric, not every `pi-*` folder. Earlier conversations are ranked the same
@@ -255,7 +261,7 @@ Every call except health and pair needs the token.
 3. **One Jev call, typed questions:** `target` (which live session, or new),
    `folder`, `side` (is this a side question), `resume` (does it continue an
    earlier conversation).
-4. **Typed answer → decision** (`daemon/Route.bend`): every key maps back to a
+4. **Typed answer → decision** (`daemon/src/route.ts`): every key maps back to a
    candidate, or the request waits for you. The harness for a new session is
    the one you name in the text, otherwise your default.
 
@@ -264,7 +270,16 @@ returns the decision; `POST /api/explain` returns the exact Jev request.
 
 ## Laws
 
-`bend daemon/PROOF.bend --check-only` checks every law in `daemon/LAWS.bend`:
+`cd daemon && bun run laws` proves every law in `daemon/laws/` with gdp-wired
+and prints `ALL LAWS PROVEN` only when each one is proven and checked by its
+kernel, each law's broken variant (the bug it rules out) is refused, and each
+rule agrees with the code it describes (`fun.compare` over every combination
+of what a decision reads, `rule.compare`, or the rule run beside `core.step`
+on random messages). The rules are the pure functions in `daemon/src`
+(`core.ts`, `route.ts`, `folders.ts`) as gdp-wired states them; laws about
+pending dispatches are proven from every state, not only those a run reaches.
+`daemon/tests/laws.test.ts` also checks each law as first stated, on the real
+functions over random inputs:
 
 - `fired_are_ripe`, `kept_are_unripe`, `fire_partitions`, `cancel_removes` —
   scheduled dispatches run exactly when due, once, and a cancelled one never.
@@ -280,8 +295,11 @@ returns the decision; `POST /api/explain` returns the exact Jev request.
   blocked agent's TUI.
 - `rank_is_bounded` — Jev is offered at most k folders.
 
-The laws cover reflexd's policy. herdr, Jev, the harnesses and the Bend
-runtime are assumptions. `--verdict` re-checks with Bend's Lean-proven kernel.
+The laws cover reflexd's policy. herdr, Jev, the harnesses, Bun and the
+IO shell (`main.ts`) are assumptions. A rule is the decision the code makes,
+written again in gdp-wired's terms; that the code makes it is a test (it
+agrees with the rule on every combination, or on thousands of random runs),
+not a proof.
 
 ## Security and privacy
 
@@ -308,18 +326,20 @@ runtime are assumptions. `--verdict` re-checks with Bend's Lean-proven kernel.
 
 ## Development notes
 
-- Bend requires callees above callers and no mutual recursion;
-  `scripts/bend-order.py <file>` topologically sorts a module's defs.
-- Pure modules (`Core`, `Route`, `Index`, `Http`, `Model`, `Js`) must check
-  clean; IO lives in `main.bend`, `Herdr.bend`, `Fs.bend` and the three C
-  effects in `host.c`.
-- `docs/bend-build-speed.md` explains Bend build times and the
-  `BUN_JSC_forceRAMSize` setting the build script uses; `docs/design.md` the
+- The pure modules (`model`, `core`, `route`, `folders`, `past`, `js`,
+  `http`, `str` in `daemon/src`) import nothing that does IO; IO lives in
+  `main.ts`, `hc.ts`, `herdr.ts`, `term.ts`, `link.ts` and `host.ts`. One
+  actor owns the state: every change is `core.step`, one message at a time.
+- Text is read as reflexd always read it: by Unicode scalar (lengths, take and
+  drop), with ASCII whitespace and ASCII lower case, and counters wrap at 32
+  bits (`daemon/src/str.ts`).
+- `bun run build:linux` builds a linux-x64 reflexd; `docs/design.md` is the
   design language.
 - Dev hooks (`REFLEX_SHOW=bar|inbox|rail|agents|settings|onboarding|pairing|…`)
   open a surface at launch for screenshots and tests.
 
 ## License
 
-[MIT](LICENSE). The vendored JSON parser in `daemon/vendor/strict-json` is
-Apache-2.0 (see its `LICENSE` and `PROVENANCE.md`).
+[MIT](LICENSE). The JSON reader in `daemon/src/js.ts` is a port of the
+strict-json reader, Apache-2.0 (see `daemon/vendor/strict-json`'s `LICENSE`
+and `PROVENANCE.md`).
