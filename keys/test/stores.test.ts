@@ -21,6 +21,21 @@ afterAll(() => {
 })
 
 describe('stores', () => {
+  test("agy off a Mac: the Keychain's value lands as agy's JSON file, and reads back the same", async () => {
+    const p = parse('agy[t]'), s = storeFor(p), f = join(p.hhome, '.gemini', 'antigravity-cli', 'antigravity-oauth-token')
+    const json = JSON.stringify({token: {access_token: 'a1', token_type: 'Bearer', refresh_token: 'r1', expiry: '2030-01-01T00:00:00Z'}, auth_method: 'oauth', id_token_email: 'x@example.com'})
+    const value = 'go-keyring-base64:' + Buffer.from(json).toString('base64')
+    expect(await s.read()).toBe(null)
+    await s.write({value}, false)
+    expect(readJ(f)).toEqual(JSON.parse(json))
+    expect(statSync(f).mode & 0o777).toBe(0o600)
+    const back = await s.read()
+    expect(back).toEqual({value})
+    expect(s.fingerprint(back)).toBe(s.fingerprint({value}))
+    await expect(s.write({value: 'go-keyring-base64:' + Buffer.from('not json').toString('base64')}, false)).rejects.toThrow()
+    expect(readJ(f)).toEqual(JSON.parse(json))
+  })
+
   test('grok: an oidc refresh token is left out of a copy; API keys stay', async () => {
     const p = parse('grok[t]'), s = storeFor(p), f = join(p.hhome, '.grok', 'auth.json')
     const login = {

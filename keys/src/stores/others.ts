@@ -3,12 +3,12 @@
 // build 1.0.45 source at 2bdd1d6: not installed here, unverified against a binary).
 import {Database} from 'bun:sqlite'
 import {spawnSync} from 'node:child_process'
-import {existsSync} from 'node:fs'
-import {join} from 'node:path'
+import {existsSync, mkdirSync, readFileSync} from 'node:fs'
+import {dirname, join} from 'node:path'
 import * as kc from '../keychain'
 import {flock} from '../lock'
 import {home, keychainStore, type Profile} from '../profile'
-import {clone, fail, readJson, writeJson} from '../util'
+import {atomicWrite, clone, fail, readJson, writeJson} from '../util'
 import {fp, type Content, type Store} from './store'
 
 const NO_TRIGGER = async () => 'no harness command refreshes it early: it refreshes itself when used on the holder'
@@ -19,8 +19,32 @@ const NO_TRIGGER = async () => 'no harness command refreshes it early: it refres
 export const PROFILE_KEYCHAIN = 'Reflex profile keychain'
 export function agyStore(p: Profile): Store {
   if (!keychainStore()) {
-    const no = () => fail('agy outside a Mac: where it keeps its login there is not known yet')
-    return {rotates: false, where: '?', read: no, strip: c => c, usable: () => false, write: no, expiry: () => null, loginEnd: () => null, fingerprint: () => '', due: () => false, refresh: no, guard: fn => fn()}
+    // Off a Mac (no Keychain service): agy keeps the same login as JSON in
+    // <home>/.gemini/antigravity-cli/antigravity-oauth-token (0600). Carried between
+    // machines as the Keychain's value, "go-keyring-base64:" + base64 of that JSON.
+    const file = join(p.hhome, '.gemini', 'antigravity-cli', 'antigravity-oauth-token')
+    const PREFIX = 'go-keyring-base64:'
+    const toJson = (v: string) => (v.startsWith(PREFIX) ? Buffer.from(v.slice(PREFIX.length), 'base64').toString('utf8') : v)
+    return {
+      rotates: false,
+      where: file,
+      async read() {
+        if (!existsSync(file)) return null
+        const t = readFileSync(file, 'utf8').trim()
+        return t ? {value: PREFIX + Buffer.from(t, 'utf8').toString('base64')} : null
+      },
+      usable: (c: Content) => typeof c?.value === 'string' && c.value !== '',
+      strip: (c: Content) => c,
+      async write(c: Content) {
+        const json = toJson(c.value)
+        JSON.parse(json) // (never write what agy couldn't read)
+        mkdirSync(dirname(file), {recursive: true})
+        atomicWrite(file, json, '.antigravity-oauth-token-')
+      },
+      expiry: () => null, loginEnd: () => null,
+      fingerprint: (c: Content) => fp(c?.value ? toJson(c.value) : ''),
+      due: () => false, refresh: NO_TRIGGER, guard: fn => fn(),
+    }
   }
   const keychain = p.name ? join(p.hhome, 'Library', 'Keychains', 'reflex-profile.keychain-db') : undefined
   const item: kc.Item = {service: 'gemini', account: 'antigravity', keychain: keychain ?? kc.defaultKeychain(), home: p.name ? p.hhome : undefined}
@@ -42,7 +66,8 @@ export function agyStore(p: Profile): Store {
     strip: (c: Content) => c,
     async write(c: Content) { open(); kc.write(item, c.value) },
     expiry: () => null, loginEnd: () => null,
-    fingerprint: (c: Content) => fp(c?.value),
+    // (The JSON inside, so a Mac's and a box's copy of one login read as the same.)
+    fingerprint: (c: Content) => fp(typeof c?.value === 'string' && c.value.startsWith('go-keyring-base64:') ? Buffer.from(c.value.slice(18), 'base64').toString('utf8') : c?.value),
     due: () => false, refresh: NO_TRIGGER, guard: fn => fn(),
   }
 }

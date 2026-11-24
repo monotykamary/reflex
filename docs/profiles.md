@@ -24,6 +24,10 @@ user's real home and login, untouched. A profile exists only where there is an a
 
 - Claude, Codex and pi take their folder by a setting (below); the others run with
   `HOME=~/.reflex/profiles/<harness>/<name>/home`, whose entries link back to the real home.
+- **Linux:** agy has no Keychain service there; it keeps the same login as JSON in
+  `<home>/.gemini/antigravity-cli/antigravity-oauth-token` (0600). reflex-keys carries it between
+  machines as the Keychain's value (`go-keyring-base64:` + base64 of that JSON) and writes the file on
+  a box.
 - **macOS:** `security` resolves the default Keychain from `$HOME`, so such a profile home gets its own
   `Library/Keychains/reflex-profile.keychain-db` (not named "login": macOS unlocks a login keychain
   only with your login password), isolated from the real one (tested: an item added there is not in
