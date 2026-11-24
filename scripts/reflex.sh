@@ -63,6 +63,17 @@
 #   reflex id                       this machine's Reflex id
 #   reflex skill install [--on MACHINE]
 #   reflex install                  link this script as ~/.local/bin/reflex
+#   reflex profile new|login|run|exec|ls|rm ...
+#                                   another account for one harness: claude[NAME],
+#                                   codex[NAME], agy[NAME], pi[NAME], opencode,
+#                                   amp, grok (bare claude:
+#                                   your own). Its own login and sessions, your
+#                                   settings, skills and everything else shared;
+#                                   it can't read other profiles' sessions
+#     new SPEC                      made (login, run and exec make it too)
+#     login SPEC [PROVIDER]         sign it in (pi: which provider)
+#     run SPEC [ARG...]             the harness in it;  exec SPEC COMMAND...
+#     ls                            rm SPEC --yes (its sessions and login go)
 #
 # Machines are herdr-core's (`hc machine ls`); `machine new` makes an instabox
 # box (or, --provider boat, a boat.dev sandbox) and adds it as a temporary one. Nothing here
@@ -1705,6 +1716,214 @@ skill() {
   done
 }
 
+# Profiles. Claude, Codex and pi are each pointed at a folder of the profile's
+# own (CLAUDE_CONFIG_DIR, CODEX_HOME, PI_CODING_AGENT_DIR); agy has no such
+# setting, so it gets a home of its own whose entries link back to the real one
+# (and on a Mac its own Keychain, which `security` finds through $HOME). Your
+# settings, skills, hooks and extensions are linked in; the login, sessions and
+# history are the profile's. A run can't read other profiles, or (in a profile)
+# your own sessions: Seatbelt on a Mac, a private mount namespace on Linux.
+PROFILES=${REFLEX_PROFILES:-"$HOME/.reflex/profiles"}
+PROFILE_KEYCHAIN="Reflex profile keychain"
+
+prof_parse() { # prof_parse SPEC: PH the harness, PN the name ("" for your own), P its folder
+  case $1 in
+    *\[*\]) PH=${1%%\[*}; PN=${1#*\[}; PN=${PN%\]} ;;
+    *) PH=$1; PN= ;;
+  esac
+  case $PH in claude|codex|pi|agy|opencode|amp|grok) ;; *) die "profile: no harness $PH (claude, codex, agy, pi, opencode, amp or grok)" ;; esac
+  case $PN in *[!a-z0-9._-]*|.*) die "profile: a name is lowercase letters, digits, '.', '_' or '-'" ;; esac
+  P="$PROFILES/$PH/$PN"
+}
+
+# Claude, Codex and pi take a folder of their own by a setting. The others get a
+# home of their own: these paths in it are the profile's, the rest link to yours.
+prof_private() {
+  case $1 in
+    agy) echo ".gemini" ;;
+    opencode) echo ".local/share/opencode .local/state/opencode" ;;
+    amp) echo ".local/share/amp" ;;
+    grok) echo ".grok" ;;
+  esac
+}
+
+prof_own() { # where the harness keeps its files in your own home
+  case $1 in claude) echo "$HOME/.claude" ;; codex) echo "$HOME/.codex" ;; pi) echo "$HOME/.pi/agent" ;; agy) echo "$HOME/.gemini" ;; esac
+}
+
+prof_shared() { # what a profile shares with your own: settings and what extends the harness
+  case $1 in
+    claude) echo "settings.json settings.local.json CLAUDE.md agents commands hooks skills plugins output-styles keybindings.json" ;;
+    codex) echo "config.toml AGENTS.md instructions.md hooks.json herdr-agent-state.sh rules skills plugins prompts" ;;
+    pi) echo "settings.json models.json AGENTS.md SYSTEM.md APPEND_SYSTEM.md mcp.json keybindings.json extensions skills prompts themes agents bin git npm" ;;
+    agy) echo "settings.json GEMINI.md skills config bin trustedFolders.json" ;;
+  esac
+}
+
+prof_link() { # prof_link FROM TO NAME...: each NAME in FROM linked into TO, unless TO has its own
+  _f=$1 _t=$2; shift 2
+  mkdir -p "$_t"
+  for _x in "$@"; do
+    if [ -L "$_t/$_x" ] && [ ! -e "$_t/$_x" ]; then rm -f "$_t/$_x"; fi  # gone from yours
+    { [ -e "$_f/$_x" ] || [ -L "$_f/$_x" ]; } || continue
+    { [ -e "$_t/$_x" ] || [ -L "$_t/$_x" ]; } && continue
+    ln -s "$_f/$_x" "$_t/$_x"
+  done
+}
+
+prof_farm() ( # prof_farm SRC DST REL PRIVATE...: SRC's entries linked into DST, but the PRIVATE paths (relative to the home) left to it
+  _s=$1 _d=$2 _r=$3; shift 3
+  mkdir -p "$_d"
+  for _x in "$_s"/* "$_s"/.[!.]* "$_s"/..?*; do
+    { [ -e "$_x" ] || [ -L "$_x" ]; } || continue
+    _b=${_x##*/}; _rel=${_r:+$_r/}$_b; _skip= _into=
+    for _p in "$@"; do
+      [ "$_p" = "$_rel" ] && _skip=1
+      case $_p in "$_rel"/*) _into=1 ;; esac
+    done
+    [ -n "$_skip" ] && continue
+    if [ -n "$_into" ] && [ -d "$_x" ]; then
+      if [ -L "$_d/$_b" ]; then rm -f "$_d/$_b"; fi
+      prof_farm "$_x" "$_d/$_b" "$_rel" "$@"; continue
+    fi
+    { [ -e "$_d/$_b" ] || [ -L "$_d/$_b" ]; } || ln -s "$_x" "$_d/$_b"
+  done
+)
+
+prof_keychain() { # prof_keychain HOMEDIR: its own default Keychain, made once, unlocked
+  # (not named "login": macOS unlocks a login keychain only with your login password)
+  _h=$1 _k="$1/Library/Keychains/reflex-profile.keychain-db" _a="$PH/$PN"
+  [ -L "$_h/Library/Preferences/com.apple.security.plist" ] && die "profile: $_h's Keychain preference links to yours; not touching it"
+  if [ ! -f "$_k" ]; then
+    _pw=$(LC_ALL=C tr -dc 'A-Za-z0-9' </dev/urandom | head -c 40)
+    # Its password, in your own Keychain.
+    security add-generic-password -U -s "$PROFILE_KEYCHAIN" -a "$_a" -w "$_pw" >/dev/null ||
+      die "profile: couldn't keep ${PH}[$PN]'s Keychain password in yours (is your Keychain unlocked?)"
+    HOME=$_h security create-keychain -p "$_pw" "$_k" >/dev/null
+    HOME=$_h security set-keychain-settings "$_k"
+    HOME=$_h security list-keychains -d user -s "$_k"
+    HOME=$_h security default-keychain -d user -s "$_k"
+  fi
+  _pw=$(security find-generic-password -s "$PROFILE_KEYCHAIN" -a "$_a" -w 2>/dev/null) ||
+    die "profile: ${PH}[$PN]'s Keychain password isn't in your Keychain"
+  HOME=$_h security unlock-keychain -p "$_pw" "$_k" || die "profile: couldn't unlock ${PH}[$PN]'s Keychain"
+}
+
+prof_make() { # prof_make: the profile's folder, made or brought up to date; sets PENV, the env it runs with
+  PENV="REFLEX_HARNESS_PROFILE=${PH}[$PN]"  # (REFLEX_PROFILE is the app's own: a separate Reflex)
+  [ -n "$PN" ] || return 0
+  _own=$(prof_own "$PH")
+  # shellcheck disable=SC2046
+  case $PH in
+    claude) prof_link "$_own" "$P/claude" $(prof_shared claude); PENV="$PENV CLAUDE_CONFIG_DIR=$P/claude" ;;
+    codex) prof_link "$_own" "$P/codex" $(prof_shared codex); PENV="$PENV CODEX_HOME=$P/codex" ;;
+    pi) prof_link "$_own" "$P/pi" $(prof_shared pi); PENV="$PENV PI_CODING_AGENT_DIR=$P/pi" ;;
+    *)
+      if [ "$(uname)" = Darwin ]; then
+        prof_farm "$HOME" "$P/home" "" $(prof_private "$PH") .reflex Library/Keychains Library/Preferences/com.apple.security.plist
+        mkdir -p "$P/home/Library/Keychains"
+        prof_keychain "$P/home"
+        # Its Keychain isn't yours, so gh (and git through it) gets your token another way.
+        if command -v gh >/dev/null && _gt=$(gh auth token 2>/dev/null) && [ -n "$_gt" ]; then GH_TOKEN=$_gt; export GH_TOKEN; fi
+      else
+        prof_farm "$HOME" "$P/home" "" $(prof_private "$PH") .reflex
+      fi
+      # A private path's parents, even where yours has none (never through a link to yours).
+      for _p in $(prof_private "$PH"); do
+        case $_p in */*) [ -L "$P/home/${_p%%/*}" ] && die "profile: $P/home/${_p%%/*} links to yours"; mkdir -p "$P/home/${_p%/*}" ;; esac
+      done
+      [ "$PH" = agy ] && prof_link "$_own" "$P/home/.gemini" $(prof_shared agy)
+      PENV="$PENV HOME=$P/home" ;;
+  esac
+  chmod 700 "$PROFILES" "$PROFILES/$PH" "$P" 2>/dev/null || true
+}
+
+prof_hidden() { # what a run in this profile can't reach, one a line
+  for _d in "$PROFILES"/*/*; do
+    [ -d "$_d" ] || continue
+    [ "$_d" = "$P" ] && [ -n "$PN" ] && continue
+    printf '%s\n' "$_d"
+  done
+  [ -n "$PN" ] || return 0
+  for _d in "$HOME/.claude/projects" "$HOME/.claude/transcripts" "$HOME/.claude/history.jsonl" \
+            "$HOME/.codex/sessions" "$HOME/.codex/archived_sessions" "$HOME/.codex/history.jsonl" \
+            "$HOME/.pi/agent/sessions" "$HOME/.gemini/antigravity" "$HOME/.gemini/history" \
+            "$HOME/.local/share/opencode" "$HOME/.local/share/amp" "$HOME/.grok"; do
+    [ -e "$_d" ] && printf '%s\n' "$_d"
+  done
+  return 0
+}
+
+prof_exec() { # prof_exec COMMAND...: run in the profile, kept from what it can't reach
+  rm -rf "$T"  # (exec skips the EXIT trap)
+  _hide=$(prof_hidden)
+  if [ -z "$_hide" ]; then exec env $PENV "$@"; fi
+  if [ "$(uname)" = Darwin ]; then
+    _sb='(version 1)(allow default)'
+    _old=$IFS; IFS='
+'
+    for _d in $_hide; do
+      _e=$(printf '%s' "$_d" | sed 's/[\\"]/\\&/g')
+      if [ -d "$_d" ]; then _sb="$_sb(deny file-read* file-write* (subpath \"$_e\"))"; else _sb="$_sb(deny file-read* file-write* (literal \"$_e\"))"; fi
+    done
+    IFS=$_old
+    exec env $PENV sandbox-exec -p "$_sb" "$@"
+  fi
+  # Linux: a private mount namespace that root makes, the hidden paths covered,
+  # then you again (so sudo still works inside; bubblewrap's no_new_privs would end that).
+  if command -v unshare >/dev/null && command -v setpriv >/dev/null && sudo -n true 2>/dev/null; then
+    exec sudo -n --preserve-env unshare --mount --propagation private sh -c '
+      set -e; u=$1 g=$2 path=$3 home=$4 hide=$5; shift 5
+      IFS="
+"
+      for d in $hide; do
+        if [ -d "$d" ]; then mount -t tmpfs -o mode=700,uid=$u,gid=$g reflex-hidden "$d"; else mount --bind /dev/null "$d"; fi
+      done
+      exec setpriv --reuid="$u" --regid="$g" --init-groups -- env PATH="$path" HOME="$home" "$@"
+    ' sh "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$_hide" env $PENV "$@"
+  fi
+  say "reflex profile: no passwordless sudo here; running ${PH}[$PN] without hiding the other profiles"
+  exec env $PENV "$@"
+}
+
+prof_login() { # what signs the harness in
+  case $PH in
+    claude) set -- claude auth login ;;
+    codex) if [ -n "${SSH_CONNECTION:-}" ] || [ "$(uname)" != Darwin ]; then set -- codex login --device-auth; else set -- codex login; fi ;;
+    pi) [ -n "${1:-}" ] || die "profile login pi[$PN] PROVIDER (anthropic, openai-codex, github-copilot...)"; set -- pi auth login "$1" ;;
+    opencode) set -- opencode auth login ;;
+    # The others ask you to sign in when they start.
+    *) say "$PH asks you to sign in when it starts; quit it once you have."; set -- "$PH" ;;
+  esac
+  prof_exec "$@"
+}
+
+profile() {
+  sub=${1:-}; [ $# -gt 0 ] && shift
+  case $sub in
+    ls)
+      for _d in "$PROFILES"/*/*; do [ -d "$_d" ] || continue; _n=${_d##*/}; _h=${_d%/*}; printf '%s[%s]\n' "${_h##*/}" "$_n"; done ;;
+    new) [ $# -eq 1 ] || die "profile new SPEC"; prof_parse "$1"; [ -n "$PN" ] || die "profile new: give it a name, ${PH}[NAME]"
+      prof_make; echo "${PH}[$PN]: $P" ;;
+    login) [ $# -ge 1 ] || die "profile login SPEC [PROVIDER]"; prof_parse "$1"; shift; prof_make; prof_login "$@" ;;
+    run) [ $# -ge 1 ] || die "profile run SPEC [ARG...]"; prof_parse "$1"; shift; prof_make; prof_exec "$PH" "$@" ;;
+    exec) [ $# -ge 2 ] || die "profile exec SPEC COMMAND..."; prof_parse "$1"; shift; prof_make; prof_exec "$@" ;;
+    rm)
+      [ $# -eq 2 ] && [ "$2" = --yes ] || die "profile rm SPEC --yes (its login and sessions are deleted)"
+      prof_parse "$1"; [ -n "$PN" ] && [ -d "$P" ] || die "profile rm: no profile $1"
+      if [ "$(uname)" = Darwin ]; then
+        case $PH in
+          claude) _s="Claude Code-credentials-$(printf '%s' "$P/claude" | shasum -a 256 | cut -c1-8)"
+                  security delete-generic-password -s "$_s" >/dev/null 2>&1 || true ;;
+          agy) HOME="$P/home" security delete-keychain "$P/home/Library/Keychains/reflex-profile.keychain-db" 2>/dev/null || true
+               security delete-generic-password -s "$PROFILE_KEYCHAIN" -a "$PH/$PN" >/dev/null 2>&1 || true ;;
+        esac
+      fi
+      rm -rf "$P"; echo "removed ${PH}[$PN]" ;;
+    *) die "profile new|login|run|exec|ls|rm" ;;
+  esac
+}
+
 install() {
   mkdir -p "$HOME/.local/bin"
   ln -sf "$HERE/$(basename "$_self")" "$HOME/.local/bin/reflex"
@@ -1746,6 +1965,7 @@ case $cmd in
   skill) skill "$@" ;;
   mesh) [ "${1:-}" = sync ] || die "mesh sync"; mesh_sync ;;
   install) install ;;
+  profile) profile "$@" ;;
   ""|-h|--help|help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
   *) die "unknown command $cmd (reflex --help)" ;;
 esac
