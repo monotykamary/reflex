@@ -4,7 +4,7 @@
 // reported as such; agy (Google's tokens don't rotate) is asked to refresh by running
 // `agy models` in its profile, which saves the new token as agy always does.
 //
-//   reflex-keys usage [--json] [SPEC...]    every login here (profiles and your own) by default
+//   reflex-keys usage [--json] [SPEC...]    every profile kept here by default
 //
 // The last answers are kept in ~/.reflex/keys/usage.json: a login that fails now keeps its
 // last numbers, with when they were read.
@@ -163,10 +163,9 @@ async function read(p: Profile): Promise<Omit<Usage, 'profile' | 'at'>> {
 
 const cacheFile = () => join(keysDir(), 'usage.json')
 
-// The logins here: the profiles reflex-keys keeps, and your own where you're signed in.
+// The logins here: the profiles reflex-keys keeps (your own only when named: `usage claude`).
 export function usageSpecs(): string[] {
-  const own: string[] = [...USAGE_HARNESSES]
-  return [...new Set([...known(), ...own])].filter(k => (USAGE_HARNESSES as readonly string[]).includes(parse(k).harness))
+  return known().filter(k => (USAGE_HARNESSES as readonly string[]).includes(parse(k).harness))
 }
 
 export async function usage(specs: string[] = usageSpecs()): Promise<Usage[]> {

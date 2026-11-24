@@ -82,9 +82,9 @@ final class ProfilesModel: ObservableObject {
     // each machine's row changes as that machine answers, never emptied while loading.
     @Published private(set) var logins: [ProfileLogin] = ViewCache.load("profile-logins") ?? []
     @Published private(set) var places: [Place] = ViewCache.load("profile-places") ?? []
-    /// spec → its plan's use: profiles and your own logins ("claude").
+    /// spec → its plan's use (profiles).
     @Published private(set) var usage: [String: LoginUsage] = (ViewCache.load("profile-usage") as [LoginUsage]?)
-        .map { Dictionary($0.map { ($0.profile, $0) }, uniquingKeysWith: { a, _ in a }) } ?? [:]
+        .map { Dictionary($0.filter { !$0.name.isEmpty }.map { ($0.profile, $0) }, uniquingKeysWith: { a, _ in a }) } ?? [:]
     private var usageAt: Date = .distantPast
     private var usageBusy = false
     @Published private(set) var busy: Set<String> = []
@@ -94,11 +94,6 @@ final class ProfilesModel: ObservableObject {
     /// The harnesses in the order Reflex shows them (most used first).
     nonisolated static let harnesses = ["claude", "codex", "agy", "pi", "opencode", "amp", "grok"]
 
-    /// Your own logins with a reading, after the profiles.
-    var ownUsage: [LoginUsage] {
-        usage.values.filter { $0.name.isEmpty }.sorted { Self.harnessOrder($0.harness) < Self.harnessOrder($1.harness) }
-    }
-
     /// Usage, read again when it is a few minutes old (the services are asked, not a file).
     func loadUsage(force: Bool = false) async {
         guard !usageBusy, force || Date().timeIntervalSince(usageAt) > 180 else { return }
@@ -106,7 +101,8 @@ final class ProfilesModel: ObservableObject {
         defer { usageBusy = false }
         guard let xs = await Blocking.run({ Self.keysUsage() }) else { return }
         usageAt = Date()
-        let next = Dictionary(xs.map { ($0.profile, $0) }, uniquingKeysWith: { a, _ in a })
+        // (Profiles only: logins in your home folder aren't used.)
+        let next = Dictionary(xs.filter { !$0.name.isEmpty }.map { ($0.profile, $0) }, uniquingKeysWith: { a, _ in a })
         if next != usage { usage = next; ViewCache.save("profile-usage", xs) }
     }
 
@@ -370,7 +366,6 @@ struct ProfilesPane: View {
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 10) {
                     ForEach(model.logins) { LoginCard(login: $0, usage: model.usage[$0.profile], rows: rows) }
-                    ForEach(model.ownUsage) { OwnLoginCard(usage: $0, rows: rows) }
                 }
                 .padding(.vertical, 4)
             }
@@ -392,7 +387,7 @@ struct ProfilesPane: View {
         } header: {
             Text("Default on each machine")
         } footer: {
-            Text("A bare agent on that machine (claude, codex, agy…) starts in its default. /claude[tom] in the ⌥⌥ bar picks one for a single session; \"Your own\" is the login in your home folder. A session stays in the profile it started in.")
+            Text("A bare agent on that machine (claude, codex, agy…) starts in its default. /claude[tom] in the ⌥⌥ bar picks one for a single session. A session stays in the profile it started in.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
     }
@@ -521,36 +516,6 @@ private struct UsageBars: View {
     }
 }
 
-/// Your own login (no profile) where it is signed in here: its plan's use.
-private struct OwnLoginCard: View {
-    let usage: LoginUsage
-    var rows = 0
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 10) {
-                HarnessLogo(harness: usage.harness, size: 38)
-                VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 4) {
-                        Text(usage.harness).font(.system(size: 13, weight: .semibold))
-                        Text("your own").font(.system(size: 11)).foregroundStyle(.secondary)
-                    }
-                    Text(([usage.plan].compactMap { $0 } + ["the login in your home folder"]).joined(separator: " · "))
-                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
-                }
-                Spacer(minLength: 0)
-            }
-            UsageBars(usage: usage, harness: usage.harness)
-            Spacer(minLength: 0)
-        }
-        .padding(11)
-        .frame(maxWidth: .infinity, minHeight: LoginCard.height + UsageBars.height(rows),
-               maxHeight: LoginCard.height + UsageBars.height(rows), alignment: .topLeading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
-    }
-}
-
 private struct Chip: Hashable {
     let text: String
     let symbol: String
@@ -655,9 +620,6 @@ private struct PlaceRow: View {
         let busy = model.busy.contains(model.key(place, h))
         return Menu {
             Section(h) {
-                Button { model.setDefault(place, harness: h, to: "") } label: {
-                    if current.isEmpty { Label("Your own", systemImage: "checkmark") } else { Text("Your own") }
-                }
                 ForEach(model.names(h, on: place), id: \.self) { n in
                     Button { model.setDefault(place, harness: h, to: n) } label: {
                         if n == current { Label(n, systemImage: "checkmark") } else { Text(n) }
@@ -668,7 +630,7 @@ private struct PlaceRow: View {
             HStack(spacing: 5) {
                 // (The logo and colour say which harness: only the profile is written.)
                 HarnessLogo(harness: h, size: 14, tile: false)
-                Text(current.isEmpty ? "own" : current).font(.system(size: 11, weight: current.isEmpty ? .regular : .bold)).lineLimit(1).truncationMode(.tail)
+                Text(current.isEmpty ? "none" : current).font(.system(size: 11, weight: current.isEmpty ? .regular : .bold)).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(current.isEmpty ? Color.secondary : HarnessLook.tint(h))
                 Spacer(minLength: 2)
                 if busy { ProgressView().controlSize(.mini) } else { Image(systemName: "chevron.up.chevron.down").font(.system(size: 7.5, weight: .bold)).foregroundStyle(.secondary) }
@@ -682,7 +644,7 @@ private struct PlaceRow: View {
         .buttonStyle(.plain)
         .fixedSize()
         .disabled(!place.connected || busy)
-        .help(current.isEmpty ? "A bare \(h) here uses your own login" : "A bare \(h) here starts as \(h)[\(current)]")
-        .accessibilityLabel("\(h) default: \(current.isEmpty ? "your own login" : current)")
+        .help(current.isEmpty ? "No default: a bare \(h) here uses the login in your home folder. Pick a profile." : "A bare \(h) here starts as \(h)[\(current)]")
+        .accessibilityLabel("\(h) default: \(current.isEmpty ? "none" : current)")
     }
 }

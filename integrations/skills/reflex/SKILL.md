@@ -276,7 +276,9 @@ hc run --on mini --cwd ~/VCS/app --bg --name build reflex profile run 'claude[wo
 
 `reflex profile run claude` with no brackets uses that machine's default
 profile (the user picks it in Reflex's Settings › Profiles); `claude[]` is
-always their own login. Bringing a session back with no brackets
+their own login, or, where a profile adopted their own sessions
+(`reflex profile adopt`), that profile. On such a machine plain `claude`,
+`codex` and `agy` in a shell also start through `reflex profile run`. Bringing a session back with no brackets
 (`reflex profile run claude --resume ID`, `codex resume ID`) starts it in the
 profile that holds that session, wherever it was saved. Quote a profile's name (`'claude[work]'`): zsh reads
 the brackets as a file pattern otherwise. `${REFLEX_HARNESS_PROFILE:-claude}` falls back to

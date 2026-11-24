@@ -66,7 +66,7 @@
 #   reflex keys install             this Mac: reflex-keys (the login holder) and its service
 #   reflex keys send MACHINE        reflex-keys there, to receive logins
 #   reflex keys ARGS...             reflex-keys itself (seed SPEC, hold SPEC --on M, status)
-#   reflex profile new|login|run|exec|ls|rm ...
+#   reflex profile new|login|run|exec|ls|default|shell|adopt|rm ...
 #                                   another account for one harness: claude[NAME],
 #                                   codex[NAME], agy[NAME], pi[NAME], opencode,
 #                                   amp, grok (bare claude:
@@ -1799,7 +1799,8 @@ prof_session_home() { # prof_session_home HARNESS ARG...: the profile ("" your o
   }
   for _f in "$_own"/$_pat; do _try "" "$_f"; done
   for _d in "$PROFILES/$_h"/*; do
-    [ -d "$_d/$_sub" ] || continue
+    # (An adopting profile's folder is a link to your own: found there.)
+    [ -d "$_d/$_sub" ] && [ ! -L "$_d/$_sub" ] || continue
     for _f in "$_d/$_sub"/$_pat; do _try "${_d##*/}" "$_f"; done
   done
   [ -n "$_found" ] || return 1
@@ -1813,8 +1814,16 @@ prof_parse() { # prof_parse SPEC: PH the harness, PN the name ("" for your own),
     *) PH=$1; PN=$(prof_default "$1") ;;
   esac
   case $PH in claude|codex|pi|agy|opencode|amp|grok) ;; *) die "profile: no harness $PH (claude, codex, agy, pi, opencode, amp or grok)" ;; esac
+  # Your own, once a profile adopted your home folder's sessions (profile
+  # adopt): that profile. Your own login is then never used.
+  [ -n "$PN" ] || PN=$(prof_adopted "$PH")
   case $PN in *[!a-z0-9._-]*|.*) die "profile: a name is lowercase letters, digits, '.', '_' or '-'" ;; esac
   P="$PROFILES/$PH/$PN"
+}
+
+prof_adopted() { # prof_adopted HARNESS: the profile that adopted your own sessions, if one did
+  [ -f "$PROFILES/$1/.adopted" ] && tr -cd 'a-z0-9._-' < "$PROFILES/$1/.adopted"
+  return 0
 }
 
 # Claude, Codex and pi take a folder of their own by a setting. The others get a
@@ -1987,7 +1996,7 @@ profile() {
     run) [ $# -ge 1 ] || die "profile run SPEC [ARG...]"; _spec=$1; prof_parse "$1"; shift
       # A bare harness bringing a session back starts where that session was
       # saved (your own login or a profile), not in this machine's default.
-      case $_spec in *\[*) ;; *) _held=$(prof_session_home "$PH" "$@") && { PN=$_held; P="$PROFILES/$PH/$PN"; } ;; esac
+      case $_spec in *\[*) ;; *) _held=$(prof_session_home "$PH" "$@") && { PN=${_held:-$(prof_adopted "$PH")}; P="$PROFILES/$PH/$PN"; } ;; esac
       prof_make; prof_exec "$PH" "$@" ;;
     exec) [ $# -ge 2 ] || die "profile exec SPEC COMMAND..."; prof_parse "$1"; shift; prof_make; prof_exec "$@" ;;
     rm)
@@ -2002,8 +2011,60 @@ profile() {
         esac
       fi
       [ "$(prof_default "$PH")" = "$PN" ] && prof_set_default "$PH" ""
+      [ "$(prof_adopted "$PH")" = "$PN" ] && rm -f "$PROFILES/$PH/.adopted"
+      # (rm doesn't follow links: an adopting profile's sessions stay in your home folder.)
       rm -rf "$P"; echo "removed ${PH}[$PN]" ;;
-    *) die "profile new|login|run|exec|ls|default|rm" ;;
+    adopt)
+      # SPEC takes over your home folder's sessions and memory: its own folders
+      # for them become links to yours (what it had is merged in first, the
+      # newer copy kept), and your own (claude[], or a bare claude with no
+      # default) means SPEC from then on. For a profile on the same account
+      # as your own login, which is then no longer used.
+      [ $# -eq 1 ] || die "profile adopt SPEC (claude[NAME] or codex[NAME])"
+      prof_parse "$1"; [ -n "$PN" ] && [ -d "$P" ] || die "profile adopt: no profile $1 here"
+      case $PH in
+        claude) _hd="$P/claude"; _ad="projects file-history todos plans" ;;
+        codex) _hd="$P/codex"; _ad="sessions archived_sessions" ;;
+        *) die "profile adopt: claude or codex" ;;
+      esac
+      _ow=$(prof_own "$PH")
+      for _x in $_ad; do
+        mkdir -p "$_ow/$_x"
+        if [ -d "$_hd/$_x" ] && [ ! -L "$_hd/$_x" ]; then
+          rsync -a --update "$_hd/$_x/" "$_ow/$_x/" || die "profile adopt: couldn't merge $_hd/$_x into $_ow/$_x"
+          rm -rf "$_hd/$_x"
+        fi
+        ln -sfn "$_ow/$_x" "$_hd/$_x"
+      done
+      printf '%s\n' "$PN" > "$PROFILES/$PH/.adopted"
+      echo "${PH}[$PN] has your own sessions now; ${PH}[] and a bare $PH with no default start in it" ;;
+    shell)
+      # Plain claude, codex and agy typed in a shell start as `reflex profile
+      # run` does: in this machine's default profile (or, inside an agent in a
+      # profile of that harness, in its profile), never by accident in the
+      # login in your home folder.
+      mkdir -p "$PROFILES"
+      cat > "$PROFILES/shell.sh" <<'SH'
+# Written by `reflex profile shell`: plain claude, codex and agy start through
+# `reflex profile run` (this machine's default profile; an agent's own profile
+# inside one). `command claude` skips it.
+_reflex_harness() {
+  _rh=$1; shift
+  command -v reflex >/dev/null 2>&1 || { command "$_rh" "$@"; return; }
+  case ${REFLEX_HARNESS_PROFILE:-} in "$_rh"\[?*\]) _rh=$REFLEX_HARNESS_PROFILE ;; esac
+  command reflex profile run "$_rh" "$@"
+}
+claude() { _reflex_harness claude "$@"; }
+codex() { _reflex_harness codex "$@"; }
+agy() { _reflex_harness agy "$@"; }
+SH
+      _line='[ -f "$HOME/.reflex/profiles/shell.sh" ] && . "$HOME/.reflex/profiles/shell.sh"  # reflex profile shell'
+      for _rc in "$HOME/.zshrc" "$HOME/.bashrc"; do
+        case $_rc in *zshrc) [ -f "$_rc" ] || [ "$(basename "${SHELL:-}")" = zsh ] || continue ;; *) [ -f "$_rc" ] || continue ;; esac
+        grep -qF 'reflex/profiles/shell.sh' "$_rc" 2>/dev/null || { printf '\n%s\n' "$_line" >> "$_rc"; echo "added to $_rc"; }
+      done
+      echo "plain claude, codex and agy start in this machine's default profile (new shells)" ;;
+    *) die "profile new|login|run|exec|ls|default|shell|adopt|rm" ;;
   esac
 }
 

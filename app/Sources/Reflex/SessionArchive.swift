@@ -206,7 +206,12 @@ final class SessionArchive: ObservableObject {
         let profiles = home + "/.reflex/profiles"
         for (agent, sub, depth) in [("claude", "claude/projects", 2), ("pi", "pi/sessions", 2), ("codex", "codex/sessions", 4)] {
             let names = (try? FileManager.default.contentsOfDirectory(atPath: "\(profiles)/\(agent)")) ?? []
-            for n in names where !n.hasPrefix(".") { collect(agent, "\(profiles)/\(agent)/\(n)/\(sub)", depth: depth) }
+            for n in names where !n.hasPrefix(".") {
+                let dir = "\(profiles)/\(agent)/\(n)/\(sub)"
+                // (A profile that adopted your own sessions links to them: read above.)
+                if (try? FileManager.default.destinationOfSymbolicLink(atPath: dir)) != nil { continue }
+                collect(agent, dir, depth: depth)
+            }
         }
 
         var out: [PastSession] = []
