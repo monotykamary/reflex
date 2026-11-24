@@ -8,7 +8,7 @@ import SwiftUI
 // the control on the right — so nothing is ever cut off.
 
 enum SettingsPane: String, CaseIterable, Identifiable {
-    case general, rail, terminal, routing, projects, machines, phone, setup, about
+    case general, rail, terminal, routing, projects, machines, profiles, phone, setup, about
     var id: String { rawValue }
 
     var title: String {
@@ -19,6 +19,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .routing: return "Routing"
         case .projects: return "Projects"
         case .machines: return "Machines"
+        case .profiles: return "Profiles"
         case .phone: return "Phone"
         case .setup: return "Setup"
         case .about: return "About"
@@ -33,6 +34,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .routing: return "arrow.triangle.branch"
         case .projects: return "folder.fill"
         case .machines: return "desktopcomputer"
+        case .profiles: return "person.2.fill"
         case .phone: return "iphone"
         case .setup: return "checklist"
         case .about: return "info.circle.fill"
@@ -47,6 +49,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .routing: return Tone.route
         case .projects: return Color(red: 0.2, green: 0.6, blue: 0.95)
         case .machines: return Tone.remote
+        case .profiles: return Color(red: 0.93, green: 0.36, blue: 0.55)
         case .phone: return Tone.done
         case .setup: return Tone.blocked
         case .about: return Color(white: 0.45)
@@ -61,6 +64,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .routing: return "Jev decides where each request goes. Pick its provider; it learns from your choices."
         case .projects: return "The folders Reflex can start new sessions in."
         case .machines: return "Your Macs and your boat and instabox sandboxes, one mesh: their sessions show up here with this Mac's, and move between them."
+        case .profiles: return "Your harnesses' other accounts. Each keeps its own login and sessions, stays signed in on every machine, and a machine can start in one by default."
         case .phone: return "Answer your agents from your phone."
         case .setup: return "Everything Reflex needs, checked live."
         case .about: return "Reflex, herdr and Jev."
@@ -76,6 +80,7 @@ enum SettingsPane: String, CaseIterable, Identifiable {
         case .routing: return "jev provider api key keychain credential typesafe openrouter vercel test memory forget"
         case .projects: return "folders roots repositories index herdr session new project keyword"
         case .machines: return "remote machines ssh tunnel herdr saved machine other mac work laptop tailscale remove forget delete boat instabox sandbox box template skill move sessions retire approve files commands run trust resume"
+        case .profiles: return "profile account login sign in work personal gig claude codex agy pi opencode amp grok default holder refresh keys token keychain"
         case .phone: return "remote qr tailscale network link token"
         case .setup: return "onboarding install herdr integrations jev accessibility welcome tour guide"
         case .about: return "version"
@@ -152,6 +157,7 @@ struct SettingsView: View {
                 case .routing: RoutingPane()
                 case .projects: ProjectsPane()
                 case .machines: MachinesPane()
+                case .profiles: ProfilesPane()
                 case .phone: PhonePane()
                 case .setup: SetupPane()
                 case .about: AboutPane()
@@ -224,7 +230,7 @@ struct IconTile: View {
 }
 
 /// The header card at the top of each pane.
-private struct PaneHeader: View {
+struct PaneHeader: View {
     var pane: SettingsPane
     var body: some View {
         VStack(spacing: 8) {

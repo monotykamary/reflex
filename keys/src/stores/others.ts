@@ -2,11 +2,12 @@
 // opencode. Read from their code on 2026-11-24 (opencode 2.3.2, amp 0.0.1767960117, grok
 // build 1.0.45 source at 2bdd1d6: not installed here, unverified against a binary).
 import {Database} from 'bun:sqlite'
+import {spawnSync} from 'node:child_process'
 import {existsSync} from 'node:fs'
 import {join} from 'node:path'
 import * as kc from '../keychain'
 import {flock} from '../lock'
-import {keychainStore, type Profile} from '../profile'
+import {home, keychainStore, type Profile} from '../profile'
 import {clone, fail, readJson, writeJson} from '../util'
 import {fp, type Content, type Store} from './store'
 
@@ -25,7 +26,11 @@ export function agyStore(p: Profile): Store {
   const item: kc.Item = {service: 'gemini', account: 'antigravity', keychain: keychain ?? kc.defaultKeychain(), home: p.name ? p.hhome : undefined}
   const open = () => {
     if (!keychain) return
-    if (!existsSync(keychain)) fail(`${p.key} has no Keychain here yet: make the profile first (reflex profile new ${p.key})`)
+    // A profile pushed to a Mac that hasn't got it yet: made there first (its home and Keychain).
+    if (!existsSync(keychain)) {
+      const r = spawnSync(join(home(), '.local', 'bin', 'reflex'), ['profile', 'new', p.key], {stdio: 'ignore', timeout: 60_000})
+      if (r.status !== 0 || !existsSync(keychain)) fail(`${p.key} has no Keychain here yet, and making it failed: reflex profile new ${p.key}`)
+    }
     const pw = kc.read({service: PROFILE_KEYCHAIN, account: `agy/${p.name}`, keychain: kc.defaultKeychain()}) ?? fail(`${p.key}'s Keychain password isn't in your Keychain`)
     kc.unlock(keychain, pw, p.hhome)
   }
