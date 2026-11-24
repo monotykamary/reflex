@@ -11,19 +11,23 @@ user's real home and login, untouched. A profile exists only where there is an a
   (repos, ssh, gh, git config, other tools) is shared through links back to the real home.
 - No resuming across profiles. Work crosses only by handoff: Reflex, which runs outside every profile,
   copies one picked session (summary or transcript) into the target profile.
-- Profiles can't read each other's folders (Seatbelt on a Mac; on Linux the other profiles' folders are
-  covered by empty ones inside the mount namespace).
+- On Linux, profiles can't read each other's folders: they are covered by empty ones inside the mount
+  namespace. On a Mac they are kept apart only by their own folders and logins and by the agents' rules
+  (the reflex skill): a Seatbelt profile around an agent stops every sandbox the agent starts itself
+  (Codex's and Claude's command sandboxes, SwiftPM: `sandbox_apply: Operation not permitted`), so
+  Reflex doesn't use one (found 2026-11-24, removed in 0.1.97).
 - Reflex tags each session with its profile, so a resume starts in the same profile. A folder may pin a
   default profile.
 
 ### Isolation per OS
 
-- **macOS:** run the harness with `HOME=~/.reflex/profiles/<harness>/<name>/home`. `security` resolves
+- **macOS:** Claude, Codex and pi take their folder by a setting (below); the others run with
+  `HOME=~/.reflex/profiles/<harness>/<name>/home`. `security` resolves
   the default Keychain from `$HOME`, so the profile home gets its own
-  `Library/Keychains/login.keychain-db`, isolated from the real one (tested: an item added there is not
-  in the real Keychain; claude and codex report not logged in). Its password is random, kept in the
-  real login Keychain, and Reflex unlocks it before starting an agent. A Seatbelt profile denies other
-  profiles' folders. sandbox-exec cannot remap paths; it only enforces.
+  `Library/Keychains/reflex-profile.keychain-db` (not named "login": macOS unlocks a login keychain
+  only with your login password), isolated from the real one (tested: an item added there is not in
+  the real Keychain). Its password is random, kept in the real login Keychain, and Reflex unlocks it
+  before starting an agent.
 - **Linux boxes:** a root-made private mount namespace binds the profile's folders over the real ones,
   then drops back to the user, so sudo keeps working:
   `sudo --preserve-env unshare --mount --propagation private sh -c 'mount --bind A B && exec setpriv --reuid=$U --regid=$U --init-groups -- CMD'`.

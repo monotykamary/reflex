@@ -1742,8 +1742,9 @@ skill() {
 # setting, so it gets a home of its own whose entries link back to the real one
 # (and on a Mac its own Keychain, which `security` finds through $HOME). Your
 # settings, skills, hooks and extensions are linked in; the login, sessions and
-# history are the profile's. A run can't read other profiles, or (in a profile)
-# your own sessions: Seatbelt on a Mac, a private mount namespace on Linux.
+# history are the profile's. On Linux a run can't read other profiles, or (in a
+# profile) your own sessions: a private mount namespace hides them. On a Mac
+# nothing is hidden (Seatbelt would break the agents' own sandboxes).
 PROFILES=${REFLEX_PROFILES:-"$HOME/.reflex/profiles"}
 PROFILE_KEYCHAIN="Reflex profile keychain"
 
@@ -1907,17 +1908,11 @@ prof_exec() { # prof_exec COMMAND...: run in the profile, kept from what it can'
   rm -rf "$T"  # (exec skips the EXIT trap)
   _hide=$(prof_hidden)
   if [ -z "$_hide" ]; then exec env $PENV "$@"; fi
-  if [ "$(uname)" = Darwin ]; then
-    _sb='(version 1)(allow default)'
-    _old=$IFS; IFS='
-'
-    for _d in $_hide; do
-      _e=$(printf '%s' "$_d" | sed 's/[\\"]/\\&/g')
-      if [ -d "$_d" ]; then _sb="$_sb(deny file-read* file-write* (subpath \"$_e\"))"; else _sb="$_sb(deny file-read* file-write* (literal \"$_e\"))"; fi
-    done
-    IFS=$_old
-    exec env $PENV sandbox-exec -p "$_sb" "$@"
-  fi
+  # On a Mac nothing is hidden: a Seatbelt profile around the agent would stop
+  # every sandbox it starts itself (Codex's and Claude's command sandboxes,
+  # SwiftPM: "sandbox_apply: Operation not permitted"). Profiles there are kept
+  # apart by their own folders and logins, and by the agents' rules.
+  if [ "$(uname)" = Darwin ]; then exec env $PENV "$@"; fi
   # Linux: a private mount namespace that root makes, the hidden paths covered,
   # then you again (so sudo still works inside; bubblewrap's no_new_privs would end that).
   if command -v unshare >/dev/null && command -v setpriv >/dev/null && sudo -n true 2>/dev/null; then
