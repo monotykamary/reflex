@@ -1,0 +1,14 @@
+{
+  "name": "reflex-keys",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "bun test",
+    "build": "bun build --compile --target=bun-darwin-arm64 src/cli.ts --outfile dist/reflex-keys-darwin-arm64 && bun build --compile --target=bun-linux-x64 src/cli.ts --outfile dist/reflex-keys-linux-x64"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.5",
+    "gdp-wired": "0.59.0"
+  }
+}

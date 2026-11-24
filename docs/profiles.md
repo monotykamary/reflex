@@ -1,6 +1,6 @@
 # Harness profiles and the credential holder
 
-Design notes, 2026-11-24. Not built yet.
+Design notes, 2026-11-24. The credential holder is built in keys/ (below); profiles are `reflex profile`.
 
 ## Profiles
 
@@ -71,6 +71,78 @@ early and pushes the result to every other machine. Rules:
 
 Holder cadence: Claude at least every 8 h; Codex daily or with under a day left; pi with an hour or
 more to spare. The holder pushes straight after each refresh.
+
+### Built: `reflex-keys` (keys/)
+
+A Bun program, shipped as `bun build --compile` binaries (`cd keys && bun run build`:
+`dist/reflex-keys-darwin-arm64`, `dist/reflex-keys-linux-x64`). Its records live in
+`~/.reflex/keys/`; the machine's identity is `~/.reflex/id` (`reflex id`); other machines are
+reached with `hc exec --on M -i` running `~/.local/bin/reflex-keys` there, payloads on stdin and
+stdout only.
+
+    reflex-keys seed SPEC               this Mac, where SPEC is signed in, holds it (epoch 1)
+    reflex-keys watch [--quiet]         the service on every Mac (a LaunchAgent, KeepAlive)
+    reflex-keys tick                    one pass of what watch does every ~10 min
+    reflex-keys hold SPEC --on M        handover: the holder stops, sends its newest copy, epoch + 1
+    reflex-keys hold SPEC --on M --force    the holder gone for good: M, signed in again, takes over
+    reflex-keys status [--json]         holder, epoch, generation, expiry, login end, who's current
+
+The protocol is `keys/laws/protocol.ts`, a gdp-wired rule over any number of machines. Its laws
+are proven and kernel-checked with no assumed invariant: at most one machine can refresh, at
+most one holds the lease, a non-holder never stores a usable refresh token, the holder has the
+newest generation, a receiver's generation and epoch never decrease, and after a handover the
+new holder has the newest generation. Five broken variants are refused by real runs:
+- a handover that doesn't stop the old holder;
+- a forced takeover;
+- no version check;
+- a push carrying the token;
+- a handover sending an older copy.
+
+`src/lease.ts` holds one machine's decisions. It is run beside the compiled rule on 12,000
+random steps, and every map cell must agree. `bun test` runs all of it.
+
+Holder triggers, read from each harness's source on 2026-11-24:
+
+| | How the holder makes it refresh | When |
+|---|---|---|
+| Claude | its own daemon, `claude daemon run --log-file ~/.reflex/keys/claude-SPEC.log` with the profile's env, kept running by `watch` on the holder | about 4 min before expiry |
+| Codex | `codex app-server`: `initialize`, `initialized`, `account/read {refreshToken: true}` | under a day left, or a day since the last |
+| pi | `pi auth print-bearer-token --provider X --min-expiry 120m` | under 2 h left |
+| opencode, grok | none (they refresh themselves when used on the holder) | - |
+| agy, amp, Copilot | don't rotate: copied as they are | - |
+
+`watch` runs these pieces:
+- **Change check, every ~15 s.** It reads the stores of the profiles this Mac holds. A change is
+  a new generation, pushed straight away.
+- **Full tick, every ~10 min,** also at start and after a sleep. Codex and pi are refreshed when
+  due, newer copies are taken, and machines that are behind are brought up to date.
+- **Claude daemons.** One `claude daemon run` runs per Claude profile held here.
+  - None is started if `claude daemon status` says one already runs for that config.
+  - It is restarted with backoff (5 s doubling to 10 min) when it exits.
+  - It is stopped by its PID when this Mac stops holding the profile.
+  - A small sh guard kills it when `watch` is gone, even after a SIGKILL.
+- **Log:** `~/.reflex/keys/watch.log`, rotated at 256 KB into `watch.log.1`.
+
+Receivers get Claude's new token at most about 4 minutes before the old one ends. A Claude
+started fresh on a receiver in the last 5 minutes of a token may count itself signed out until
+the push lands.
+
+Codex's `account/read` refresh is a forced refresh through its own guarded reload and locks.
+
+Placeholders and locks per harness:
+- Claude: `refreshToken` left out. Writes go under `<config>/.storage-write.lock`; a stray
+  `.credentials.json` beside a Mac's Keychain item is removed.
+- Codex: `refresh_token: ""`. Writes go under flocks on `auth.lock`, then `auth.json.lock`; the
+  account must match.
+- pi: `reflex-keys:not-the-holder`, written under `<realpath>.lock`. Only `anthropic` and
+  `openai-codex` rotate.
+- grok: `refresh_token` left out, under a flock on `auth.json.lock`.
+- opencode: rows of `credential` in `opencode.db`, written with SQL. Rotating rows (openai, xai,
+  opencode, gitlab) get `refresh: ""`, `expires: 0`. MCP rows stay per machine.
+- amp: `secrets.json`, without its `mcp-oauth-*` entries.
+
+A usable refresh token found on a non-holder is replaced by a placeholder at the next tick. The
+safety net of rule 5 is reduced to that.
 
 ### Still open
 
