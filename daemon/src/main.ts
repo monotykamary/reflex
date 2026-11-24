@@ -18,7 +18,7 @@ import * as Js from './js.ts'
 import type {J, Res} from './js.ts'
 import * as Link from './link.ts'
 import type {Action, Agent, Dispatch, Folder, Msg, Opt, Reply, State} from './model.ts'
-import {emptyState, showStatus} from './model.ts'
+import {emptyState, showStatus, spec} from './model.ts'
 import * as P from './past.ts'
 import * as R from './route.ts'
 import {isEmpty, lines, orElse, readU32, showU32, trim} from './str.ts'
@@ -162,7 +162,7 @@ function stdoutOf(r: Res<Host.Ran>): Res<string> {
 
 const textOr = (r: Res<string>, prev: string) => (r.ok ? r.v : prev)
 
-class Daemon {
+export class Daemon {
   readonly actor: Actor
   constructor(readonly cfg: Cfg) {
     this.actor = new Actor(cfg.undo, (d) => void this.exec(d))
@@ -294,10 +294,18 @@ class Daemon {
 
   // A headless fork runs where the session's files are: on this Mac. One on
   // another machine isn't forked (yet): its own terminal can take the question.
-  async sideFork(pane: string, label: string, kind: string, cwd: string, session: string, text: string): Promise<Res<string>> {
+  async sideFork(pane: string, label: string, kind: string, cwd: string, session: string, text: string, profile: string): Promise<Res<string>> {
     if (!isEmpty(Herdr.machine(pane)))
       return Js.fail(1, 'a side question for an agent on ' + Herdr.machine(pane) + ' needs it free to take /btw: ask in its terminal')
-    const r = stdoutOf(await Host.run(this.cfg.fork, [kind, cwd, session, text], '', 4194304, 300000))
+    // An agent in a profile is forked in it: its sessions are the profile's
+    // (where this Mac's reflex knows profiles).
+    const found = isEmpty(profile) ? null : Bun.which('reflex')
+    const knows = found ? await Host.run(found, ['profile', 'ls'], '', 1048576, 5000) : null
+    const reflex = knows?.ok && knows.v.status === 0 ? found : null
+    const [cmd, args] = reflex
+      ? [reflex, ['profile', 'exec', spec(kind, profile), this.cfg.fork, kind, cwd, session, text]]
+      : [this.cfg.fork, [kind, cwd, session, text]]
+    const r = stdoutOf(await Host.run(cmd, args, '', 4194304, 300000))
     if (!r.ok) return r
     this.post({m: 'post', kind: 'reply', pane, agent: label, title: 'btw answer (forked session)', body: trim(r.v), opts: []})
     return Js.done('answered in a fork')
@@ -323,19 +331,20 @@ class Daemon {
 
   // Started in the core with the request as its first prompt (the agent's own
   // argument: nothing to type in, nothing to wait for).
-  async coreRun(id: number, m: string, cwd: string, kind: string, session: string, args: string[], text: string): Promise<Res<string>> {
+  async coreRun(id: number, m: string, cwd: string, kind: string, session: string, args: string[], text: string, profile: string): Promise<Res<string>> {
     const name = agentName(id, Host.randomU32())
-    const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, text)
+    const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, text, profile)
     if (!a.ok) return a
     // A request that went in counts as using its folder.
     await this.recordUse(!isEmpty(trim(text)), cwd)
     return Js.done('started ' + name + ' in ' + a.v)
   }
 
-  async spawnOn(c: boolean, id: number, m: string, cwd: string, kind: string, text: string): Promise<Res<string>> {
+  // (A profile is the core's: herdr starts its own agents by kind.)
+  async spawnOn(c: boolean, id: number, m: string, cwd: string, kind: string, text: string, profile: string): Promise<Res<string>> {
     if (c) {
       const s = freshSession(kind)
-      return this.coreRun(id, m, cwd, kind, s, isEmpty(s) ? [] : ['--session-id', s], text)
+      return this.coreRun(id, m, cwd, kind, s, isEmpty(s) ? [] : ['--session-id', s], text, profile)
     }
     const sock = Herdr.atOf(this.cfg.sock, machinesDir(this.cfg), m)
     const w = await Herdr.newWorkspace(sock, Ix.pathOn(cwd), Core.baseName(cwd))
@@ -347,14 +356,14 @@ class Daemon {
 
   // Attaching to a running background session takes no first prompt: the
   // request is sent once it is up, as to any live session.
-  async resumeOn(c: boolean, id: number, m: string, cwd: string, kind: string, session: string, mode: string, text: string): Promise<Res<string>> {
+  async resumeOn(c: boolean, id: number, m: string, cwd: string, kind: string, session: string, mode: string, text: string, profile: string): Promise<Res<string>> {
     const args = R.resumeArgs(kind, mode, session)
     if (c) {
       // A resumed (or attached) session keeps its id; a fork's is new and
       // comes to light later (Claude's own session file).
-      if (mode !== 'attach') return this.coreRun(id, m, cwd, kind, mode === 'fork' ? '' : session, args, text)
+      if (mode !== 'attach') return this.coreRun(id, m, cwd, kind, mode === 'fork' ? '' : session, args, text, profile)
       const name = agentName(id, Host.randomU32())
-      const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, '')
+      const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, '', profile)
       if (!a.ok) return a
       return this.resumed(isEmpty(text), this.cfg.core, m, cwd, name, a.v, text, Js.done(Js.NULL))
     }
@@ -383,18 +392,18 @@ class Daemon {
         return okDetail(r, 'asked with /btw')
       }
       case 'fork':
-        return this.sideFork(a.pane, label, a.kind, a.cwd, a.session, a.text)
+        return this.sideFork(a.pane, label, a.kind, a.cwd, a.session, a.text, a.profile ?? '')
       // A folder on another Mac ("work:/Users/you/VCS/app") starts there.
       case 'resume': {
         const m = Ix.machineOf(a.cwd)
-        return this.resumeOn(await this.useCore(m), id, m, a.cwd, a.kind, a.session, a.mode, a.text)
+        return this.resumeOn(await this.useCore(m), id, m, a.cwd, a.kind, a.session, a.mode, a.text, a.profile ?? '')
       }
       case 'spawn': {
         const m = Ix.machineOf(a.cwd)
         // A new project folder may not exist yet; on another Mac the folder
         // comes from its own index: it is there.
         if (isEmpty(m)) await Host.run('/bin/mkdir', ['-p', a.cwd], '', 4096, 5000)
-        return this.spawnOn(await this.useCore(m), id, m, a.cwd, a.kind, a.text)
+        return this.spawnOn(await this.useCore(m), id, m, a.cwd, a.kind, a.text, a.profile ?? '')
       }
     }
   }
@@ -580,18 +589,21 @@ class Daemon {
   }
 
   // Jev's ranking of every candidate, live, for the Ask bar's list. Dry.
-  async candidates(text: string, harness: string, memory: string, machine: string): Promise<string> {
+  // A harness with a profile: only that profile's agents and sessions; a
+  // bare harness: any of the harness's.
+  async candidates(text: string, harness: string, memory: string, machine: string, profile: string): Promise<string> {
     const ctx = this.context()
     if (!ctx) return '{"ok":false,"error":"no context"}'
     const c = this.cfg
-    const seen = await this.readSeen(scopeAgents(machine, ctx.agents).filter((a) => isEmpty(harness) || harness === a.kind).slice(0, 12))
+    const mine = (a: Agent) => isEmpty(harness) || (harness === a.kind && (isEmpty(profile) || profile === a.profile))
+    const seen = await this.readSeen(scopeAgents(machine, ctx.agents).filter(mine).slice(0, 12))
     const cands = Ix.rank(text, Ix.on(machine, ctx.folders), 8)
-    const pasts = P.rank(text, P.harness(harness, P.on(machine, await this.readPasts())), 5)
+    const pasts = P.rank(text, P.harness(harness, P.on(machine, await this.readPasts()), profile), 5)
     const line = R.request(text, c.home, seen, cands, pasts, memory)
     const t0 = Host.nowMs()
     const out = await this.jev(line, 4194304, 65000)
     const t1 = Host.nowMs()
-    return R.candidatesOutput(out, text, c.home, orElse(harness, c.harness), c.threshold, seen, cands, pasts, (t1 - t0) >>> 0)
+    return R.candidatesOutput(out, text, c.home, spec(orElse(harness, c.harness), profile), c.threshold, seen, cands, pasts, (t1 - t0) >>> 0)
   }
 
   // The JSON request for the candidates routing would show Jev (for a UI or a
@@ -723,16 +735,20 @@ class Daemon {
       case '/api/state':
         return ok(this.askText({m: 'query'}))
       case '/api/route':
-        return ok(await this.route(isTrue(t('dry')), t('text'), orElse(t('harness'), c.harness), t('memory'), t('machine')))
+        return ok(await this.route(isTrue(t('dry')), t('text'), spec(orElse(t('harness'), c.harness), t('profile')), t('memory'), t('machine')))
       case '/api/candidates':
-        return ok(await this.candidates(t('text'), t('harness'), t('memory'), t('machine')))
+        return ok(await this.candidates(t('text'), t('harness'), t('memory'), t('machine'), t('profile')))
       case '/api/explain':
         return ok(await this.explain(t('text'), t('memory'), t('machine')))
       case '/api/send':
         return ok(this.askText({m: 'enqueue', action: {type: 'prompt', pane: t('pane'), text: t('text')}, label: '→ ' + orElse(t('label'), t('pane')), item: 0}))
+      // `profile`: the harness profile to start it in ("" or none: your own,
+      // or the machine's default for that harness).
       case '/api/spawn': {
         const kind = orElse(t('kind'), c.harness)
-        return ok(this.askText({m: 'enqueue', action: {type: 'spawn', cwd: t('cwd'), kind, text: t('text')}, label: 'new ' + kind + ' in ' + R.leaf(t('cwd')), item: 0}))
+        const profile = t('profile')
+        const action: Action = profile ? {type: 'spawn', cwd: t('cwd'), kind, text: t('text'), profile} : {type: 'spawn', cwd: t('cwd'), kind, text: t('text')}
+        return ok(this.askText({m: 'enqueue', action, label: 'new ' + spec(kind, profile) + ' in ' + R.leaf(t('cwd')), item: 0}))
       }
       case '/api/cancel':
         return ok(this.askText({m: 'cancel', id: Js.asU32(Js.get(body, 'id'), 0)}))
@@ -776,15 +792,11 @@ class Daemon {
         return ok(paneJson(okDetail(await Term.closePane(at(c, t('pane')), Term.bare(t('pane'))), 'closed')))
       case '/api/sessions':
         return ok(Js.obj([Js.kv('ok', 'true'), Js.kv('sessions', Js.arr((await this.readPasts()).map(P.pastJson)))]))
-      case '/api/resume':
-        return ok(
-          this.askText({
-            m: 'enqueue',
-            action: {type: 'resume', cwd: t('cwd'), kind: orElse(t('kind'), 'claude'), session: t('session'), mode: orElse(t('mode'), 'resume'), text: t('text')},
-            label: 'resume ' + orElse(t('label'), R.leaf(t('cwd'))),
-            item: 0,
-          }),
-        )
+      case '/api/resume': {
+        const action: Action = {type: 'resume', cwd: t('cwd'), kind: orElse(t('kind'), 'claude'), session: t('session'), mode: orElse(t('mode'), 'resume'), text: t('text')}
+        if (t('profile')) action.profile = t('profile')
+        return ok(this.askText({m: 'enqueue', action, label: 'resume ' + orElse(t('label'), R.leaf(t('cwd'))), item: 0}))
+      }
       // The agents the core lost (a restart, a lost holder): shown to bring back.
       case '/api/stopped':
         return ok(await Hc.listStopped(c.core))
@@ -901,8 +913,10 @@ const JEV_ARGS = ['--', 'serve', '--timeout-ms', '60000', '1', '60000']
 
 const PING = '{"id":1,"op":"jev","request":{"state":"Reflex setup check.","questions":{"ready":{"type":"noul","instructions":"Is this a setup check?"}}}}\n'
 
+// Profiles' too (`reflex profile`: ~/.reflex/profiles/claude/<name>/claude is
+// a profile's CLAUDE_CONFIG_DIR, …/pi/<name>/pi its pi agent folder).
 const BUSY =
-  'for f in "$HOME"/.claude/sessions/*.json "$HOME"/.pi/agent/reflex/sessions/*.json; do [ -f "$f" ] || continue; p=${f##*/}; p=${p%.json}; kill -0 "$p" 2>/dev/null && { cat "$f"; echo; }; done'
+  'for f in "$HOME"/.claude/sessions/*.json "$HOME"/.pi/agent/reflex/sessions/*.json "$HOME"/.reflex/profiles/claude/*/claude/sessions/*.json "$HOME"/.reflex/profiles/pi/*/pi/reflex/sessions/*.json; do [ -f "$f" ] || continue; p=${f##*/}; p=${p%.json}; kill -0 "$p" 2>/dev/null && { cat "$f"; echo; }; done'
 
 // herdr's refusals, and herdr-core's: "blocked: …" (waiting on you),
 // "unavailable: …" (starting, or a lost terminal waiting for its new shell).

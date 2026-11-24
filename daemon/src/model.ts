@@ -24,7 +24,13 @@ export type Agent = {
   screen: string
   // The terminal that started it (`hc run` in it), "" for none.
   parent: string
+  // The harness profile it runs in (`reflex profile`: "tom" for claude[tom]),
+  // "" for your own.
+  profile: string
 }
+
+// "claude", or "claude[tom]" in a profile.
+export const spec = (kind: string, profile: string | undefined): string => (profile ? kind + '[' + profile + ']' : kind)
 
 // A folder where a new session may start (built by folders.ts from the scan).
 export type Folder = {
@@ -42,18 +48,19 @@ export type Action =
   // submit a prompt to an existing agent
   | {type: 'prompt'; pane: string; text: string}
   // open a workspace in cwd, start a harness there, then prompt it
-  | {type: 'spawn'; cwd: string; kind: string; text: string}
+  // (in `profile`, "" or absent for your own; so for resume and fork)
+  | {type: 'spawn'; cwd: string; kind: string; text: string; profile?: string}
   // bring an earlier session back in cwd — mode "resume" (continue it), "fork"
   // (a copy: it is open elsewhere) or "attach" (a running background session)
   // — then prompt it if text is set
-  | {type: 'resume'; cwd: string; kind: string; session: string; mode: string; text: string}
+  | {type: 'resume'; cwd: string; kind: string; session: string; mode: string; text: string; profile?: string}
   // press one key in an agent's pane, e.g. "1" to answer a numbered question
   | {type: 'press'; pane: string; key: string}
   // the harness's own side-question command, typed into its TUI (/btw)
   | {type: 'btw'; pane: string; text: string}
   // fork the agent's session headlessly and ask there; the reply comes back
   // as an inbox item and the original agent is never touched
-  | {type: 'fork'; pane: string; kind: string; cwd: string; session: string; text: string}
+  | {type: 'fork'; pane: string; kind: string; cwd: string; session: string; text: string; profile?: string}
 
 // One answer an inbox item offers (pressed as 1, 2, 3...).
 export type Opt = {key: string; label: string; action: Action}
@@ -145,13 +152,16 @@ export const showStatus = (s: Status): string => (s === 'finished' ? 'done' : s)
 // JSON rendering
 // --------------
 
+// A profile, as a field of its own: none when it's your own.
+const profileKv = (profile: string | undefined): string[] => (profile ? [Js.kv('profile', Js.str(profile))] : [])
+
 export function actionJson(a: Action): string {
   const {str, kv, obj} = Js
   switch (a.type) {
     case 'prompt':
       return obj([kv('type', str('prompt')), kv('pane', str(a.pane)), kv('text', str(a.text))])
     case 'spawn':
-      return obj([kv('type', str('spawn')), kv('cwd', str(a.cwd)), kv('kind', str(a.kind)), kv('text', str(a.text))])
+      return obj([kv('type', str('spawn')), kv('cwd', str(a.cwd)), kv('kind', str(a.kind)), kv('text', str(a.text)), ...profileKv(a.profile)])
     case 'resume':
       return obj([
         kv('type', str('resume')),
@@ -160,6 +170,7 @@ export function actionJson(a: Action): string {
         kv('session', str(a.session)),
         kv('mode', str(a.mode)),
         kv('text', str(a.text)),
+        ...profileKv(a.profile),
       ])
     case 'press':
       return obj([kv('type', str('press')), kv('pane', str(a.pane)), kv('key', str(a.key))])
@@ -172,6 +183,7 @@ export function actionJson(a: Action): string {
         kv('kind', str(a.kind)),
         kv('cwd', str(a.cwd)),
         kv('text', str(a.text)),
+        ...profileKv(a.profile),
       ])
   }
 }
@@ -188,6 +200,7 @@ export function agentJson(a: Agent): string {
     kv('seq', num(a.seq)),
     kv('session', str(a.session)),
     kv('parent', str(a.parent)),
+    ...profileKv(a.profile),
   ])
 }
 

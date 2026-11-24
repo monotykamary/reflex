@@ -40,6 +40,7 @@ const agent = (status: Status = pick(STATUS)): Agent => ({
   session: pick(['', 's']),
   screen: pick(['', 'Proceed?\n❯ 1. Yes\n  2. No', 'Pick\n   A\n ❯ B']),
   parent: '',
+  profile: pick(['', '', 'tom']),
 })
 const item = (): Item => ({id: r(6), kind: pick(['ask', 'ready', 'reply', 'route', 'note'] as const), pane: 't1', agent: 'a', title: '', body: '', opts: r(2) ? [{key: '1', label: 'x', action: action()}] : [], at: 0})
 const state = (): State => ({
@@ -107,7 +108,7 @@ const folder = (): Folder => ({path: pick(['/Users/me/a', '/x/b', 'work:/c']), n
 const pickOf = (prefix: string, n: number): R.Pick | undefined =>
   r(4) === 0 ? undefined : {key: r(5) === 0 ? 'new' : prefix + r(n + 1), bp: r(10001), all: Array.from({length: n}, (_, i) => ({key: prefix + i, bp: r(10001)}))}
 const seen = (): R.Seen[] => Array.from({length: r(3)}, () => ({agent: agent(), recent: ''}))
-const past = (): Past => ({agent: pick(['claude', 'pi', 'codex']), id: 'i' + r(3), cwd: '/a', title: 't', last: 'l', age: r(50), state: pick(['past', 'running', 'elsewhere'])})
+const past = (): Past => ({agent: pick(['claude', 'pi', 'codex']), id: 'i' + r(3), cwd: '/a', title: 't', last: 'l', age: r(50), state: pick(['past', 'running', 'elsewhere']), profile: pick(['', 'tom'])})
 const decision = (): R.Decision => R.decide(pick(TEXT), '/Users/me', 'claude', 6000, seen(), [folder(), folder()], pickOf('a', 2), pickOf('f', 2), r(10001))
 
 test('unsure_target_never_acts, unsure_folder_never_acts: on any request', () => {

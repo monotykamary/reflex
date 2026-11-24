@@ -77,6 +77,7 @@ export function agentOf(a: J): Agent {
     session: Js.textOf(Js.path(['agent_session', 'value'], a)),
     screen: '',
     parent: '',
+    profile: '',
   }
 }
 

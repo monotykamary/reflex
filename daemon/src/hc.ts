@@ -130,6 +130,7 @@ export function agentOf(t: J): Agent {
     session: label(t, 'reflex.session'),
     screen: '',
     parent: Js.textAt(t, 'parent'),
+    profile: label(t, 'reflex.profile'),
   }
 }
 
@@ -147,7 +148,14 @@ const downOf = (xs: J[]) => xs.filter((x) => Js.textAt(x, 'state') !== 'connecte
 
 const fgPid = (t: J) => Js.textOf(Js.path(['foreground', 'pid'], t))
 
-export const sessionFile = (home: string, pid: string): string => home + '/.claude/sessions/' + pid + '.json'
+// A harness's own folder: yours, or a profile's (`reflex profile`: Claude's
+// CLAUDE_CONFIG_DIR, pi's agent folder).
+export function harnessDir(home: string, kind: 'claude' | 'pi', profile: string): string {
+  if (profile) return home + '/.reflex/profiles/' + kind + '/' + profile + '/' + kind
+  return kind === 'claude' ? home + '/.claude' : home + '/.pi/agent'
+}
+
+export const sessionFile = (home: string, pid: string, profile = ''): string => harnessDir(home, 'claude', profile) + '/sessions/' + pid + '.json'
 
 function sessionIn(r: Res<string>): string {
   if (!r.ok) return ''
@@ -194,7 +202,7 @@ async function fillSessions(xs: J[], sock: string, home: string): Promise<Agent[
   for (const t of xs) {
     await markShell(sock, t)
     let a = agentOf(t)
-    if (fillSessionWant(a)) a = {...a, session: sessionIn(await readText(sessionFile(home, fgPid(t)), 65536))}
+    if (fillSessionWant(a)) a = {...a, session: sessionIn(await readText(sessionFile(home, fgPid(t), a.profile), 65536))}
     if (!isEmpty(kindOf(t))) out.push(a)
   }
   return out
@@ -245,6 +253,7 @@ const stoppedJson = (t: J) =>
     Js.kv('session', Js.str(label(t, 'reflex.session'))),
     Js.kv('why', Js.str(lostWhy(t))),
     Js.kv('at', Js.str(Js.textAt(t, 'finished_ms'))),
+    ...(isEmpty(label(t, 'reflex.profile')) ? [] : [Js.kv('profile', Js.str(label(t, 'reflex.profile')))]),
   ])
 
 export function stoppedOf(r: Res<J>): string {
@@ -337,8 +346,24 @@ const cmdOf = (kind: string) => (kind === 'codex' ? ['codex', '--no-daemon'] : [
 // the id to start one with), then the request as its first prompt.
 export const argv = (kind: string, args: string[], text: string): string[] => [...cmdOf(kind), ...args, ...(isEmpty(trim(text)) ? [] : [text])]
 
-const labels = (kind: string, session: string) =>
-  Js.obj([Js.kv('reflex.kind', Js.str(kind)), ...(isEmpty(session) ? [] : [Js.kv('reflex.session', Js.str(session))])])
+// Through the profile runner where the machine has one (`reflex profile run
+// SPEC ARGS...`: the profile named, or for a bare kind that machine's default
+// profile), else the harness itself. SPEC is "claude" or "claude[tom]"; the
+// agent's kind stays its label (reflex.kind). A reflex from before profiles
+// (`reflex profile ls` unknown to it) counts as none.
+export const PROFILE_RUNNER =
+  'if command -v reflex >/dev/null 2>&1 && reflex profile ls >/dev/null 2>&1; then exec reflex profile run "$0" "$@"; else exec "${0%%[*}" "$@"; fi'
+
+export function profiled(kind: string, profile: string, xs: string[]): string[] {
+  return ['sh', '-c', PROFILE_RUNNER, isEmpty(profile) ? kind : kind + '[' + profile + ']', ...xs.slice(1)]
+}
+
+const labels = (kind: string, session: string, profile: string) =>
+  Js.obj([
+    Js.kv('reflex.kind', Js.str(kind)),
+    ...(isEmpty(session) ? [] : [Js.kv('reflex.session', Js.str(session))]),
+    ...(isEmpty(profile) ? [] : [Js.kv('reflex.profile', Js.str(profile))]),
+  ])
 
 // A shell that runs `"$@"` (fish and nu don't): yours, else zsh.
 const posix = (shell: string) => (base(shell) === 'fish' || base(shell) === 'nu' ? '/bin/zsh' : shell)
@@ -361,12 +386,12 @@ export function wrap(shell: string, m: string, xs: string[]): string[] {
 // 52), not only to the clipboard of the machine it runs on: herdr-core passes
 // it to Reflex's window, so a copy from another Mac's pi lands on this one.
 // (Claude Code does that already; pi only does it over ssh.)
-export function pRun(shell: string, name: string, m: string, cwd: string, kind: string, session: string, xs: string[]): string {
+export function pRun(shell: string, name: string, m: string, cwd: string, kind: string, session: string, xs: string[], profile = ''): string {
   return Js.obj([
     Js.kv('name', Js.str(name)),
     Js.kv('cwd', Js.str(cwd)),
     Js.kv('argv', Js.arr(wrap(shell, m, xs).map(Js.str))),
-    Js.kv('labels', labels(kind, session)),
+    Js.kv('labels', labels(kind, session, profile)),
     Js.kv('no_parent', 'true'),
     Js.kv('keep', 'true'),
     Js.kv('env', Js.obj([Js.kv('TERM', Js.str('xterm-256color')), Js.kv('COLORTERM', Js.str('truecolor')), Js.kv('PI_CLIPBOARD_OSC52', Js.str('1'))])),
@@ -376,8 +401,19 @@ export function pRun(shell: string, name: string, m: string, cwd: string, kind: 
 
 // Start an agent in a new terminal, on this Mac or machine m, in cwd (there):
 // its address ("t7", "box/t7").
-export async function run(sock: string, shell: string, name: string, m: string, cwd: string, kind: string, session: string, args: string[], text: string): Promise<Res<string>> {
-  const r = await call(sock, 'terminal.run', pRun(shell, name, m, cwd, kind, session, argv(kind, args, text)), 30000)
+export async function run(
+  sock: string,
+  shell: string,
+  name: string,
+  m: string,
+  cwd: string,
+  kind: string,
+  session: string,
+  args: string[],
+  text: string,
+  profile = '',
+): Promise<Res<string>> {
+  const r = await call(sock, 'terminal.run', pRun(shell, name, m, cwd, kind, session, profiled(kind, profile, argv(kind, args, text)), profile), 30000)
   return r.ok ? Js.done(Js.textAt(r.v, 'address')) : r
 }
 

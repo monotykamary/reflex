@@ -227,9 +227,9 @@ curl -H 'authorization: Bearer dev' localhost:47823/api/state
 
 ### API
 
-`GET /api/state` · `POST /api/route {text, dry?, memory?}` · `POST /api/candidates {text, harness?, memory?, machine?}` ·
+`GET /api/state` · `POST /api/route {text, dry?, memory?, harness?, profile?}` · `POST /api/candidates {text, harness?, profile?, memory?, machine?}` ·
 `POST /api/explain {text}` · `POST /api/send {pane, text}` · `POST /api/side {pane, text}` ·
-`POST /api/spawn {cwd, kind?, text}` · `POST /api/resume {cwd, kind, session, mode, text}` (mode `resume`, `fork`, `attach` or `continue`: the folder's latest) ·
+`POST /api/spawn {cwd, kind?, profile?, text}` · `POST /api/resume {cwd, kind, profile?, session, mode, text}` (mode `resume`, `fork`, `attach` or `continue`: the folder's latest) ·
 `POST /api/answer {item, key}` · `POST /api/dismiss {item}` · `POST /api/note {pane, agent, title, body}` ·
 `GET /api/pane?id=&lines=&format=ansi` · `POST /api/keys {pane, key}` · `POST /api/text {pane, text}` ·
 `POST /api/focus {pane}` · `POST /api/close {pane}` · `GET /api/stopped` · `GET /api/folders?q=&machine=` · `GET /api/sessions` ·
@@ -240,6 +240,12 @@ herdr-core when the core has added it (else that Mac's herdr).
 `machine` scopes routing to one Mac (`""`, the default: every live session, and
 this Mac's folders and earlier sessions); `/api/folders` takes `.` for this Mac
 only, and every Mac's without it.
+`profile` is a harness profile's name (`reflex profile`: `tom` for
+`claude[tom]`; none for your own): a session started or resumed in herdr-core
+runs through `reflex profile run` (a bare harness gets that machine's default
+profile) and is labelled `reflex.profile`; agents, stopped agents and earlier
+sessions carry `profile` when they have one, and `/api/candidates` with a
+profile offers only that profile's sessions.
 Every call except health and pair needs the token.
 
 ## How routing works

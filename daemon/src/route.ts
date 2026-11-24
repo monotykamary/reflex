@@ -8,7 +8,7 @@ import {machineOf, paneMachine, pathOn, place} from './folders.ts'
 import * as Js from './js.ts'
 import type {J, Res} from './js.ts'
 import type {Action, Agent, Folder, Opt, Status} from './model.ts'
-import {actionJson, optJsons, showStatus} from './model.ts'
+import {actionJson, optJsons, showStatus, spec} from './model.ts'
 import type {Past} from './past.ts'
 import {add32, div32, drop, isEmpty, length, lines, mul32, orElse, showU32, sortBy, take, toLower, trim, trimEnd, trimStart} from './str.ts'
 
@@ -73,7 +73,7 @@ const agentLine = (home: string, i: number, s: Seen) => {
   return (
     idx('a', i) +
     ': ' +
-    a.kind +
+    spec(a.kind, a.profile) +
     ' agent in ' +
     short(home, place(paneMachine(a.pane), a.cwd)) +
     ' (' +
@@ -107,7 +107,7 @@ const section = (title: string, body: string) => (isEmpty(body) ? '' : '\n' + ti
 const pastLine = (home: string, i: number, p: Past) =>
   idx('p', i) +
   ': ' +
-  p.agent +
+  spec(p.agent, p.profile) +
   ' conversation ' +
   Js.str(p.title) +
   ' in ' +
@@ -136,7 +136,7 @@ export function stateText(text: string, home: string, seen: Seen[], folders: Fol
 // ---------
 
 const agentChoices = (xs: Seen[], home: string): string[] => [
-  ...xs.map((s, i) => Js.kv(idx('a', i), Js.str(s.agent.kind + ' in ' + short(home, place(paneMachine(s.agent.pane), s.agent.cwd)) + titlePart(s.agent.title)))),
+  ...xs.map((s, i) => Js.kv(idx('a', i), Js.str(spec(s.agent.kind, s.agent.profile) + ' in ' + short(home, place(paneMachine(s.agent.pane), s.agent.cwd)) + titlePart(s.agent.title)))),
   Js.kv('new', Js.str('none of these sessions: start a new session in a folder')),
 ]
 
@@ -144,7 +144,7 @@ const folderChoices = (xs: Folder[], home: string): string[] =>
   xs.map((f, i) => Js.kv(idx('f', i), Js.str(f.name + ' (' + short(home, f.path) + ')')))
 
 const pastChoices = (xs: Past[], home: string): string[] => [
-  ...xs.map((p, i) => Js.kv(idx('p', i), Js.str(p.agent + ' conversation ' + p.title + ' (' + short(home, p.cwd) + ')'))),
+  ...xs.map((p, i) => Js.kv(idx('p', i), Js.str(spec(p.agent, p.profile) + ' conversation ' + p.title + ' (' + short(home, p.cwd) + ')'))),
   Js.kv('none', Js.str('none: this is new work, even if it is in the same project')),
 ]
 
@@ -268,7 +268,21 @@ export function response(out: string): Res<J> {
 
 const HARNESSES = ['claude', 'codex', 'pi', 'grok', 'opencode', 'amp', 'agy', 'cursor', 'droid', 'copilot', 'omp', 'kimi']
 
-// The harness for a new session: one the user names, else the default.
+// "claude[tom]" → claude and tom; "claude" → claude and "".
+export function splitSpec(s: string): {kind: string; profile: string} {
+  const open = s.indexOf('[')
+  if (!s.endsWith(']') || open < 0) return {kind: s, profile: ''}
+  return {kind: s.slice(0, open), profile: s.slice(open + 1, -1)}
+}
+
+// A new session's action: its harness spec ("claude[tom]") as kind and profile.
+const spawnOf = (cwd: string, harnessSpec: string, text: string): Action => {
+  const {kind, profile} = splitSpec(harnessSpec)
+  return profile ? {type: 'spawn', cwd, kind, text, profile} : {type: 'spawn', cwd, kind, text}
+}
+
+// The harness for a new session: one the user names, else the default (a
+// spec: "claude", or "claude[tom]" for a profile's).
 export function harness(text: string, dflt: string): string {
   for (const t of toLower(text).split(' ')) if (HARNESSES.includes(t)) return t
   return dflt
@@ -310,20 +324,23 @@ export function leaf(path: string): string {
 const labelAgent = (kind: string, cwd: string) => kind + ' · ' + leaf(cwd)
 
 function sideDecision(side: Side, a: Agent, text: string, dflt: string): Decision {
-  if (side === 'native') return {d: 'go', action: {type: 'btw', pane: a.pane, text}, label: 'btw → ' + labelAgent(a.kind, a.cwd), why: 'side question; native /btw'}
+  const who = spec(a.kind, a.profile)
+  if (side === 'native') return {d: 'go', action: {type: 'btw', pane: a.pane, text}, label: 'btw → ' + labelAgent(who, a.cwd), why: 'side question; native /btw'}
   if (side === 'forked')
     return {
       d: 'go',
-      action: {type: 'fork', pane: a.pane, kind: a.kind, cwd: a.cwd, session: a.session, text},
-      label: 'btw → fork of ' + labelAgent(a.kind, a.cwd),
+      action: a.profile
+        ? {type: 'fork', pane: a.pane, kind: a.kind, cwd: a.cwd, session: a.session, text, profile: a.profile}
+        : {type: 'fork', pane: a.pane, kind: a.kind, cwd: a.cwd, session: a.session, text},
+      label: 'btw → fork of ' + labelAgent(who, a.cwd),
       why: 'side question; forked session',
     }
   return {
     d: 'choose',
-    title: 'No side channel for ' + a.kind + ': how should this go?',
+    title: 'No side channel for ' + who + ': how should this go?',
     opts: [
-      {key: '1', label: 'send to ' + labelAgent(a.kind, a.cwd) + ' as a prompt', action: {type: 'prompt', pane: a.pane, text}},
-      {key: '2', label: 'ask a new ' + dflt + ' session in ' + leaf(a.cwd), action: {type: 'spawn', cwd: a.cwd, kind: dflt, text}},
+      {key: '1', label: 'send to ' + labelAgent(who, a.cwd) + ' as a prompt', action: {type: 'prompt', pane: a.pane, text}},
+      {key: '2', label: 'ask a new ' + dflt + ' session in ' + leaf(a.cwd), action: spawnOf(a.cwd, dflt, text)},
     ],
     why: 'side question for a harness without /btw or fork',
   }
@@ -331,12 +348,12 @@ function sideDecision(side: Side, a: Agent, text: string, dflt: string): Decisio
 
 export function agentDecision(side: boolean, a: Agent, text: string, _home: string, dflt: string): Decision {
   if (side) return sideDecision(sideFor(a.kind, a.status), a, sideText(text), dflt)
-  return {d: 'go', action: {type: 'prompt', pane: a.pane, text}, label: '→ ' + labelAgent(a.kind, a.cwd), why: 'routed to a live session'}
+  return {d: 'go', action: {type: 'prompt', pane: a.pane, text}, label: '→ ' + labelAgent(spec(a.kind, a.profile), a.cwd), why: 'routed to a live session'}
 }
 
 const spawnDecision = (f: Folder, text: string, dflt: string): Decision => ({
   d: 'go',
-  action: {type: 'spawn', cwd: f.path, kind: harness(text, dflt), text},
+  action: spawnOf(f.path, harness(text, dflt), text),
   label: 'new ' + harness(text, dflt) + ' in ' + leaf(f.path),
   why: 'new session in a folder',
 })
@@ -352,13 +369,13 @@ export type Ranked = {bp: number; label: string; action: Action}
 const rankedLe = (a: Ranked, b: Ranked) => a.bp >= b.bp
 
 const seenRanked = (xs: Seen[], all: Prob[], text: string): Ranked[] =>
-  xs.map((s, i) => ({bp: lookupBp(all, idx('a', i)), label: '→ ' + labelAgent(s.agent.kind, s.agent.cwd), action: {type: 'prompt', pane: s.agent.pane, text}}))
+  xs.map((s, i) => ({bp: lookupBp(all, idx('a', i)), label: '→ ' + labelAgent(spec(s.agent.kind, s.agent.profile), s.agent.cwd), action: {type: 'prompt', pane: s.agent.pane, text}}))
 
 const folderRanked = (xs: Folder[], all: Prob[], newBp: number, text: string, dflt: string): Ranked[] =>
   xs.map((f, i) => ({
     bp: div32(mul32(lookupBp(all, idx('f', i)), Math.max(newBp, 1)), 10000),
     label: 'new ' + harness(text, dflt) + ' in ' + leaf(f.path),
-    action: {type: 'spawn', cwd: f.path, kind: harness(text, dflt), text},
+    action: spawnOf(f.path, harness(text, dflt), text),
   }))
 
 function optsOf(xs: Ranked[], n: number): Opt[] {
@@ -441,6 +458,9 @@ export function resumeArgs(kind: string, mode: string, id: string): string[] {
   if (kind === 'claude') return mode === 'attach' ? ['attach', id] : mode === 'fork' ? ['--resume', id, '--fork-session'] : ['--resume', id]
   if (kind === 'pi') return mode === 'fork' ? ['--fork', id] : ['--session', id]
   if (kind === 'codex') return ['resume', id]
+  if (kind === 'opencode') return ['--session', id]
+  // amp's own CLI (`amp threads continue`), not tried here against a real amp.
+  if (kind === 'amp') return ['threads', 'continue', id]
   return ['--resume', id]
 }
 
@@ -450,9 +470,13 @@ export function resumeArgs(kind: string, mode: string, id: string): string[] {
 
 const modeOf = (state: string) => (state === 'running' ? 'attach' : state === 'elsewhere' ? 'fork' : 'resume')
 
-export const resumeAction = (p: Past, text: string): Action => ({type: 'resume', cwd: p.cwd, kind: p.agent, session: p.id, mode: modeOf(p.state), text})
+// In the profile it was saved in.
+export const resumeAction = (p: Past, text: string): Action =>
+  p.profile
+    ? {type: 'resume', cwd: p.cwd, kind: p.agent, session: p.id, mode: modeOf(p.state), text, profile: p.profile}
+    : {type: 'resume', cwd: p.cwd, kind: p.agent, session: p.id, mode: modeOf(p.state), text}
 
-export const resumeLabel = (p: Past): string => 'resume ' + p.agent + ' · ' + clip(p.title, 48)
+export const resumeLabel = (p: Past): string => 'resume ' + spec(p.agent, p.profile) + ' · ' + clip(p.title, 48)
 
 // A decision that already sends to a live session.
 export const liveGo = (d: Decision): boolean => d.d === 'go' && (d.action.type === 'prompt' || d.action.type === 'btw' || d.action.type === 'fork')
@@ -540,7 +564,7 @@ export function candidatesOutput(out: string, text: string, home: string, dflt: 
     Js.kv('ms', Js.num(ms)),
     Js.kv('side', Js.num(side)),
     Js.kv('threshold', Js.num(threshold)),
-    Js.kv('harness', Js.str(dflt)),
+    Js.kv('harness', Js.str(splitSpec(dflt).kind)),
     Js.kv('decision', decisionJson(decideWithPast(resume, text, home, dflt, threshold, seen, folders, pasts, target, folder, side))),
     Js.kv('ranked', Js.arr(rankedAll(target, folder, resume, seen, folders, pasts, text, dflt).map(rankedJson))),
   ])

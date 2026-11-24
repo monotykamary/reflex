@@ -75,7 +75,7 @@ test('sent: a prompt typed but unsent, or never arrived', () => {
 test('machines: panes, places and folders on other machines', () => {
   const line = (pane: string) =>
     pane + '  =>  machine ' + Herdr.machine(pane) + ', pane ' + Herdr.bare(pane) + ', socket ' + Herdr.at('/local/herdr.sock', '/data/machines', pane)
-  const agent = (pane: string): Agent => ({pane, name: 'a', kind: 'claude', status: 'idle', cwd: '/w', title: '', seq: 0, session: '', screen: '', parent: ''})
+  const agent = (pane: string): Agent => ({pane, name: 'a', kind: 'claude', status: 'idle', cwd: '/w', title: '', seq: 0, session: '', screen: '', parent: '', profile: ''})
   const panes = (xs: Agent[]) => xs.map((a) => a.pane + ' ').join('')
   const place = (path: string) =>
     path +
@@ -108,9 +108,9 @@ test('machines: panes, places and folders on other machines', () => {
 
 test('harness: earlier sessions of one harness, on one machine', () => {
   const xs: P.Past[] = [
-    {agent: 'claude', id: 'a', cwd: '/a', title: '', last: '', age: 0, state: 'past'},
-    {agent: 'pi', id: 'b', cwd: '/b', title: '', last: '', age: 0, state: 'past'},
-    {agent: 'claude', id: 'c', cwd: 'work:/c', title: '', last: '', age: 0, state: 'past'},
+    {agent: 'claude', id: 'a', cwd: '/a', title: '', last: '', age: 0, state: 'past', profile: ''},
+    {agent: 'pi', id: 'b', cwd: '/b', title: '', last: '', age: 0, state: 'past', profile: ''},
+    {agent: 'claude', id: 'c', cwd: 'work:/c', title: '', last: '', age: 0, state: 'past', profile: ''},
   ]
   const ids = (ps: P.Past[]) => ps.map((p) => p.id + ' ').join('')
   const out = [

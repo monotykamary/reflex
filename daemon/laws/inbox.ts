@@ -39,7 +39,7 @@ const brokenChange = changeFun(true).law('new_blocked_agent_asks: a newly seen a
 
 const ASK_A = 'Proceed?\n❯ 1. Yes\n  2. No'
 const ASK_B = 'Overwrite it?\n❯ 1. Overwrite\n  2. Keep both\n  3. Skip'
-const agent = (status: Status, seq: number, screen: string): Agent => ({pane: 't1', name: 'a', kind: 'claude', status, cwd: '/w', title: '', seq, session: '', screen, parent: ''})
+const agent = (status: Status, seq: number, screen: string): Agent => ({pane: 't1', name: 'a', kind: 'claude', status, cwd: '/w', title: '', seq, session: '', screen, parent: '', profile: ''})
 
 const changeHeld = () =>
   change.compare(({seen, was, now, sameSeq, sameAsk}) => {

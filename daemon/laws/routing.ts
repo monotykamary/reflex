@@ -81,7 +81,7 @@ const brokenTarget = targetFun(true).law('unsure_target_never_acts: Jev never ac
 
 const HOME = '/Users/me'
 const FOLDER: Folder = {path: '/Users/me/VCS/app', name: 'app', desc: '', recent: '', branch: 'main', age: 3, uses: 1}
-const live = (kind: string, blocked: boolean): Agent => ({pane: 't1', name: 'a', kind, status: blocked ? 'blocked' : 'idle', cwd: '/Users/me/VCS/app', title: '', seq: 1, session: 's', screen: '', parent: ''})
+const live = (kind: string, blocked: boolean): Agent => ({pane: 't1', name: 'a', kind, status: blocked ? 'blocked' : 'idle', cwd: '/Users/me/VCS/app', title: '', seq: 1, session: 's', screen: '', parent: '', profile: ''})
 
 const targetHeld = () =>
   target.compare(({sure, isNew, hasAgent, side, kind, blocked, folderPick, folderSure, folderFound}) => {
@@ -115,7 +115,7 @@ const unsureResume = past.law('unsure_resume_changes_nothing: unsure, the decisi
 const liveBeats = past.law('live_session_beats_resume: a request going to a live session is never turned into a resume', ({live}) => [live], ({changed}) => changed.not())
 const brokenPast = pastFun(true).law('live_session_beats_resume: a request going to a live session is never turned into a resume', ({live}) => [live], ({changed}) => changed.not())
 
-const PAST: Past = {agent: 'claude', id: 'id0', cwd: '/Users/me/VCS/app', title: 'earlier', last: 'the thing', age: 2, state: 'past'}
+const PAST: Past = {agent: 'claude', id: 'id0', cwd: '/Users/me/VCS/app', title: 'earlier', last: 'the thing', age: 2, state: 'past', profile: ''}
 const decisions = (live: boolean): R.Decision[] =>
   live
     ? [
