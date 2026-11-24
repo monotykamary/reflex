@@ -3,7 +3,7 @@
 # then assemble build/Reflex.app.
 #
 #   scripts/build-app.sh            # daemon + app
-#   scripts/build-app.sh --app      # app only (reuse build/reflexd)
+#   scripts/build-app.sh --app      # app and reflex-keys (reuse build/reflexd)
 #   scripts/build-app.sh --daemon   # daemon only
 set -eu
 cd "$(dirname "$0")/.."
@@ -27,12 +27,12 @@ fi
 [ "$mode" = --daemon ] && exit 0
 
 # reflex-keys (keys/): this Mac's own, and as one script for boxes, run with their Bun.
-if [ "$mode" != --app ] || [ ! -f build/reflex-keys ]; then
-  echo "reflex-keys: building"
-  (cd keys && bun install --frozen-lockfile >/dev/null &&
-    bun build --compile --minify --target=bun-darwin-arm64 src/cli.ts --outfile ../build/reflex-keys >/dev/null &&
-    bun build --minify --target=bun src/cli.ts --outfile ../build/reflex-keys.js >/dev/null)
-fi
+# Always built (seconds): --app reuses only reflexd, and a reused reflex-keys once
+# shipped an app whose Settings asked it for a command it didn't have yet.
+echo "reflex-keys: building"
+(cd keys && bun install --frozen-lockfile >/dev/null &&
+  bun build --compile --minify --target=bun-darwin-arm64 src/cli.ts --outfile ../build/reflex-keys >/dev/null &&
+  bun build --minify --target=bun src/cli.ts --outfile ../build/reflex-keys.js >/dev/null)
 
 echo "Reflex.app: building"
 scripts/prepare-swiftterm.sh
