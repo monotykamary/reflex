@@ -229,25 +229,38 @@ struct MachineChip: View {
 }
 
 /// Which login of its harness an agent runs in (`reflex profile`): the
-/// profile's name in the harness's colour. Nothing for your own login.
+/// profile's name in the harness's colour, or a quiet "own" for your own
+/// login where that harness has profiles (none where it has none: nothing to tell apart).
 struct ProfileChip: View {
     var kind: String
     var profile: String?
     @ObservedObject private var profiles = ProfilesModel.shared
 
+    /// The harnesses this Mac has profiles for (read once a minute at most).
+    @MainActor private static var known: (at: Date, kinds: Set<String>) = (.distantPast, [])
+    @MainActor private static func hasProfiles(_ kind: String) -> Bool {
+        if Date().timeIntervalSince(known.at) > 60 {
+            known = (Date(), Set(Profiles.local().map { Profiles.split($0).kind }))
+        }
+        return known.kinds.contains(kind)
+    }
+
     var body: some View {
-        if let p = profile, !p.isEmpty {
-            let tint = HarnessLook.tint(kind)
+        let name = profile ?? ""
+        if !name.isEmpty || Self.hasProfiles(kind) {
+            let own = name.isEmpty
+            let tint = own ? Color.secondary : HarnessLook.tint(kind)
+            let spec = Profiles.spec(kind, profile)
             HStack(spacing: 3) {
-                Image(systemName: "person.crop.circle").font(.system(size: 8, weight: .semibold))
-                Text(p).font(.system(size: 9.5, weight: .semibold))
+                Image(systemName: own ? "house" : "person.crop.circle").font(.system(size: 8, weight: .semibold))
+                Text(own ? "own" : name).font(.system(size: 9.5, weight: .semibold))
             }
             .foregroundStyle(tint)
             .padding(.horizontal, 5).padding(.vertical, 1.5)
-            .background(tint.opacity(0.14), in: Capsule())
+            .background(tint.opacity(own ? 0.1 : 0.14), in: Capsule())
             .fixedSize()
-            .help(["\(kind)[\(p)]" + (profiles.usage["\(kind)[\(p)]"]?.plan.map { " · \($0)" } ?? ""),
-                   profiles.usage["\(kind)[\(p)]"]?.summary ?? ""].filter { !$0.isEmpty }.joined(separator: "\n"))
+            .help([(own ? "\(kind): your own login" : spec) + (profiles.usage[spec]?.plan.map { " · \($0)" } ?? ""),
+                   profiles.usage[spec]?.summary ?? ""].filter { !$0.isEmpty }.joined(separator: "\n"))
             .task { await profiles.loadUsage() }
         }
     }
