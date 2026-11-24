@@ -22,11 +22,11 @@ export function agyStore(p: Profile): Store {
     return {rotates: false, where: '?', read: no, strip: c => c, usable: () => false, write: no, expiry: () => null, loginEnd: () => null, fingerprint: () => '', due: () => false, refresh: no, guard: fn => fn()}
   }
   const keychain = p.name ? join(p.hhome, 'Library', 'Keychains', 'reflex-profile.keychain-db') : undefined
-  const item: kc.Item = {service: 'gemini', account: 'antigravity', keychain, home: p.name ? p.hhome : undefined}
+  const item: kc.Item = {service: 'gemini', account: 'antigravity', keychain: keychain ?? kc.defaultKeychain(), home: p.name ? p.hhome : undefined}
   const open = () => {
     if (!keychain) return
     if (!existsSync(keychain)) fail(`${p.key} has no Keychain here yet: make the profile first (reflex profile new ${p.key})`)
-    const pw = kc.read({service: PROFILE_KEYCHAIN, account: `agy/${p.name}`}) ?? fail(`${p.key}'s Keychain password isn't in your Keychain`)
+    const pw = kc.read({service: PROFILE_KEYCHAIN, account: `agy/${p.name}`, keychain: kc.defaultKeychain()}) ?? fail(`${p.key}'s Keychain password isn't in your Keychain`)
     kc.unlock(keychain, pw, p.hhome)
   }
   return {

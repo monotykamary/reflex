@@ -27,7 +27,7 @@ import {fp, margin, run, type Content, type Store} from './store'
 
 export function claudeStore(p: Profile): Store {
   const dir = claudeDir(p), file = join(dir, '.credentials.json')
-  const item = {service: claudeService(p), account: claudeAccount()}
+  const item = {service: claudeService(p), account: claudeAccount(), keychain: kc.defaultKeychain()}
   const mac = keychainStore()
 
   const readAll = (): any => {
