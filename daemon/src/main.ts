@@ -1005,6 +1005,10 @@ export type {Opt}
 // ----
 
 async function main() {
+  // A task that fails is logged, never the end of the daemon: the actor, the
+  // poller and every other task go on.
+  process.on('unhandledRejection', (err) => process.stderr.write('reflexd: ' + String((err as Error)?.stack ?? err) + '\n'))
+  process.on('uncaughtException', (err) => process.stderr.write('reflexd: ' + String(err?.stack ?? err) + '\n'))
   const cfg = load()
   await Host.mkdirP(cfg.data)
   const d = new Daemon(cfg)
