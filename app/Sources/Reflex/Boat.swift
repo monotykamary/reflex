@@ -172,8 +172,9 @@ enum Boat {
     /// session to resume there. Again later: only what it wrote since (a
     /// long session is copied while the agent is still here; after its
     /// close, the last lines).
-    static func session(_ machine: String, kind: String, session: String, cwd: String, from: String = here) async throws -> (cwd: String, session: String) {
-        let out = try await reflex(["session", machine, kind, session, cwd, "--from", from], timeout: 3600)
+    static func session(_ machine: String, kind: String, session: String, cwd: String, profile: String? = nil, from: String = here) async throws -> (cwd: String, session: String) {
+        let p = profile.map { $0.isEmpty ? [] : ["--profile", $0] } ?? []
+        let out = try await reflex(["session", machine, kind, session, cwd, "--from", from] + p, timeout: 3600)
         let parts = out.split(separator: "\t", maxSplits: 1).map(String.init)
         guard parts.count == 2 else { throw Failure(message: "reflex session said \(out)") }
         return (parts[0], parts[1])
@@ -483,7 +484,11 @@ final class BoatLifetime: ObservableObject {
     /// The sessions each machine ran when last looked at (`reflex machine
     /// sessions`: whoever started them, an agent too), kept on disk: what one
     /// boat lost has again.
-    struct Ran: Codable, Equatable { var kind: String; var cwd: String; var session: String }
+    struct Ran: Codable, Equatable {
+        var kind: String; var cwd: String; var session: String
+        /// The harness profile it ran in (none: your own; an older record has none).
+        var profile: String? = nil
+    }
     private struct Sessions: Decodable { var up: Int; var agents: [Ran] }
     private var ran: [String: [Ran]] = [:]
     private var ranAt: [String: Date] = [:]
@@ -805,7 +810,7 @@ final class BoatLifetime: ObservableObject {
         var want = lastRan(m)
         if want.isEmpty {
             want = were.filter { HerdrMove.kinds.contains($0.kind) && !$0.session.isEmpty }
-                .map { Ran(kind: $0.kind, cwd: $0.cwd, session: $0.session) }
+                .map { Ran(kind: $0.kind, cwd: $0.cwd, session: $0.session, profile: $0.profile) }
         }
         var once = Set<String>()
         want = want.filter { once.insert($0.kind + "\u{0}" + $0.session).inserted }
@@ -825,7 +830,7 @@ final class BoatLifetime: ObservableObject {
             let folder = (r.cwd as NSString).lastPathComponent
             NSLog("Reflex: %@ in %@ on %@ didn't come back; resuming its session", r.kind, folder, m)
             do {
-                _ = try await Client.local.resume(cwd: Place.on(m, r.cwd), kind: r.kind, session: r.session,
+                _ = try await Client.local.resume(cwd: Place.on(m, r.cwd), kind: r.kind, profile: r.profile, session: r.session,
                                                   label: "resume \(r.kind) · \(folder) on \(m)")
             } catch {
                 NSLog("Reflex: resuming %@'s session on %@ didn't work: %@", r.kind, m, error.localizedDescription)

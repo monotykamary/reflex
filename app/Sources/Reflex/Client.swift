@@ -100,8 +100,8 @@ struct Client {
 
     /// A live agent's own session, brought back where new sessions start
     /// (mode "continue": the folder's latest, its id never known).
-    func resume(cwd: String, kind: String, session: String, mode: String = "resume", label: String) async throws -> PendingInfo {
-        try await post("/api/resume", ["cwd": cwd, "kind": kind, "session": session, "mode": mode, "text": "", "label": label],
+    func resume(cwd: String, kind: String, profile: String? = nil, session: String, mode: String = "resume", label: String) async throws -> PendingInfo {
+        try await post("/api/resume", ["cwd": cwd, "kind": kind, "profile": profile ?? "", "session": session, "mode": mode, "text": "", "label": label],
                        as: PendingInfo.self)
     }
 

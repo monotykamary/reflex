@@ -49,6 +49,8 @@ struct StoppedInfo: Codable, Identifiable, Hashable {
     var why: String
     /// When it ended (ms since the epoch), "" when the core doesn't say.
     var at: String
+    /// The harness profile it ran in, nil for your own (an older reflexd sends none).
+    var profile: String?
     var id: String { pane }
 
     var machine: String { Machines.machine(of: pane) }

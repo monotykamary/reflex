@@ -72,7 +72,8 @@ enum Sessions {
     /// is up; the lost one is forgotten (a kept shell closed, a finished
     /// record removed).
     @MainActor static func resume(_ s: StoppedInfo) async throws {
-        let d = try await Client.local.resume(cwd: s.place, kind: s.kind, session: s.session,
+        // In the profile it ran in: a resume comes back where it was saved.
+        let d = try await Client.local.resume(cwd: s.place, kind: s.kind, profile: s.profile, session: s.session,
                                               mode: s.session.isEmpty ? "continue" : "resume",
                                               label: "\(s.kind) · \(s.title_.prefix(40))")
         Store.shared.leave(s.pane)

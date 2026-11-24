@@ -228,6 +228,31 @@ struct MachineChip: View {
     }
 }
 
+/// Which login of its harness an agent runs in (`reflex profile`): the
+/// profile's name in the harness's colour. Nothing for your own login.
+struct ProfileChip: View {
+    var kind: String
+    var profile: String?
+    @ObservedObject private var profiles = ProfilesModel.shared
+
+    var body: some View {
+        if let p = profile, !p.isEmpty {
+            let tint = HarnessLook.tint(kind)
+            HStack(spacing: 3) {
+                Image(systemName: "person.crop.circle").font(.system(size: 8, weight: .semibold))
+                Text(p).font(.system(size: 9.5, weight: .semibold))
+            }
+            .foregroundStyle(tint)
+            .padding(.horizontal, 5).padding(.vertical, 1.5)
+            .background(tint.opacity(0.14), in: Capsule())
+            .fixedSize()
+            .help(["\(kind)[\(p)]" + (profiles.usage["\(kind)[\(p)]"]?.plan.map { " · \($0)" } ?? ""),
+                   profiles.usage["\(kind)[\(p)]"]?.summary ?? ""].filter { !$0.isEmpty }.joined(separator: "\n"))
+            .task { await profiles.loadUsage() }
+        }
+    }
+}
+
 /// The tab's outline: rounded on the screen side, with concave "ears" where it
 /// meets the screen edge, so it reads as growing out of the edge.
 struct EdgeTabShape: InsettableShape {
@@ -1272,6 +1297,7 @@ private struct StoppedRow: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 5) {
                     Text(stopped.title_).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.dim).lineLimit(1)
+                    ProfileChip(kind: stopped.kind, profile: stopped.profile)
                     MachineChip(machine: stopped.machine)
                 }
                 Text(StoppedRow.subtitle(stopped, failed: failed)).font(.system(size: 10.5)).foregroundStyle(Ink.dim).lineLimit(1)
@@ -1353,6 +1379,7 @@ private struct AgentRow: View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack(spacing: 5) {
                     Text(title).font(.system(size: 12, weight: .semibold)).foregroundStyle(Ink.text).lineLimit(1)
+                    ProfileChip(kind: agent.kind, profile: agent.profile)
                     MachineChip(machine: agent.machine)
                 }
                 Text(subtitle).font(.system(size: 10.5)).foregroundStyle(Ink.dim).lineLimit(1)

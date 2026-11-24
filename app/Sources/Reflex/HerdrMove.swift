@@ -203,7 +203,7 @@ final class HerdrMove: ObservableObject {
             return
         }
         do {
-            _ = try await Client.local.resume(cwd: Place.on(a.machine, a.cwd), kind: a.kind, session: a.session,
+            _ = try await Client.local.resume(cwd: Place.on(a.machine, a.cwd), kind: a.kind, profile: a.profile, session: a.session,
                                               label: "move \(a.kind) · \(a.folder)")
         } catch {
             problem = "reflexd didn't take \(name): resume it from Recent sessions."
@@ -239,7 +239,7 @@ final class HerdrMove: ObservableObject {
                 try await Boat.creds(m)
             }
             notes[a.pane] = "Copying this conversation to \(place)…"
-            _ = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd, from: src)
+            _ = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd, profile: a.profile, from: src)
         } catch {
             return fail(a.pane, "Not moved: \(error.localizedDescription)")
         }
@@ -258,14 +258,14 @@ final class HerdrMove: ObservableObject {
         }
         let there: (cwd: String, session: String)
         do {
-            there = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd, from: src)
+            there = try await Boat.session(m, kind: a.kind, session: a.session, cwd: a.cwd, profile: a.profile, from: src)
         } catch {
             await back(a, "Not moved (\(error.localizedDescription)): \(a.kind) is back where it was.")
             return
         }
         notes[a.pane] = "Starting \(a.kind) on \(place)…"
         do {
-            _ = try await Client.local.resume(cwd: m == Boat.here ? there.cwd : Place.on(m, there.cwd), kind: a.kind, session: there.session,
+            _ = try await Client.local.resume(cwd: m == Boat.here ? there.cwd : Place.on(m, there.cwd), kind: a.kind, profile: a.profile, session: there.session,
                                               label: "move \(a.kind) · \(a.folder) → \(place)")
         } catch {
             await back(a, "reflexd didn't start it on \(place): \(a.kind) is back where it was.")
@@ -288,7 +288,7 @@ final class HerdrMove: ObservableObject {
     /// window, which says why.
     private func back(_ a: AgentInfo, _ why: String) async {
         fail(a.pane, why)
-        _ = try? await Client.local.resume(cwd: a.remote ? Place.on(a.machine, a.cwd) : a.cwd, kind: a.kind, session: a.session, label: "resume \(a.kind) · \(a.folder)")
+        _ = try? await Client.local.resume(cwd: a.remote ? Place.on(a.machine, a.cwd) : a.cwd, kind: a.kind, profile: a.profile, session: a.session, label: "resume \(a.kind) · \(a.folder)")
         let here = { Store.shared.state.agents.first { $0.machine == a.machine && $0.session == a.session && $0.pane != a.pane } }
         guard await until(seconds: 30, { here() != nil }), let b = here() else { return }
         notes[a.pane] = nil

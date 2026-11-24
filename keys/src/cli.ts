@@ -10,6 +10,7 @@
 //                         [--force]       ... when the holder is gone for good: MACHINE, signed in
 //                                         again, takes it over at a higher epoch
 //   reflex-keys status [--json]           per profile: holder, epoch, generation, expiry, who's current
+//   reflex-keys usage [--json] [SPEC...]  how much of each login's plan is used (read only)
 //   reflex-keys watch [--quiet]           the service (a LaunchAgent, KeepAlive): pushes a change within
 //                                         ~15 s, ticks every ~10 min, runs Claude's daemon for the
 //                                         Claude profiles this Mac holds; logs to ~/.reflex/keys/watch.log
@@ -25,9 +26,10 @@
 import {exportCopy, hold, meta, receive, release, seed, status, statusText, takeover, tick, VERSION} from './ops'
 import {myId} from './state'
 import {watch} from './watch'
+import {usage as readUsage, usageText} from './usage'
 import {Fail, redact} from './util'
 
-const usage = 'usage: reflex-keys seed SPEC | tick | watch [--quiet] | hold SPEC --on MACHINE [--force] | status [--json] | receive | export SPEC | meta | release SPEC --to ID | takeover SPEC'
+const usage = 'usage: reflex-keys seed SPEC | tick | watch [--quiet] | hold SPEC --on MACHINE [--force] | status [--json] | usage [--json] [SPEC...] | receive | export SPEC | meta | release SPEC --to ID | takeover SPEC'
 
 async function main(argv: string[]): Promise<number> {
   const [cmd, ...rest] = argv
@@ -56,6 +58,7 @@ async function main(argv: string[]): Promise<number> {
       json(await receive(pl)); return 0
     }
     case 'export': { if (rest.length !== 1) break; json(await exportCopy(rest[0])); return 0 }
+    case 'usage': { const j = has('--json'); const xs = await readUsage(rest.length ? rest : undefined); if (j) json(xs); else process.stdout.write(usageText(xs) + '\n'); return 0 }
     case 'meta': case 'whoami': json(meta()); return 0
     case 'release': { const to = flag('--to'); if (!to || rest.length !== 1) break; json({lines: await release(rest[0], to)}); return 0 }
     case 'takeover': { if (rest.length !== 1) break; json({lines: await takeover(rest[0])}); return 0 }

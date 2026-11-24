@@ -22,6 +22,44 @@ struct ProfileLogin: Codable, Identifiable, Hashable {
     var name: String { Profiles.split(profile).profile }
 }
 
+/// How much of a login's plan is used, as `reflex-keys usage --json` reports it.
+struct LoginUsage: Codable, Identifiable, Hashable {
+    struct Window: Codable, Hashable {
+        let label: String
+        let percent: Int
+        let resetsAt: Double?
+    }
+    let profile: String
+    let plan: String?
+    let windows: [Window]
+    let at: Double
+    let error: String?
+    var id: String { profile }
+    var harness: String { Profiles.split(profile).kind }
+    var name: String { Profiles.split(profile).profile }
+
+    /// "Week 31% · resets in 4d", one line a window.
+    var summary: String {
+        var lines = windows.map { "\($0.label) \($0.percent)% used" + ($0.resetsAt.map { " · resets " + Self.until($0) } ?? "") }
+        if let error { lines.append(at > 0 ? "as of \(Self.ago(at)): \(error)" : error) }
+        return lines.joined(separator: "\n")
+    }
+
+    static func until(_ ms: Double) -> String {
+        let s = ms / 1000 - Date().timeIntervalSince1970
+        if s <= 60 { return "now" }
+        if s < 3600 { return "in \(Int(s / 60))m" }
+        if s < 86400 { return "in \(Int(s / 3600))h" }
+        let d = Date(timeIntervalSince1970: ms / 1000)
+        return s < 86400 * 6 ? d.formatted(.dateTime.weekday(.abbreviated).hour()) : d.formatted(.dateTime.month(.abbreviated).day())
+    }
+
+    static func ago(_ ms: Double) -> String {
+        let s = Date().timeIntervalSince1970 - ms / 1000
+        return s < 3600 ? "\(max(1, Int(s / 60)))m ago" : s < 86400 ? "\(Int(s / 3600))h ago" : "\(Int(s / 86400))d ago"
+    }
+}
+
 @MainActor
 final class ProfilesModel: ObservableObject {
     static let shared = ProfilesModel()
@@ -44,6 +82,11 @@ final class ProfilesModel: ObservableObject {
     // each machine's row changes as that machine answers, never emptied while loading.
     @Published private(set) var logins: [ProfileLogin] = ViewCache.load("profile-logins") ?? []
     @Published private(set) var places: [Place] = ViewCache.load("profile-places") ?? []
+    /// spec → its plan's use: profiles and your own logins ("claude").
+    @Published private(set) var usage: [String: LoginUsage] = (ViewCache.load("profile-usage") as [LoginUsage]?)
+        .map { Dictionary($0.map { ($0.profile, $0) }, uniquingKeysWith: { a, _ in a }) } ?? [:]
+    private var usageAt: Date = .distantPast
+    private var usageBusy = false
     @Published private(set) var busy: Set<String> = []
     @Published var failure: String?
     @Published private(set) var loaded = false
@@ -51,7 +94,30 @@ final class ProfilesModel: ObservableObject {
     /// The harnesses in the order Reflex shows them (most used first).
     nonisolated static let harnesses = ["claude", "codex", "agy", "pi", "opencode", "amp", "grok"]
 
+    /// Your own logins with a reading, after the profiles.
+    var ownUsage: [LoginUsage] {
+        usage.values.filter { $0.name.isEmpty }.sorted { Self.harnessOrder($0.harness) < Self.harnessOrder($1.harness) }
+    }
+
+    /// Usage, read again when it is a few minutes old (the services are asked, not a file).
+    func loadUsage(force: Bool = false) async {
+        guard !usageBusy, force || Date().timeIntervalSince(usageAt) > 180 else { return }
+        usageBusy = true
+        defer { usageBusy = false }
+        guard let xs = await Blocking.run({ Self.keysUsage() }) else { return }
+        usageAt = Date()
+        let next = Dictionary(xs.map { ($0.profile, $0) }, uniquingKeysWith: { a, _ in a })
+        if next != usage { usage = next; ViewCache.save("profile-usage", xs) }
+    }
+
+    nonisolated static func keysUsage() -> [LoginUsage]? {
+        let bin = NSHomeDirectory() + "/.local/bin/reflex-keys"
+        guard let out = run(bin, ["usage", "--json"]) else { return nil }
+        return try? JSONDecoder().decode([LoginUsage].self, from: Data(out.utf8))
+    }
+
     func load() async {
+        Task { await loadUsage() }
         let fresh = await Blocking.run { Self.keysStatus() }
         // (reflex-keys not answering keeps the accounts shown.)
         if let fresh, fresh != logins { logins = fresh; ViewCache.save("profile-logins", fresh) }
@@ -299,16 +365,19 @@ struct ProfilesPane: View {
                 Text(model.loaded ? "No profile is kept here yet. Sign one in and hand it over (below)." : "Reading…")
                     .font(Type.meta).foregroundStyle(.secondary)
             } else {
+                // Every card as tall as the one with the most usage lines.
+                let rows = model.usage.values.map(\.windows.count).max() ?? 0
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 10) {
-                    ForEach(model.logins) { LoginCard(login: $0) }
+                    ForEach(model.logins) { LoginCard(login: $0, usage: model.usage[$0.profile], rows: rows) }
+                    ForEach(model.ownUsage) { OwnLoginCard(usage: $0, rows: rows) }
                 }
                 .padding(.vertical, 4)
             }
         } header: {
             Text("Accounts")
         } footer: {
-            Text("A login's refresh token works once, so one Mac (its keeper) refreshes it early and pushes it to every other machine, which never holds a usable one. Claude's own daemon refreshes Claude's.")
+            Text("A login's refresh token works once, so one Mac (its keeper) refreshes it early and pushes it to every other machine, which never holds a usable one. Claude's own daemon refreshes Claude's. Usage is each plan's, as Claude, ChatGPT and Antigravity report it, read every few minutes.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
     }
@@ -332,6 +401,8 @@ struct ProfilesPane: View {
 /// One profile's login: who keeps it, how long it lasts, where it is current.
 private struct LoginCard: View {
     let login: ProfileLogin
+    var usage: LoginUsage?
+    var rows = 0
     static let height: CGFloat = 112
 
     private var tone: Color {
@@ -342,7 +413,8 @@ private struct LoginCard: View {
 
     private var line: String {
         if let e = login.error { return e }
-        var parts: [String] = [login.here == "holder" ? "Kept fresh by this Mac" : "Kept fresh by \(login.holder)"]
+        var parts: [String] = (usage?.plan).map { [$0] } ?? []
+        parts.append(login.here == "holder" ? "Kept fresh by this Mac" : "Kept fresh by \(login.holder)")
         if let t = login.expires { parts.append("token \(Self.left(t))") }
         if let t = login.loginEnds { parts.append("sign-in ends in \(Self.days(t))") }
         return parts.joined(separator: " · ")
@@ -382,12 +454,15 @@ private struct LoginCard: View {
             ForEach(login.warnings ?? [], id: \.self) { w in
                 Label(w, systemImage: "exclamationmark.triangle.fill").font(.system(size: 10.5)).foregroundStyle(Tone.blocked).lineLimit(1)
             }
+            UsageBars(usage: usage, harness: login.harness)
             Spacer(minLength: 0)
             FlowChips(chips: chips)
         }
         .padding(11)
-        // Every card the same size, whatever it holds: two lines of status, two of machines.
-        .frame(maxWidth: .infinity, minHeight: LoginCard.height, maxHeight: LoginCard.height, alignment: .topLeading)
+        // Every card the same size, whatever it holds: two lines of status, the
+        // usage lines of the card with the most, two of machines.
+        .frame(maxWidth: .infinity, minHeight: LoginCard.height + UsageBars.height(rows),
+               maxHeight: LoginCard.height + UsageBars.height(rows), alignment: .topLeading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
@@ -398,6 +473,81 @@ private struct LoginCard: View {
         xs += login.current.map { Chip(text: $0, symbol: "checkmark", tint: Tone.done) }
         xs += login.behind.map { Chip(text: $0, symbol: "arrow.triangle.2.circlepath", tint: Tone.blocked) }
         return xs
+    }
+}
+
+/// A plan's windows: how much is used, and when it comes back.
+private struct UsageBars: View {
+    let usage: LoginUsage?
+    let harness: String
+    static let row: CGFloat = 17
+
+    static func height(_ rows: Int) -> CGFloat { rows == 0 ? 0 : CGFloat(rows) * row + 4 }
+
+    var body: some View {
+        if let u = usage, !u.windows.isEmpty {
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(u.windows, id: \.self) { w in
+                    HStack(spacing: 7) {
+                        Text(w.label).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                            .lineLimit(1).frame(width: 78, alignment: .leading)
+                        Bar(fraction: Double(w.percent) / 100, tint: Self.tint(w.percent, harness))
+                        Text("\(w.percent)%").font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                            .frame(width: 32, alignment: .trailing)
+                    }
+                    .frame(height: Self.row)
+                    .help(w.resetsAt.map { "\(w.label): \(w.percent)% used, resets \(LoginUsage.until($0))" } ?? "\(w.label): \(w.percent)% used")
+                }
+            }
+            .opacity(u.error == nil ? 1 : 0.55)
+            .help(u.error.map { "As of \(LoginUsage.ago(u.at)): \($0)" } ?? "")
+        }
+    }
+
+    static func tint(_ p: Int, _ harness: String) -> Color { p >= 90 ? Tone.blocked : p >= 75 ? .orange : HarnessLook.tint(harness) }
+
+    private struct Bar: View {
+        let fraction: Double
+        let tint: Color
+        var body: some View {
+            GeometryReader { g in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(Color.primary.opacity(0.08))
+                    Capsule().fill(tint).frame(width: max(fraction > 0 ? 4 : 0, g.size.width * min(1, fraction)))
+                }
+            }
+            .frame(height: 5)
+        }
+    }
+}
+
+/// Your own login (no profile) where it is signed in here: its plan's use.
+private struct OwnLoginCard: View {
+    let usage: LoginUsage
+    var rows = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                HarnessLogo(harness: usage.harness, size: 38)
+                VStack(alignment: .leading, spacing: 1) {
+                    HStack(spacing: 4) {
+                        Text(usage.harness).font(.system(size: 13, weight: .semibold))
+                        Text("your own").font(.system(size: 11)).foregroundStyle(.secondary)
+                    }
+                    Text(([usage.plan].compactMap { $0 } + ["the login in your home folder"]).joined(separator: " · "))
+                        .font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
+                }
+                Spacer(minLength: 0)
+            }
+            UsageBars(usage: usage, harness: usage.harness)
+            Spacer(minLength: 0)
+        }
+        .padding(11)
+        .frame(maxWidth: .infinity, minHeight: LoginCard.height + UsageBars.height(rows),
+               maxHeight: LoginCard.height + UsageBars.height(rows), alignment: .topLeading)
+        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
 }
 

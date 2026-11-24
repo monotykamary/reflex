@@ -41,7 +41,7 @@
 #                                   files or folders as they are (Downloads,
 #                                   notes, data): each to the same path there
 #   reflex creds MACHINE [--claude] [--any]
-#   reflex session MACHINE KIND SESSION CWD [--from SRC]
+#   reflex session MACHINE KIND SESSION CWD [--from SRC] [--profile NAME]
 #                                   again: only what's new since the last time
 #   reflex snapshot MACHINE --manifest FILE
 #   reflex template [--provider P] [--json|--keep]
@@ -455,9 +455,15 @@ done'
 # through /var/lib/ascii-lazy/retired/home, a path the next boot won't have.
 SESSIONS_PROBE='import glob, json, os, re
 home = os.path.expanduser("~"); me = os.getuid(); found = []; pis = {}
+def environ(p):
+    try: return open("/proc/%s/environ" % p, "rb").read().split(b"\0")
+    except OSError: return []
+def getenv(p, k):
+    for e in environ(p):
+        if e.startswith(k.encode() + b"="): return e[len(k) + 1:].decode(errors="replace")
+    return ""
 def where(p, cwd):
-    try: env = open("/proc/%s/environ" % p, "rb").read().split(b"\0")
-    except OSError: return cwd
+    env = environ(p)
     for e in env:
         if not e.startswith(b"PWD="): continue
         w = e[4:].decode(errors="replace").rstrip("/")
@@ -491,12 +497,14 @@ for p in os.listdir("/proc"):
         cwd = where(p, os.readlink("/proc/%s/cwd" % p)); start = os.stat("/proc/" + p).st_mtime
         hint = named(a) or named(argv(open("/proc/%s/stat" % p).read().rsplit(")", 1)[1].split()[1]))
     except (OSError, IndexError): continue
+    # The harness profile it runs in ("claude[tom]": tom; none for your own).
+    spec = getenv(p, "REFLEX_HARNESS_PROFILE"); prof = spec[spec.find("[") + 1:-1] if spec.endswith("]") and "[" in spec else ""
     if c == "claude":
-        try: hint = json.load(open("%s/.claude/sessions/%s.json" % (home, p))).get("sessionId") or hint
+        try: hint = json.load(open("%s/sessions/%s.json" % (getenv(p, "CLAUDE_CONFIG_DIR") or home + "/.claude", p))).get("sessionId") or hint
         except (OSError, ValueError): pass
-        if hint: found.append({"kind": c, "cwd": cwd, "session": hint})
+        if hint: found.append({"kind": c, "cwd": cwd, "session": hint, "profile": prof})
     elif c == "pi": pis.setdefault(cwd, []).append((start, hint))
-    elif hint: found.append({"kind": c, "cwd": cwd, "session": hint})
+    elif hint: found.append({"kind": c, "cwd": cwd, "session": hint, "profile": prof})
 for cwd, ps in pis.items():
     d = "%s/.pi/agent/sessions/--%s--" % (home, cwd.strip("/").replace("/", "-"))
     since = min(s for s, _ in ps) - 5
@@ -1318,26 +1326,36 @@ mark_home() { # mark_home MACHINE
 }
 
 session() {
-  m=$1 kind=$2 id=$3 cwd=$4
+  m=$1 kind=$2 id=$3 cwd=$4 sprof=
   shift 4
   while [ $# -gt 0 ]; do
-    case $1 in --from) from_src "$2"; shift 2 ;; *) die "session: unknown $1" ;; esac
+    case $1 in --from) from_src "$2"; shift 2 ;; --profile) sprof=$2; shift 2 ;; *) die "session: unknown $1" ;; esac
   done
+  case $sprof in *[!a-z0-9._-]*|.*) die "session: no profile $sprof" ;; esac
+  # The harness's folder, under the home on both sides: yours, or the
+  # profile's (`reflex profile`), which keeps the session in the same one there.
+  case $kind:$sprof in
+    claude:) hb=.claude ;; codex:) hb=.codex ;; pi:) hb=.pi/agent ;;
+    *) hb=".reflex/profiles/$kind/$sprof/$kind" ;;
+  esac
   rcwd=$(where "$m" "$cwd")
   rsh "$m" "mkdir -p $(q "$rcwd")" >/dev/null
   case $kind in
     claude)
-      f="$S_HOME/.claude/projects/$(claude_dir "$cwd")/$id.jsonl"
-      rsh "$SRC" "[ -f $(q "$f") ]" >/dev/null 2>&1 || die "no claude session $id for $cwd on $SRC"
-      rel=".claude/projects/$(claude_dir "$rcwd")"
+      f="$S_HOME/$hb/projects/$(claude_dir "$cwd")/$id.jsonl"
+      rsh "$SRC" "[ -f $(q "$f") ]" >/dev/null 2>&1 || die "no claude${sprof:+[$sprof]} session $id for $cwd on $SRC"
+      rel="$hb/projects/$(claude_dir "$rcwd")"
       send_log "$m" "$f" "$rel/$id.jsonl"
       # Its subagents' transcripts and saved tool output, and Claude's
       # memory for the project.
       send_dir "$m" "$(dirname "$f")" "$id" "$(remote_home "$m")/$rel"
       send_dir "$m" "$(dirname "$f")" memory "$(remote_home "$m")/$rel"
       # Trusted there as it is here: no folder-trust question on resume.
+      # (A profile's .claude.json is in its folder.)
+      _cj='/.claude.json'; [ -n "$sprof" ] && _cj="/$hb/.claude.json"
       rsh "$m" "command -v node >/dev/null && node -e '
-        const fs = require(\"fs\"), p = process.env.HOME + \"/.claude.json\";
+        const fs = require(\"fs\"), p = process.env.HOME + \"$_cj\";
+        fs.mkdirSync(require(\"path\").dirname(p), { recursive: true });
         let j = {}; try { j = JSON.parse(fs.readFileSync(p, \"utf8\")) } catch {}
         j.projects = j.projects || {}; const d = process.argv[1];
         j.projects[d] = Object.assign(j.projects[d] || {}, { hasTrustDialogAccepted: true });
@@ -1348,18 +1366,18 @@ session() {
     pi)
       case $id in
         /*) f=$id ;;
-        *) f=$(rsh "$SRC" "ls -t $(q "$S_HOME/.pi/agent/sessions/$(pi_dir "$cwd")")/*$(q "$id")*.jsonl 2>/dev/null | head -n 1") || f="" ;;
+        *) f=$(rsh "$SRC" "ls -t $(q "$S_HOME/$hb/sessions/$(pi_dir "$cwd")")/*$(q "$id")*.jsonl 2>/dev/null | head -n 1") || f="" ;;
       esac
       [ -n "$f" ] && rsh "$SRC" "[ -f $(q "$f") ]" >/dev/null 2>&1 || die "no pi session $id for $cwd on $SRC"
-      rel=".pi/agent/sessions/$(pi_dir "$rcwd")/$(basename "$f")"
+      rel="$hb/sessions/$(pi_dir "$rcwd")/$(basename "$f")"
       send_log "$m" "$f" "$rel"
       # A path names the file there; an id is the same id.
       case $id in /*) out="$(remote_home "$m")/$rel" ;; *) out=$id ;; esac
       ;;
     codex)
-      f=$(rsh "$SRC" "find \"\$HOME/.codex/sessions\" -name $(q "*$id*.jsonl") 2>/dev/null | head -n 1") || f=""
+      f=$(rsh "$SRC" "find \"\$HOME\"/$(q "$hb/sessions") -name $(q "*$id*.jsonl") 2>/dev/null | head -n 1") || f=""
       [ -n "$f" ] || die "no codex session $id on $SRC"
-      rel=".codex/sessions/${f#"$S_HOME/.codex/sessions/"}"
+      rel="$hb/sessions/${f#"$S_HOME/$hb/sessions/"}"
       send_log "$m" "$f" "$rel"
       out=$id
       ;;
@@ -1924,6 +1942,14 @@ prof_exec() { # prof_exec COMMAND...: run in the profile
   # which login and session folders its harness uses changes. (A Seatbelt
   # profile, or a mount namespace, also stopped the sandboxes agents start
   # themselves, and hid memory they need.)
+  # Its terminal says which profile it runs in (label reflex.profile, none for
+  # your own login), so Reflex shows it however the agent was started: from
+  # Reflex, a shell, an agent's `hc run`. Only for a program that owns its
+  # terminal: a helper run inside an agent's command (no tty) would relabel
+  # that agent's terminal.
+  if [ -n "${HC_TERMINAL_ID:-}" ] && [ -t 0 ] && [ -t 1 ] && command -v hc >/dev/null 2>&1; then
+    (hc label "$HC_TERMINAL_ID" "reflex.profile=$PN" >/dev/null 2>&1 &)
+  fi
   rm -rf "$T"  # (exec skips the EXIT trap)
   exec env $PENV "$@"
 }

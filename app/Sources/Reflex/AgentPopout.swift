@@ -1198,7 +1198,8 @@ struct AgentPopout: View {
                 Text(agent.map { "\($0.kind) · \($0.folder)" } ?? session.pane)
                     .font(.system(size: 13, weight: .semibold))
                     .lineLimit(1)
-                // Another Mac's agent wears its name here, as in the rail.
+                // Its profile and another Mac's name, as in the rail.
+                ProfileChip(kind: agent?.kind ?? "", profile: agent?.profile)
                 MachineChip(machine: Machines.machine(of: session.pane))
                 Text(agent.map { [$0.status, $0.title].filter { !$0.isEmpty }.joined(separator: " · ") } ?? "no agent")
                     .font(.system(size: 12))
