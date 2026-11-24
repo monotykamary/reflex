@@ -109,6 +109,18 @@ final class RemoteIndex: @unchecked Sendable {
                 }
                 continue
             }
+            if f.first == "S", f.count >= 8 {
+                // agy's, opencode's or amp's: read there, from a database or a thread file.
+                guard !f[2].isEmpty else { continue }
+                let path = f[4].hasPrefix("file:") ? (URL(string: f[4])?.path ?? "") : f[4]
+                guard !path.isEmpty else { continue }
+                var s = PastSession(agent: f[1], id: f[2], cwd: Place.on(m.key, path), title: String(f[5].prefix(120)),
+                                    last: String(f[6].prefix(300)), modified: Date(timeIntervalSince1970: TimeInterval(f[3]) ?? 0),
+                                    state: .past, profile: f[7].isEmpty ? nil : f[7])
+                if s.title.isEmpty { s.title = s.last }
+                next["S:" + f[1] + ":" + f[2]] = (f[3], s)
+                continue
+            }
             guard f.first == "F", f.count >= 6 else { continue }
             let (agent, mtime, path) = (f[1], f[2], f[3])
             if f[4].isEmpty, let c = cached[path], c.mtime == mtime {

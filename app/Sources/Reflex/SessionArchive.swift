@@ -222,8 +222,103 @@ final class SessionArchive: ObservableObject {
             cache[key] = (f.modified, s)
             if let s { out.append(s) }
         }
+        // agy's, opencode's and amp's, which keep theirs in a database or one file per thread.
+        let homes = [home] + profileHomes(home + "/.reflex/profiles")
+        for h in homes {
+            out += agy(h + "/.gemini/antigravity-cli/conversation_summaries.db")
+            out += opencode(h + "/.local/share/opencode/opencode.db")
+            out += amp(h + "/.local/share/amp/threads", cache: &cache, seen: &seen)
+        }
         cache = cache.filter { seen.contains($0.key) }
         return out
+    }
+
+    /// The homes of profiles that have one (agy, opencode, amp, grok: reflex profile).
+    nonisolated static func profileHomes(_ root: String) -> [String] {
+        let fm = FileManager.default
+        return ["agy", "opencode", "amp"].flatMap { h -> [String] in
+            ((try? fm.contentsOfDirectory(atPath: "\(root)/\(h)")) ?? []).filter { !$0.hasPrefix(".") }.map { "\(root)/\(h)/\($0)/home" }
+        }
+    }
+
+    /// Rows from a SQLite database, opened without writing (its WAL left alone);
+    /// fields split by U+001F. Empty when there is no database or no sqlite3.
+    nonisolated static func rows(_ db: String, _ sql: String) -> [[String]] {
+        guard FileManager.default.fileExists(atPath: db) else { return [] }
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
+        let uri = "file:" + (db.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db) + "?immutable=1"
+        p.arguments = ["-readonly", "-separator", "\u{1F}", "-newline", "\u{1E}", uri, sql]
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        p.standardInput = FileHandle.nullDevice
+        guard (try? p.run()) != nil else { return [] }
+        let d = out.fileHandleForReading.readDataToEndOfFile()
+        p.waitUntilExit()
+        guard p.terminationStatus == 0 else { return [] }
+        return String(decoding: d, as: UTF8.self).split(separator: "\u{1E}", omittingEmptySubsequences: true)
+            .map { $0.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init) }
+    }
+
+    /// agy's conversations (not the ones its agents started).
+    nonisolated static func agy(_ db: String) -> [PastSession] {
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime, .withFractionalSeconds, .withTimeZone]
+        let profile = PastSession.profile(of: db)
+        return rows(db, "select conversation_id, title, preview, workspace_uris, last_modified_time from conversation_summaries where parent_conversation_id = '' and killed = 0 order by last_modified_time desc limit 150").compactMap { r in
+            guard r.count == 5, !r[0].isEmpty else { return nil }
+            let uris = (try? JSONSerialization.jsonObject(with: Data(r[3].utf8)) as? [String]) ?? []
+            guard let u = uris.first, let cwd = URL(string: u)?.path, !cwd.isEmpty else { return nil }
+            let modified = iso.date(from: r[4]) ?? .distantPast
+            let title = clean(r[1].isEmpty ? r[2] : r[1])
+            return PastSession(agent: "agy", id: r[0], cwd: cwd, title: String(title.prefix(120)), last: String(clean(r[2]).prefix(300)),
+                               modified: modified, state: .past, profile: profile)
+        }
+    }
+
+    /// opencode's sessions (not its subagents').
+    nonisolated static func opencode(_ db: String) -> [PastSession] {
+        let profile = PastSession.profile(of: db)
+        return rows(db, "select id, directory, title, time_updated from session where parent_id is null and time_archived is null and directory != '/' and title not like 'New session - %' order by time_updated desc limit 150").compactMap { r in
+            guard r.count == 4, !r[0].isEmpty, !r[1].isEmpty else { return nil }
+            let modified = Date(timeIntervalSince1970: (Double(r[3]) ?? 0) / 1000)
+            return PastSession(agent: "opencode", id: r[0], cwd: r[1], title: String(clean(r[2]).prefix(120)), last: "",
+                               modified: modified, state: .past, profile: profile)
+        }
+    }
+
+    /// amp's threads, one JSON file each: read again only when one changes.
+    nonisolated static func amp(_ dir: String, cache: inout [String: (Date, PastSession?)], seen: inout Set<String>) -> [PastSession] {
+        let fm = FileManager.default
+        let names = (try? fm.contentsOfDirectory(atPath: dir)) ?? []
+        let files = names.filter { $0.hasSuffix(".json") }.compactMap { n -> (String, Date)? in
+            let path = dir + "/" + n
+            guard let m = (try? fm.attributesOfItem(atPath: path))?[.modificationDate] as? Date else { return nil }
+            return (path, m)
+        }.sorted { $0.1 > $1.1 }.prefix(150)
+        var out: [PastSession] = []
+        for (path, m) in files {
+            seen.insert(path)
+            if let (cm, s) = cache[path], cm == m { if let s { out.append(s) }; continue }
+            let s = ampThread(path, modified: m)
+            cache[path] = (m, s)
+            if let s { out.append(s) }
+        }
+        return out
+    }
+
+    nonisolated static func ampThread(_ path: String, modified: Date) -> PastSession? {
+        guard let d = FileManager.default.contents(atPath: path),
+              let j = try? JSONSerialization.jsonObject(with: d) as? [String: Any], let id = j["id"] as? String else { return nil }
+        let trees = ((j["env"] as? [String: Any])?["initial"] as? [String: Any])?["trees"] as? [[String: Any]]
+        guard let uri = trees?.first?["uri"] as? String, let cwd = URL(string: uri)?.path, !cwd.isEmpty else { return nil }
+        let msgs = (j["messages"] as? [[String: Any]]) ?? []
+        let prompts = msgs.filter { $0["role"] as? String == "user" }.compactMap { prompt(text($0["content"])) }
+        let title = (j["title"] as? String).map(clean) ?? prompts.first ?? ""
+        guard !title.isEmpty || !prompts.isEmpty else { return nil }
+        return PastSession(agent: "amp", id: id, cwd: cwd, title: String(title.prefix(120)), last: prompts.last ?? "",
+                           modified: modified, state: .past, profile: PastSession.profile(of: path))
     }
 
     nonisolated static func read(agent: String, url: URL, modified: Date) -> PastSession? {
