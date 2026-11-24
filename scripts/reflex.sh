@@ -71,8 +71,7 @@
 #                                   codex[NAME], agy[NAME], pi[NAME], opencode,
 #                                   amp, grok (bare claude:
 #                                   your own). Its own login and sessions, your
-#                                   settings, skills and everything else shared;
-#                                   it can't read other profiles' sessions
+#                                   settings, skills and everything else shared
 #     new SPEC                      made (login, run and exec make it too)
 #     login SPEC [PROVIDER]         sign it in (pi: which provider)
 #     run SPEC [ARG...]             the harness in it;  exec SPEC COMMAND...
@@ -1742,9 +1741,8 @@ skill() {
 # setting, so it gets a home of its own whose entries link back to the real one
 # (and on a Mac its own Keychain, which `security` finds through $HOME). Your
 # settings, skills, hooks and extensions are linked in; the login, sessions and
-# history are the profile's. On Linux a run can't read other profiles, or (in a
-# profile) your own sessions: a private mount namespace hides them. On a Mac
-# nothing is hidden (Seatbelt would break the agents' own sandboxes).
+# history are the profile's. Nothing is hidden from a run: it reads the whole
+# filesystem as it would outside a profile.
 PROFILES=${REFLEX_PROFILES:-"$HOME/.reflex/profiles"}
 PROFILE_KEYCHAIN="Reflex profile keychain"
 
@@ -1888,45 +1886,13 @@ prof_make() { # prof_make: the profile's folder, made or brought up to date; set
   chmod 700 "$PROFILES" "$PROFILES/$PH" "$P" 2>/dev/null || true
 }
 
-prof_hidden() { # what a run in this profile can't reach, one a line
-  for _d in "$PROFILES"/*/*; do
-    [ -d "$_d" ] || continue
-    [ "$_d" = "$P" ] && [ -n "$PN" ] && continue
-    printf '%s\n' "$_d"
-  done
-  [ -n "$PN" ] || return 0
-  for _d in "$HOME/.claude/projects" "$HOME/.claude/transcripts" "$HOME/.claude/history.jsonl" \
-            "$HOME/.codex/sessions" "$HOME/.codex/archived_sessions" "$HOME/.codex/history.jsonl" \
-            "$HOME/.pi/agent/sessions" "$HOME/.gemini/antigravity" "$HOME/.gemini/history" \
-            "$HOME/.local/share/opencode" "$HOME/.local/share/amp" "$HOME/.grok"; do
-    [ -e "$_d" ] && printf '%s\n' "$_d"
-  done
-  return 0
-}
-
-prof_exec() { # prof_exec COMMAND...: run in the profile, kept from what it can't reach
+prof_exec() { # prof_exec COMMAND...: run in the profile
+  # Nothing is hidden from it: an agent reads the whole filesystem (your own
+  # sessions and memory, other profiles') as it would outside a profile. Only
+  # which login and session folders its harness uses changes. (A Seatbelt
+  # profile, or a mount namespace, also stopped the sandboxes agents start
+  # themselves, and hid memory they need.)
   rm -rf "$T"  # (exec skips the EXIT trap)
-  _hide=$(prof_hidden)
-  if [ -z "$_hide" ]; then exec env $PENV "$@"; fi
-  # On a Mac nothing is hidden: a Seatbelt profile around the agent would stop
-  # every sandbox it starts itself (Codex's and Claude's command sandboxes,
-  # SwiftPM: "sandbox_apply: Operation not permitted"). Profiles there are kept
-  # apart by their own folders and logins, and by the agents' rules.
-  if [ "$(uname)" = Darwin ]; then exec env $PENV "$@"; fi
-  # Linux: a private mount namespace that root makes, the hidden paths covered,
-  # then you again (so sudo still works inside; bubblewrap's no_new_privs would end that).
-  if command -v unshare >/dev/null && command -v setpriv >/dev/null && sudo -n true 2>/dev/null; then
-    exec sudo -n --preserve-env unshare --mount --propagation private sh -c '
-      set -e; u=$1 g=$2 path=$3 home=$4 hide=$5; shift 5
-      IFS="
-"
-      for d in $hide; do
-        if [ -d "$d" ]; then mount -t tmpfs -o mode=700,uid=$u,gid=$g reflex-hidden "$d"; else mount --bind /dev/null "$d"; fi
-      done
-      exec setpriv --reuid="$u" --regid="$g" --init-groups -- env PATH="$path" HOME="$home" "$@"
-    ' sh "$(id -u)" "$(id -g)" "$PATH" "$HOME" "$_hide" env $PENV "$@"
-  fi
-  say "reflex profile: no passwordless sudo here; running ${PH}[$PN] without hiding the other profiles"
   exec env $PENV "$@"
 }
 

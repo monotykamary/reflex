@@ -11,27 +11,24 @@ user's real home and login, untouched. A profile exists only where there is an a
   (repos, ssh, gh, git config, other tools) is shared through links back to the real home.
 - No resuming across profiles. Work crosses only by handoff: Reflex, which runs outside every profile,
   copies one picked session (summary or transcript) into the target profile.
-- On Linux, profiles can't read each other's folders: they are covered by empty ones inside the mount
-  namespace. On a Mac they are kept apart only by their own folders and logins and by the agents' rules
-  (the reflex skill): a Seatbelt profile around an agent stops every sandbox the agent starts itself
-  (Codex's and Claude's command sandboxes, SwiftPM: `sandbox_apply: Operation not permitted`), so
-  Reflex doesn't use one (found 2026-11-24, removed in 0.1.97).
+- Nothing is hidden: an agent in a profile reads the whole filesystem, your own sessions and memory and
+  other profiles' included, as it would outside one. Only the login and the session folders its harness
+  writes to are the profile's. (Hiding was tried and removed in 0.1.97: a Seatbelt profile on a Mac
+  stopped every sandbox the agent starts itself, Codex's and Claude's command sandboxes and SwiftPM
+  alike, `sandbox_apply: Operation not permitted`, and it hid the project memory agents rely on; the
+  user wants agents to read freely.)
 - Reflex tags each session with its profile, so a resume starts in the same profile. A folder may pin a
   default profile.
 
-### Isolation per OS
+### Per OS
 
-- **macOS:** Claude, Codex and pi take their folder by a setting (below); the others run with
-  `HOME=~/.reflex/profiles/<harness>/<name>/home`. `security` resolves
-  the default Keychain from `$HOME`, so the profile home gets its own
+- Claude, Codex and pi take their folder by a setting (below); the others run with
+  `HOME=~/.reflex/profiles/<harness>/<name>/home`, whose entries link back to the real home.
+- **macOS:** `security` resolves the default Keychain from `$HOME`, so such a profile home gets its own
   `Library/Keychains/reflex-profile.keychain-db` (not named "login": macOS unlocks a login keychain
   only with your login password), isolated from the real one (tested: an item added there is not in
   the real Keychain). Its password is random, kept in the real login Keychain, and Reflex unlocks it
   before starting an agent.
-- **Linux boxes:** a root-made private mount namespace binds the profile's folders over the real ones,
-  then drops back to the user, so sudo keeps working:
-  `sudo --preserve-env unshare --mount --propagation private sh -c 'mount --bind A B && exec setpriv --reuid=$U --regid=$U --init-groups -- CMD'`.
-  bubblewrap also works but sets no_new_privs, which breaks sudo.
 
 Harness homes: Claude `CLAUDE_CONFIG_DIR` (its Keychain item becomes `Claude Code-credentials-<8 hex of
 sha256(dir)>`), Codex `CODEX_HOME`, pi `PI_CODING_AGENT_DIR`, agy only `$HOME` (`~/.gemini`).

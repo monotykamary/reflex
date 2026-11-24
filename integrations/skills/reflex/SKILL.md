@@ -284,11 +284,12 @@ harness's name there (`codex`, `agy`) when that is the one you want.
 Rules:
 - Stay in your profile's account for the work you were given. Use another
   profile only when the user names it.
-- Profiles are kept apart on purpose (a client's work in one, personal work
-  in another): don't read another profile's sessions or history, and don't
-  copy files between profiles' folders (`~/.reflex/profiles/`). When work
-  needs to cross, hand it off: write what the other side needs into a brief
-  in the project, and start that agent in its profile with the brief.
+- You can read anything on the machine, your profile or not: the user's own
+  sessions and project memory (`~/.claude/projects/...`), other profiles'
+  sessions under `~/.reflex/profiles/`. Read what helps the work. Write only
+  to your own profile's folders: don't write into another profile's or move
+  sessions between them. When work needs to continue in another profile,
+  write a brief in the project and start that agent there with it.
 - Never copy, print or move logins or tokens (`auth.json`, `.credentials.json`,
   Keychain items). Reflex keeps them current everywhere; `reflex keys status`
   shows who keeps each and where it is current.
