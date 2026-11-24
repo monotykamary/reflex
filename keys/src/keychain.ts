@@ -16,8 +16,11 @@ export type Item = {service: string; account: string; keychain?: string; home?: 
 // Your default Keychain, or the one REFLEX_KEYS_KEYCHAIN names (tests: a temp Keychain).
 export const defaultKeychain = () => process.env.REFLEX_KEYS_KEYCHAIN || undefined
 
-// `security` finds the default Keychain from the account, not from $HOME: a write with no
-// Keychain named, under another HOME, would go to (or ask about) your own. Refused.
+// `security` finds the default Keychain from $HOME: a write with no Keychain named under a
+// HOME that has none asks about a missing Keychain in a dialog (and one under a profile's
+// HOME lands in that profile's). So Claude's items are written with your real HOME (your
+// login Keychain), agy's with HOME=<p>/home and that profile Keychain's path; a write naming
+// no Keychain from any other HOME is refused.
 function guard(it: Item) {
   if (it.keychain) return
   const h = it.home ?? process.env.HOME

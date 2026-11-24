@@ -4,8 +4,8 @@
 // list or default changed, deleted afterwards. Your default Keychain and search list are
 // checked unchanged, and nothing lands in your Keychain.
 //
-// `security` takes the default Keychain from the account, not $HOME: a write without a
-// Keychain under a temp HOME asks you about a missing Keychain (a GUI dialog). keychain.ts
+// `security` takes the default Keychain from $HOME: a write without a Keychain under a temp
+// HOME that has no default asks you about a missing Keychain (a GUI dialog). keychain.ts
 // refuses such a write.
 import {afterAll, beforeAll, describe, expect, test} from 'bun:test'
 import {spawnSync} from 'node:child_process'
