@@ -1,0 +1,24 @@
+{
+  "lockfileVersion": 2,
+  "configVersion": 1,
+  "workspaces": {
+    "": {
+      "name": "reflex-keys",
+      "devDependencies": {
+        "@types/bun": "^1.4.5",
+        "gdp-wired": "0.59.0",
+      },
+    },
+  },
+  "packages": {
+    "@types/bun": ["@types/bun@1.4.5", "", { "dependencies": { "bun-types": "1.4.5" } }, "sha512-DpgwNI9z0L1S0gtb45QLCWgwCUcMLnsHYMJHQvpNj7erGiCGBvpggltAIeARrtobNMKMuy0UP7i56tKKgwFs/Q=="],
+
+    "@types/node": ["@types/node@26.6.6", "", { "dependencies": { "undici-types": "~8.9.0" } }, "sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog=="],
+
+    "bun-types": ["bun-types@1.4.5", "", { "dependencies": { "@types/node": "*", "undici-types": "*" } }, "sha512-ECHn+9dhL3wv0G6u0+7dQvrnaimXiRDxxerYBmhTaLyJEEuvTPWk2Fye3XIf5Y++JIIiHKfQw4Z7V5D8KuiXbg=="],
+
+    "gdp-wired": ["gdp-wired@0.59.0", "", { "peerDependencies": { "@gdp-ts/core": ">=0.1.0", "typescript": ">=5.0.0" }, "optionalPeers": ["@gdp-ts/core", "typescript"], "bin": { "gdp-wired": "dist/core/cli.js", "gdp-wired-check": "dist/interchange/cli.js", "gdp-wired-agent-consult": "dist/core/agent-consult/cli.js" } }, "sha512-TYB9Q0tpHNGywtLBnJvZoh2hzzNX6Dg+c1rxHStgx6D7dmwDffCQpK9vIcl4i6hsuDiQVGqsS33vtNbaB2hSgw=="],
+
+    "undici-types": ["undici-types@8.9.0", "", {}, "sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg=="],
+  }
+}
