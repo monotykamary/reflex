@@ -21,189 +21,326 @@ export const EMPTY_OBJ: J = {t: 'obj', fields: []}
 
 // Reading
 // -------
+// One character at a time, as the strict-json reader reflexd always used:
+// the same values, the same refusals, in the same words.
 
-class Bad extends Error {
-  constructor(
-    readonly pos: number,
-    msg: string,
-  ) {
-    super(msg)
-  }
-}
+type Frame = {k: 'arr'; items: J[]} | {k: 'obj'; fields: [string, J][]} | {k: 'key'; fields: [string, J][]; key: string}
+type NSt = 'minus' | 'zero' | 'int' | 'dot' | 'frac' | 'e' | 'esign' | 'exp'
 
 const isWs = (c: number) => c === 32 || c === 9 || c === 10 || c === 13
 const isDigit = (c: number) => c >= 48 && c <= 57
+const isE = (c: number) => c === 101 || c === 69
+
+function canEnd(st: NSt): boolean {
+  return st === 'zero' || st === 'int' || st === 'frac' || st === 'exp'
+}
+
+function cont(st: NSt, c: number): boolean {
+  switch (st) {
+    case 'minus':
+    case 'dot':
+    case 'esign':
+    case 'exp':
+      return isDigit(c)
+    case 'zero':
+      return c === 46 || isE(c)
+    case 'int':
+      return isDigit(c) || c === 46 || isE(c)
+    case 'frac':
+      return isDigit(c) || isE(c)
+    case 'e':
+      return isDigit(c) || c === 45 || c === 43
+  }
+}
+
+function next(st: NSt, c: number): NSt {
+  switch (st) {
+    case 'minus':
+      return c === 48 ? 'zero' : 'int'
+    case 'zero':
+      return c === 46 ? 'dot' : 'e'
+    case 'int':
+      return isDigit(c) ? 'int' : c === 46 ? 'dot' : 'e'
+    case 'dot':
+      return 'frac'
+    case 'frac':
+      return isDigit(c) ? 'frac' : 'e'
+    case 'e':
+      return isDigit(c) ? 'exp' : 'esign'
+    case 'esign':
+    case 'exp':
+      return 'exp'
+  }
+}
+
+function hexVal(c: number): number | null {
+  if (c >= 97 && c <= 102) return c - 87
+  if (c >= 65 && c <= 70) return c - 55
+  if (c >= 48 && c <= 57) return c - 48
+  return null
+}
+
+const isHigh = (c: number) => c >= 0xd800 && c <= 0xdbff
+const isLow = (c: number) => c >= 0xdc00 && c <= 0xdfff
+
+class Bad {
+  constructor(
+    readonly pos: number,
+    readonly msg: string,
+  ) {}
+}
 
 export function read(s: string): Res<J> {
-  let i = 0
-  const n = s.length
-  const ws = () => {
-    while (i < n && isWs(s.charCodeAt(i))) i++
+  type Need = 'val' | 'key' | 'colon' | 'after' | 'end'
+  let mode = 'need' as 'need' | 'str' | 'num' | 'lit'
+  let need = 'val' as Need
+  let done_: J | undefined
+  const stk: Frame[] = []
+  // a string
+  let esc = false
+  let hex = 0
+  let hexv = 0
+  let buf: string[] = []
+  let asKey = false
+  let high = 0
+  // a number
+  let lex = ''
+  let st: NSt = 'int'
+  // a literal
+  let want = ''
+  let lit: J = NULL
+  let pos = 0
+
+  const put = (v: J) => {
+    const h = stk[stk.length - 1]
+    if (!h) {
+      mode = 'need'
+      need = 'end'
+      done_ = v
+      return
+    }
+    if (h.k === 'arr') h.items.push(v)
+    else if (h.k === 'key') {
+      h.fields.push([h.key, v])
+      stk[stk.length - 1] = {k: 'obj', fields: h.fields}
+    } else throw new Bad(pos, 'unexpected value')
+    mode = 'need'
+    need = 'after'
   }
-  const value = (depth: number): J => {
-    if (depth > 10000) throw new Bad(i, 'too deep')
-    ws()
-    if (i >= n) throw new Bad(0, 'unexpected end')
-    const c = s.charCodeAt(i)
-    if (c === 123) {
-      i++
-      const fields: [string, J][] = []
-      ws()
-      if (s.charCodeAt(i) === 125) {
-        i++
-        return {t: 'obj', fields}
-      }
-      for (;;) {
-        ws()
-        if (i >= n) throw new Bad(0, 'unexpected end')
-        if (s.charCodeAt(i) !== 34) throw new Bad(i, 'expected a key')
-        const k = string()
-        ws()
-        if (i >= n) throw new Bad(0, 'unexpected end')
-        if (s.charCodeAt(i) !== 58) throw new Bad(i, 'expected a colon')
-        i++
-        fields.push([k, value(depth + 1)])
-        ws()
-        if (i >= n) throw new Bad(0, 'unexpected end')
-        const d = s.charCodeAt(i++)
-        if (d === 44) continue
-        if (d === 125) return {t: 'obj', fields}
-        throw new Bad(i - 1, 'unexpected character')
-      }
-    }
-    if (c === 91) {
-      i++
-      const items: J[] = []
-      ws()
-      if (s.charCodeAt(i) === 93) {
-        i++
-        return {t: 'arr', items}
-      }
-      for (;;) {
-        items.push(value(depth + 1))
-        ws()
-        if (i >= n) throw new Bad(0, 'unexpected end')
-        const d = s.charCodeAt(i++)
-        if (d === 44) continue
-        if (d === 93) return {t: 'arr', items}
-        throw new Bad(i - 1, 'unexpected character')
-      }
-    }
-    if (c === 34) return {t: 'str', v: string()}
-    if (c === 45 || isDigit(c)) return number()
-    for (const [word, v] of [
-      ['true', {t: 'bool', v: true}],
-      ['false', {t: 'bool', v: false}],
-      ['null', NULL],
-    ] as const) {
-      if (s.startsWith(word, i)) {
-        i += word.length
-        return v
-      }
-    }
-    throw new Bad(i, 'unexpected character')
-  }
-  const number = (): J => {
-    const start = i
-    if (s.charCodeAt(i) === 45) i++
-    if (s.charCodeAt(i) === 48) i++
-    else if (isDigit(s.charCodeAt(i))) while (isDigit(s.charCodeAt(i))) i++
-    else throw new Bad(i, 'bad number')
-    if (s.charCodeAt(i) === 46) {
-      i++
-      if (!isDigit(s.charCodeAt(i))) throw new Bad(i, 'bad number')
-      while (isDigit(s.charCodeAt(i))) i++
-    }
-    if (s.charCodeAt(i) === 101 || s.charCodeAt(i) === 69) {
-      i++
-      if (s.charCodeAt(i) === 43 || s.charCodeAt(i) === 45) i++
-      if (!isDigit(s.charCodeAt(i))) throw new Bad(i, 'bad number')
-      while (isDigit(s.charCodeAt(i))) i++
-    }
-    return {t: 'num', lex: s.slice(start, i)}
-  }
-  const hex4 = (): number => {
-    if (i + 4 > n) throw new Bad(0, 'unterminated string')
-    const h = s.slice(i, i + 4)
-    if (!/^[0-9a-fA-F]{4}$/.test(h)) throw new Bad(i, 'bad escape')
-    i += 4
-    return parseInt(h, 16)
-  }
-  const string = (): string => {
-    i++
-    let out = ''
-    for (;;) {
-      if (i >= n) throw new Bad(0, 'unterminated string')
-      const c = s.charCodeAt(i)
-      if (c === 34) {
-        i++
-        return out
-      }
-      if (c < 32) throw new Bad(i, 'control character in string')
-      if (c !== 92) {
-        let j = i
-        while (j < n) {
-          const d = s.charCodeAt(j)
-          if (d === 34 || d === 92 || d < 32) break
-          j++
+  const top = () => stk[stk.length - 1]
+  const stepNeed = (c: number, ch: string) => {
+    switch (need) {
+      case 'val':
+        if (isWs(c)) return
+        if (c === 93) {
+          const h = top()
+          if (!h || h.k !== 'arr') throw new Bad(pos, 'unexpected ]')
+          if (h.items.length > 0) throw new Bad(pos, 'trailing comma')
+          stk.pop()
+          return put({t: 'arr', items: []})
         }
-        out += s.slice(i, j)
-        i = j
-        continue
-      }
-      i++
-      if (i >= n) throw new Bad(0, 'unterminated string')
-      const e = s[i++]
-      switch (e) {
-        case '"':
-          out += '"'
-          break
-        case '\\':
-          out += '\\'
-          break
-        case '/':
-          out += '/'
-          break
-        case 'b':
-          out += '\b'
-          break
-        case 'f':
-          out += '\f'
-          break
-        case 'n':
-          out += '\n'
-          break
-        case 'r':
-          out += '\r'
-          break
-        case 't':
-          out += '\t'
-          break
-        case 'u': {
-          const a = hex4()
-          if (a >= 0xd800 && a <= 0xdbff) {
-            if (s.charCodeAt(i) !== 92 || s[i + 1] !== 'u') throw new Bad(i, 'lone surrogate')
-            i += 2
-            const b = hex4()
-            if (b < 0xdc00 || b > 0xdfff) throw new Bad(i, 'lone surrogate')
-            out += String.fromCharCode(a, b)
-          } else if (a >= 0xdc00 && a <= 0xdfff) throw new Bad(i, 'lone surrogate')
-          else out += String.fromCharCode(a)
-          break
+        if (c === 91) {
+          stk.push({k: 'arr', items: []})
+          need = 'val'
+          return
         }
-        default:
-          throw new Bad(i - 1, 'bad escape')
+        if (c === 123) {
+          stk.push({k: 'obj', fields: []})
+          need = 'key'
+          return
+        }
+        if (c === 34) {
+          mode = 'str'
+          esc = false
+          hex = 0
+          hexv = 0
+          buf = []
+          asKey = false
+          high = 0
+          return
+        }
+        if (c === 45 || isDigit(c)) {
+          mode = 'num'
+          lex = ch
+          st = c === 45 ? 'minus' : c === 48 ? 'zero' : 'int'
+          return
+        }
+        if (c === 116) {
+          mode = 'lit'
+          want = 'rue'
+          lit = {t: 'bool', v: true}
+          return
+        }
+        if (c === 102) {
+          mode = 'lit'
+          want = 'alse'
+          lit = {t: 'bool', v: false}
+          return
+        }
+        if (c === 110) {
+          mode = 'lit'
+          want = 'ull'
+          lit = NULL
+          return
+        }
+        throw new Bad(pos, 'unexpected char')
+      case 'key':
+        if (isWs(c)) return
+        if (c === 125) {
+          const h = top()
+          if (!h || h.k !== 'obj') throw new Bad(pos, 'unexpected }')
+          if (h.fields.length > 0) throw new Bad(pos, 'trailing comma')
+          stk.pop()
+          return put({t: 'obj', fields: []})
+        }
+        if (c === 34) {
+          mode = 'str'
+          esc = false
+          hex = 0
+          hexv = 0
+          buf = []
+          asKey = true
+          high = 0
+          return
+        }
+        throw new Bad(pos, 'expected key')
+      case 'colon':
+        if (isWs(c)) return
+        if (c === 58) {
+          need = 'val'
+          return
+        }
+        throw new Bad(pos, 'expected colon')
+      case 'after': {
+        if (isWs(c)) return
+        const h = top()
+        if (c === 44) {
+          if (!h || h.k === 'key') throw new Bad(pos, 'unexpected comma')
+          need = h.k === 'arr' ? 'val' : 'key'
+          return
+        }
+        if (c === 93) {
+          if (!h || h.k !== 'arr') throw new Bad(pos, 'unexpected ]')
+          stk.pop()
+          return put({t: 'arr', items: h.items})
+        }
+        if (c === 125) {
+          if (!h || h.k !== 'obj') throw new Bad(pos, 'unexpected }')
+          stk.pop()
+          return put({t: 'obj', fields: h.fields})
+        }
+        throw new Bad(pos, 'expected comma')
       }
+      case 'end':
+        if (isWs(c)) return
+        throw new Bad(pos, 'trailing junk')
+    }
+  }
+  const endString = () => {
+    const text = buf.join('')
+    if (!asKey) return put({t: 'str', v: text})
+    const h = top()
+    if (!h || h.k !== 'obj') throw new Bad(pos, 'bad key')
+    stk[stk.length - 1] = {k: 'key', fields: h.fields, key: text}
+    mode = 'need'
+    need = 'colon'
+  }
+  const stepStr = (c: number, ch: string) => {
+    if (esc) {
+      esc = false
+      if (c === 117) {
+        hex = 4
+        hexv = 0
+        return
+      }
+      if (high !== 0) throw new Bad(pos, 'unpaired high surrogate')
+      const m: Record<number, string> = {34: '"', 92: '\\', 47: '/', 110: '\n', 114: '\r', 116: '\t', 98: '\b', 102: '\f'}
+      const got = m[c]
+      if (got === undefined) throw new Bad(pos, 'bad escape')
+      buf.push(got)
+      return
+    }
+    if (hex !== 0) {
+      const d = hexVal(c)
+      if (d === null) throw new Bad(pos, 'bad unicode escape')
+      const v = hexv * 16 + d
+      if (hex > 1) {
+        hex -= 1
+        hexv = v
+        return
+      }
+      hex = 0
+      hexv = 0
+      if (high === 0) {
+        if (isLow(v)) throw new Bad(pos, 'unpaired low surrogate')
+        if (isHigh(v)) high = v
+        else buf.push(String.fromCharCode(v))
+        return
+      }
+      if (!isLow(v)) throw new Bad(pos, 'unpaired high surrogate')
+      buf.push(String.fromCharCode(high, v))
+      high = 0
+      return
+    }
+    if (high !== 0) {
+      if (c === 92) {
+        esc = true
+        return
+      }
+      throw new Bad(pos, 'unpaired high surrogate')
+    }
+    if (c === 34) return endString()
+    if (c === 92) {
+      esc = true
+      return
+    }
+    if (c < 32) throw new Bad(pos, 'unescaped control')
+    if (c >= 0xd800 && c <= 0xdfff) throw new Bad(pos, 'invalid unicode scalar')
+    buf.push(ch)
+  }
+  const step = (ch: string) => {
+    const c = ch.codePointAt(0)!
+    switch (mode) {
+      case 'need':
+        return stepNeed(c, ch)
+      case 'str':
+        return stepStr(c, ch)
+      case 'num':
+        if (cont(st, c)) {
+          lex += ch
+          st = next(st, c)
+          return
+        }
+        if (!canEnd(st)) throw new Bad(pos, 'incomplete number')
+        put({t: 'num', lex})
+        return stepNeed(c, ch)
+      case 'lit':
+        if (want.length === 0 || want[0] !== ch) throw new Bad(pos, 'bad literal')
+        want = want.slice(1)
+        if (want.length === 0) put(lit)
+        return
     }
   }
   try {
-    const v = value(0)
-    ws()
-    if (i < n) return fail(i, 'unexpected character')
-    return done(v)
+    for (const ch of s) {
+      step(ch)
+      pos++
+    }
+    switch (mode) {
+      case 'num':
+        if (!canEnd(st)) return fail(pos, 'bad number')
+        put({t: 'num', lex})
+        break
+      case 'str':
+        return fail(pos, 'unterminated string')
+      case 'lit':
+        return fail(pos, 'unexpected end')
+    }
+    if (mode === 'need' && need === 'end' && done_ !== undefined) return done(done_)
+    return fail(pos, 'unexpected end')
   } catch (e) {
-    if (e instanceof Bad) return fail(e.pos, e.message)
-    return fail(0, String(e))
+    if (e instanceof Bad) return fail(e.pos, e.msg)
+    return fail(pos, String(e))
   }
 }
 
