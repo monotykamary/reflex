@@ -1841,13 +1841,30 @@ prof_keychain() { # prof_keychain HOMEDIR: its own default Keychain, made once, 
   HOME=$_h security unlock-keychain -p "$_pw" "$_k" || die "profile: couldn't unlock ${PH}[$PN]'s Keychain"
 }
 
+prof_claude_json() { # prof_claude_json FILE: Claude's first run counted as done, with your theme
+  # (Its login is already there; Claude's first-run screens would ask for a
+  # new one instead. Folders are still trusted one by one, as Claude asks.)
+  _cj=$1
+  perl -MJSON::PP -e '
+    my ($f, $own) = @ARGV; my $j = {};
+    if (open my $h, "<", $f) { local $/; my $t = <$h>; $j = eval { decode_json($t) } || {} }
+    exit 0 if $j->{hasCompletedOnboarding};
+    my $o = {};
+    if (open my $h, "<", $own) { local $/; my $t = <$h>; $o = eval { decode_json($t) } || {} }
+    $j->{hasCompletedOnboarding} = JSON::PP::true;
+    for my $k (qw(theme lastOnboardingVersion)) { $j->{$k} //= $o->{$k} if defined $o->{$k} }
+    open my $w, ">", "$f.new" or exit 1; chmod 0600, "$f.new";
+    print $w JSON::PP->new->pretty->canonical->encode($j); close $w; rename "$f.new", $f or exit 1;
+  ' "$_cj" "$HOME/.claude.json" 2>/dev/null || say "reflex profile: couldn't prepare $_cj (Claude may show its first-run screens)"
+}
+
 prof_make() { # prof_make: the profile's folder, made or brought up to date; sets PENV, the env it runs with
   PENV="REFLEX_HARNESS_PROFILE=${PH}[$PN]"  # (REFLEX_PROFILE is the app's own: a separate Reflex)
   [ -n "$PN" ] || return 0
   _own=$(prof_own "$PH")
   # shellcheck disable=SC2046
   case $PH in
-    claude) prof_link "$_own" "$P/claude" $(prof_shared claude); PENV="$PENV CLAUDE_CONFIG_DIR=$P/claude" ;;
+    claude) prof_link "$_own" "$P/claude" $(prof_shared claude); prof_claude_json "$P/claude/.claude.json"; PENV="$PENV CLAUDE_CONFIG_DIR=$P/claude" ;;
     codex) prof_link "$_own" "$P/codex" $(prof_shared codex); PENV="$PENV CODEX_HOME=$P/codex" ;;
     pi) prof_link "$_own" "$P/pi" $(prof_shared pi); PENV="$PENV PI_CODING_AGENT_DIR=$P/pi" ;;
     *)

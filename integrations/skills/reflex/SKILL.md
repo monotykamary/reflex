@@ -269,14 +269,15 @@ directly, so it gets the right account:
 # Same account as you (the usual choice for helpers on the same work):
 hc run --cwd ~/VCS/app --bg --name helper reflex profile run "${REFLEX_HARNESS_PROFILE:-claude}" "$(cat brief.md)"
 # An account the user named:
-hc run --cwd ~/VCS/app --bg --name review reflex profile run codex[work] "$(cat brief.md)"
+hc run --cwd ~/VCS/app --bg --name review reflex profile run 'codex[work]' "$(cat brief.md)"
 # On another machine (the profiles are there too):
-hc run --on mini --cwd ~/VCS/app --bg --name build reflex profile run claude[work] "$(cat brief.md)"
+hc run --on mini --cwd ~/VCS/app --bg --name build reflex profile run 'claude[work]' "$(cat brief.md)"
 ```
 
 `reflex profile run claude` with no brackets uses that machine's default
 profile (the user picks it in Reflex's Settings › Profiles); `claude[]` is
-always their own login. `${REFLEX_HARNESS_PROFILE:-claude}` falls back to
+always their own login. Quote a profile's name (`'claude[work]'`): zsh reads
+the brackets as a file pattern otherwise. `${REFLEX_HARNESS_PROFILE:-claude}` falls back to
 the machine's default Claude when Reflex didn't start you; use another
 harness's name there (`codex`, `agy`) when that is the one you want.
 
