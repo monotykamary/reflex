@@ -19,6 +19,25 @@ user's real home and login, untouched. A profile exists only where there is an a
   user wants agents to read freely.)
 - Reflex tags each session with its profile, so a resume starts in the same profile. A folder may pin a
   default profile.
+- `reflex profile run` labels its own herdr-core terminal `reflex.profile=NAME` (removed for your own
+  login), however the agent was started, so Reflex shows a profile chip beside it. Only when it owns
+  the terminal (a tty): a helper run inside an agent's command would otherwise relabel that agent.
+- Moves, a box's agents brought back after a restart, and stopped agents resumed all keep the
+  profile; `reflex session --profile NAME` copies between the profile's folders on both sides.
+
+### Usage
+
+`reflex-keys usage [--json]` reads each login's plan usage on this Mac, with the access token
+already there. It never refreshes for this. Last answers are kept in `~/.reflex/keys/usage.json`.
+
+| | Call | What comes back |
+|---|---|---|
+| Claude | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`) | `limits[]` {kind, percent, resets_at}; older `five_hour`, `seven_day` |
+| Codex | `GET chatgpt.com/backend-api/wham/usage` (`ChatGPT-Account-Id`) | `rate_limit.primary_window` / `secondary_window` {used_percent, limit_window_seconds, reset_at}, `plan_type` |
+| agy | `POST cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then `:fetchAvailableModels` (`User-Agent: antigravity`, else 403) | per model `quotaInfo` {remainingFraction, resetTime}; tier |
+
+The token agy keeps runs out after an hour while agy refreshes in memory: when it has, `agy models`
+runs in the profile, which refreshes and saves it (Google's tokens don't rotate).
 
 ### Per OS
 
