@@ -107,7 +107,7 @@ laws and proven with [gdp-wired](https://github.com/monotykamary/gdp-wired)
 
 ## Build and run
 
-Building also needs [Bun](https://bun.sh) 1.3 or later (`curl -fsSL https://bun.sh/install | bash`)
+Building also needs [Bun](https://bun.sh) 1.4 (`curl -fsSL https://bun.sh/install | bash`)
 and Xcode / Swift 6 with its Metal Toolchain (SwiftTerm compiles a shader:
 `xcodebuild -downloadComponent MetalToolchain`).
 
