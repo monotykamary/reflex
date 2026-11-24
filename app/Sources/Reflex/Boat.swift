@@ -207,6 +207,9 @@ enum Boat {
     /// At launch: the skill in each harness here, and the link (`reflex` on
     /// PATH always: other machines' sessions reach it).
     static func updateInstalled() {
+        // A separate Reflex (REFLEX_PROFILE, a test copy) leaves the machine's
+        // `reflex`, its skill and the login holder to the installed one.
+        guard Settings.profile == nil else { return }
         linkCommand()
         installKeys()
         // Every harness here (claude, codex, pi) has this version: a session

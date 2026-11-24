@@ -242,13 +242,13 @@ struct ProfilesPane: View {
                         Text("Add a profile").font(Type.title)
                         Text("In a terminal: sign it in, then hand it to this Mac to keep fresh and share.")
                             .font(Type.meta).foregroundStyle(.secondary)
-                        Text("reflex profile login claude[work]\nreflex keys seed claude[work]")
+                        Text("reflex profile login 'claude[work]'\nreflex keys seed 'claude[work]'")
                             .font(Type.mono).textSelection(.enabled).padding(.top, 2)
                     }
                     Spacer()
                     Button(copied ? "Copied" : "Copy") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("reflex profile login claude[work] && reflex keys seed claude[work]", forType: .string)
+                        NSPasteboard.general.setString("reflex profile login 'claude[work]' && reflex keys seed 'claude[work]'", forType: .string)
                         copied = true
                     }
                     .controlSize(.small)
@@ -345,8 +345,10 @@ private struct LoginCard: View {
                         Text(login.harness).font(.system(size: 13, weight: .semibold))
                         Text("[\(login.name)]").font(.system(size: 13, weight: .semibold)).foregroundStyle(HarnessLook.tint(login.harness))
                     }
-                    HStack(spacing: 5) {
+                    // The dot beside the first line, however many lines the status takes.
+                    HStack(alignment: .firstTextBaseline, spacing: 5) {
                         Circle().fill(tone).frame(width: 6, height: 6)
+                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 0.5 }
                         Text(line).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
                     }
                 }
@@ -425,7 +427,7 @@ private struct FlowLayout: Layout {
 
 /// A machine and, per harness it has profiles for, the one a bare agent starts in.
 private struct PlaceRow: View {
-    static let pickerWidth: CGFloat = 138
+    static let pickerWidth: CGFloat = 146
     @ObservedObject private var model = ProfilesModel.shared
     let place: ProfilesModel.Place
     let symbol: String
@@ -435,24 +437,42 @@ private struct PlaceRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 10) {
-            IconTile(symbol: symbol, tint: place.name.isEmpty ? Color(red: 0.36, green: 0.39, blue: 0.47) : Tone.remote, size: 28)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(place.title).font(Type.title)
-                HStack(spacing: 4) {
-                    Circle().fill(place.connected ? Tone.done : Color.secondary).frame(width: 5, height: 5)
-                    Text(place.name.isEmpty ? "This Mac" : place.connected ? (place.read ? "Connected" : "Reading…") : "Away: its defaults show once it's back")
-                        .font(.system(size: 10.5)).foregroundStyle(.secondary)
-                }
+        // Side by side when the pane is wide enough, else the pickers under the name;
+        // the name and its state never wrap.
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 10) {
+                header
+                Spacer(minLength: 8)
+                pickers
             }
-            Spacer(minLength: 8)
-            if place.read && harnesses.isEmpty {
-                Text("No profiles there yet").font(Type.meta).foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                header
+                HStack(spacing: 8) { pickers }
             }
-            ForEach(harnesses, id: \.self) { h in picker(h) }
         }
         .padding(.vertical, 3)
         .opacity(place.connected ? 1 : 0.55)
+    }
+
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            IconTile(symbol: symbol, tint: place.name.isEmpty ? Color(red: 0.36, green: 0.39, blue: 0.47) : Tone.remote, size: 28)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(place.title).font(Type.title).lineLimit(1).fixedSize()
+                HStack(spacing: 4) {
+                    Circle().fill(place.connected ? Tone.done : Color.secondary).frame(width: 5, height: 5)
+                    Text(place.name.isEmpty ? "This Mac" : place.connected ? (place.read ? "Connected" : "Reading…") : "Away: its defaults show once it's back")
+                        .font(.system(size: 10.5)).foregroundStyle(.secondary).lineLimit(1).fixedSize()
+                }
+            }
+        }
+    }
+
+    @ViewBuilder private var pickers: some View {
+        if place.read && harnesses.isEmpty {
+            Text("No profiles there yet").font(Type.meta).foregroundStyle(.secondary)
+        }
+        ForEach(harnesses, id: \.self) { h in picker(h) }
     }
 
     private func picker(_ h: String) -> some View {
@@ -472,8 +492,8 @@ private struct PlaceRow: View {
         } label: {
             HStack(spacing: 5) {
                 HarnessLogo(harness: h, size: 14, tile: false)
-                Text(h).font(.system(size: 11, weight: .semibold))
-                Text(current.isEmpty ? "own" : current).font(.system(size: 11, weight: current.isEmpty ? .regular : .bold))
+                Text(h).font(.system(size: 11, weight: .semibold)).lineLimit(1).fixedSize()
+                Text(current.isEmpty ? "own" : current).font(.system(size: 11, weight: current.isEmpty ? .regular : .bold)).lineLimit(1).truncationMode(.tail)
                     .foregroundStyle(current.isEmpty ? Color.secondary : HarnessLook.tint(h))
                 Spacer(minLength: 2)
                 if busy { ProgressView().controlSize(.mini) } else { Image(systemName: "chevron.up.chevron.down").font(.system(size: 7.5, weight: .bold)).foregroundStyle(.secondary) }
