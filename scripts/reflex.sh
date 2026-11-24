@@ -63,6 +63,9 @@
 #   reflex id                       this machine's Reflex id
 #   reflex skill install [--on MACHINE]
 #   reflex install                  link this script as ~/.local/bin/reflex
+#   reflex keys install             this Mac: reflex-keys (the login holder) and its service
+#   reflex keys send MACHINE        reflex-keys there, to receive logins
+#   reflex keys ARGS...             reflex-keys itself (seed SPEC, hold SPEC --on M, status)
 #   reflex profile new|login|run|exec|ls|rm ...
 #                                   another account for one harness: claude[NAME],
 #                                   codex[NAME], agy[NAME], pi[NAME], opencode,
@@ -1139,7 +1142,15 @@ creds() {
   # The harnesses' logins, and the files the template's manifest calls
   # secret (an extension's key file): never in the template, copied to each.
   extra=$(template_field manifest secrets 2>/dev/null | perl -MJSON::PP -0777 -ne 'print join "\n", @{decode_json($_)}' 2>/dev/null || true)
+  # (A login reflex-keys holds isn't copied: copies of one refresh token log
+  # each other out. The holder pushes it there instead, below.)
+  held() { [ -f "$HOME/.reflex/keys/profiles/$1.json" ]; }
+  pushed=""
   for rel in .pi/agent/auth.json .codex/auth.json .mcporter/credentials.json $(printf '%s\n' "$extra" | sed -n 's#^~/##p'); do
+    case $rel in
+      .pi/agent/auth.json) held pi && { pushed="$pushed pi"; continue; } ;;
+      .codex/auth.json) held codex && { pushed="$pushed codex"; continue; } ;;
+    esac
     if [ -f "$HOME/$rel" ]; then
       put "$m" "$HOME/$rel" "$rel"
     elif [ -d "$HOME/$rel" ]; then   # a folder: as it is, yours alone there
@@ -1187,6 +1198,12 @@ creds() {
     sed "s#$HOME/#$rh/#g" "$HOME/.mcporter/mcporter.json" > "$T/mcporter.json"
     put "$m" "$T/mcporter.json" .mcporter/mcporter.json
     copied="$copied .mcporter/mcporter.json"
+  fi
+  [ $claude = 1 ] && held claude && { claude=0; pushed="$pushed claude"; }
+  if [ -n "$pushed" ]; then
+    keys_send "$m"
+    command -v reflex-keys >/dev/null 2>&1 && reflex-keys tick --quiet >/dev/null 2>&1 || say "reflex-keys couldn't push$pushed to $m yet; its next run will"
+    copied="$copied (held:$pushed)"
   fi
   if [ $claude = 1 ]; then
     tmp="$T/claude.json"
@@ -1707,6 +1724,8 @@ skill() {
     # ($_self, not $0: run as ~/.local/bin/reflex, $0's name isn't the script's)
     put "$m" "$HERE/$(basename "$_self")" .local/bin/reflex
     rsh "$m" 'chmod 755 "$HOME/.local/bin/reflex"' >/dev/null
+    # And reflex-keys, which receives the logins the holder keeps current.
+    keys_send "$m"
     echo "installed the reflex skill and command on $m"
     return
   fi
@@ -1948,6 +1967,73 @@ profile() {
   esac
 }
 
+# reflex-keys (keys/): the credential holder. On a Mac, the app's binary,
+# linked into ~/.local/bin and run as a LaunchAgent (`reflex-keys watch`); on a
+# box, one script its Bun runs (boxes only receive, so no service there).
+KEYS_LABEL=dev.reflex.keys
+keys_bin() { # this Mac's reflex-keys: the app's, else a checkout's build
+  for _k in "$HERE/../reflex-keys" "$HERE/../build/reflex-keys"; do [ -x "$_k" ] && { (cd "$(dirname "$_k")" && printf '%s/%s' "$(pwd -P)" "$(basename "$_k")"); return 0; }; done
+  return 1
+}
+keys_js() { for _k in "$HERE/reflex-keys.js" "$HERE/../build/reflex-keys.js"; do [ -f "$_k" ] && { printf '%s' "$_k"; return 0; }; done; return 1; }
+
+keys_install() { # this Mac: the command, and the service that keeps it running
+  [ "$(uname)" = Darwin ] || die "keys install: a Mac's (a box gets it with skill install --on)"
+  _kb=$(keys_bin) || die "keys install: no reflex-keys here (scripts/build-app.sh builds it)"
+  mkdir -p "$HOME/.local/bin" "$HOME/Library/LaunchAgents" "$HOME/.reflex/keys"
+  ln -sf "$_kb" "$HOME/.local/bin/reflex-keys"
+  _pl="$HOME/Library/LaunchAgents/$KEYS_LABEL.plist"
+  cat > "$_pl.new" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>$KEYS_LABEL</string>
+  <key>ProgramArguments</key><array><string>$HOME/.local/bin/reflex-keys</string><string>watch</string><string>--quiet</string></array>
+  <key>EnvironmentVariables</key><dict><key>HOME</key><string>$HOME</string><key>PATH</key><string>$HOME/.local/bin:$HOME/.bun/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ProcessType</key><string>Background</string>
+  <key>StandardOutPath</key><string>/dev/null</string>
+  <key>StandardErrorPath</key><string>$HOME/.reflex/keys/watch.err</string>
+</dict>
+</plist>
+PLIST
+  if cmp -s "$_pl.new" "$_pl" && launchctl print "gui/$(id -u)/$KEYS_LABEL" >/dev/null 2>&1; then
+    rm -f "$_pl.new"
+    # (Same service; a new binary behind the same link starts on the next restart.)
+    launchctl kickstart -k "gui/$(id -u)/$KEYS_LABEL" >/dev/null 2>&1 || true
+  else
+    mv "$_pl.new" "$_pl"
+    launchctl bootout "gui/$(id -u)/$KEYS_LABEL" >/dev/null 2>&1 || true
+    launchctl bootstrap "gui/$(id -u)" "$_pl" || die "keys install: launchctl couldn't start $KEYS_LABEL"
+  fi
+  echo "reflex-keys: ~/.local/bin/reflex-keys, running as $KEYS_LABEL"
+}
+
+keys_send() { # keys_send MACHINE: reflex-keys there, run with its Bun (a Mac's own app's stays)
+  _js=$(keys_js) || { say "no reflex-keys.js here: $1 can't receive logins"; return 0; }
+  rsh "$1" '[ -L "$HOME/.local/bin/reflex-keys" ] && [ "$(uname)" = Darwin ]' >/dev/null 2>&1 && return 0
+  put "$1" "$_js" .local/lib/reflex/reflex-keys.js
+  rsh "$1" 'mkdir -p "$HOME/.local/bin" && cat > "$HOME/.local/bin/reflex-keys" <<"EOS"
+#!/bin/sh
+# reflex-keys (Reflex sent it): receives the logins Reflex keeps current.
+for b in bun "$HOME/.bun/bin/bun" /usr/local/bin/bun /opt/homebrew/bin/bun; do
+  command -v "$b" >/dev/null 2>&1 && exec "$b" "$HOME/.local/lib/reflex/reflex-keys.js" "$@"
+done
+echo "reflex-keys: needs Bun (curl -fsSL https://bun.sh/install | bash)" >&2; exit 127
+EOS
+chmod 755 "$HOME/.local/bin/reflex-keys"' >/dev/null || say "couldn't install reflex-keys on $1"
+}
+
+keys() {
+  case ${1:-} in
+    install) keys_install ;;
+    send) [ $# -eq 2 ] || die "keys send MACHINE"; keys_send "$2" ;;
+    *) _kb=$(command -v reflex-keys 2>/dev/null || keys_bin) || die "no reflex-keys here (reflex keys install)"; exec "$_kb" "$@" ;;
+  esac
+}
+
 install() {
   mkdir -p "$HOME/.local/bin"
   ln -sf "$HERE/$(basename "$_self")" "$HOME/.local/bin/reflex"
@@ -1990,6 +2076,7 @@ case $cmd in
   mesh) [ "${1:-}" = sync ] || die "mesh sync"; mesh_sync ;;
   install) install ;;
   profile) profile "$@" ;;
+  keys) keys "$@" ;;
   ""|-h|--help|help) awk 'NR > 1 && /^#/ { sub(/^# ?/, ""); print; next } NR > 1 { exit }' "$0" ;;
   *) die "unknown command $cmd (reflex --help)" ;;
 esac

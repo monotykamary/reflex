@@ -208,6 +208,7 @@ enum Boat {
     /// PATH always: other machines' sessions reach it).
     static func updateInstalled() {
         linkCommand()
+        installKeys()
         // Every harness here (claude, codex, pi) has this version: a session
         // here may move, or be asked to.
         guard !skillTargets.isEmpty, !skillInstalled else { return }
@@ -225,6 +226,24 @@ enum Boat {
             if (try? fm.copyItem(at: skill, to: t)) == nil { ok = false }
         }
         return linkCommand() && ok
+    }
+
+    /// reflex-keys, the login holder (keys/): this version's on PATH, and its
+    /// service (`reflex-keys watch`, a LaunchAgent) running. Once per launch, off
+    /// the main thread; a build without it (none bundled) is left alone.
+    static func installKeys() {
+        guard FileManager.default.isExecutableFile(atPath: Daemon.resources.appendingPathComponent("reflex-keys").path) else { return }
+        let script = script
+        Task.detached(priority: .utility) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = [script, "keys", "install"]
+            p.standardOutput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            p.standardInput = FileHandle.nullDevice
+            guard (try? p.run()) != nil else { return }
+            p.waitUntilExit()
+        }
     }
 
     /// ~/.local/bin/reflex, this version's.

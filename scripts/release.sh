@@ -31,6 +31,7 @@ codesign --force --options runtime $stamp --sign "$identity" "$fw/Autoupdate"
 codesign --force --options runtime $stamp --sign "$identity" "$fw/Updater.app"
 codesign --force --options runtime $stamp --sign "$identity" "$app/Contents/Frameworks/Sparkle.framework"
 codesign --force --options runtime $stamp --sign "$identity" "$app/Contents/Resources/reflexd"
+codesign --force --options runtime $stamp --entitlements scripts/bun.entitlements --sign "$identity" "$app/Contents/Resources/reflex-keys"
 codesign --force --options runtime $stamp --entitlements scripts/Reflex.entitlements --sign "$identity" "$app"
 codesign --verify --deep --strict "$app"
 

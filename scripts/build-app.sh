@@ -26,6 +26,14 @@ if [ "$mode" != --app ]; then
 fi
 [ "$mode" = --daemon ] && exit 0
 
+# reflex-keys (keys/): this Mac's own, and as one script for boxes, run with their Bun.
+if [ "$mode" != --app ] || [ ! -f build/reflex-keys ]; then
+  echo "reflex-keys: building"
+  (cd keys && bun install --frozen-lockfile >/dev/null &&
+    bun build --compile --minify --target=bun-darwin-arm64 src/cli.ts --outfile ../build/reflex-keys >/dev/null &&
+    bun build --minify --target=bun src/cli.ts --outfile ../build/reflex-keys.js >/dev/null)
+fi
+
 echo "Reflex.app: building"
 scripts/prepare-swiftterm.sh
 swift build -c release --package-path app
@@ -54,6 +62,8 @@ ditto "$(dirname "$bin")/Sparkle.framework" "$app/Contents/Frameworks/Sparkle.fr
 rm -rf "$app/Contents/Frameworks/Sparkle.framework/Versions/B/XPCServices" "$app/Contents/Frameworks/Sparkle.framework/XPCServices"
 cp "$icon" "$app/Contents/Resources/AppIcon.icns"
 cp build/reflexd "$app/Contents/Resources/reflexd"
+cp build/reflex-keys "$app/Contents/Resources/reflex-keys"
+cp build/reflex-keys.js "$app/Contents/Resources/scripts/reflex-keys.js"
 cp scripts/reflex-scan.sh scripts/reflex-fork.sh scripts/reflex-remote.sh scripts/reflex.sh "$app/Contents/Resources/scripts/"
 cp web/* "$app/Contents/Resources/web/"
 mkdir -p "$app/Contents/Resources/integrations/pi"
@@ -88,5 +98,6 @@ cat > "$app/Contents/Info.plist" <<EOF
 EOF
 codesign --force --sign - "$app/Contents/Frameworks/Sparkle.framework"
 codesign --force --sign - "$app/Contents/Resources/reflexd"
+codesign --force --sign - --entitlements scripts/bun.entitlements "$app/Contents/Resources/reflex-keys"
 codesign --force --sign - "$app"
 echo "built $app"
