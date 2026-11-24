@@ -1756,6 +1756,38 @@ prof_set_default() { # prof_set_default HARNESS NAME: NAME "" clears it
   mv "$PROFILES/defaults.new" "$PROFILES/defaults"
 }
 
+prof_session_home() { # prof_session_home HARNESS ARG...: the profile ("" your own) holding the session the args resume; fails if none named or found
+  _h=$1; shift; _id=
+  while [ $# -gt 0 ]; do
+    case $_h:$1 in
+      claude:--resume|claude:-r|claude:--session-id) _id=${2:-}; break ;;
+      claude:--resume=*) _id=${1#--resume=}; break ;;
+      codex:resume|codex:fork) _id=${2:-}; case $_id in --last|-*) _id= ;; esac; break ;;
+    esac
+    shift
+  done
+  case $_id in ""|*/*|*[!A-Za-z0-9._-]*) return 1 ;; esac
+  case $_h in
+    claude) _own="$HOME/.claude/projects"; _sub=claude/projects; _pat="*/$_id.jsonl" ;;
+    codex) _own="$HOME/.codex/sessions"; _sub=codex/sessions; _pat="*/*/*/*$_id.jsonl" ;;
+  esac
+  # Where it was used last, when it is in more than one (a session handed to a profile).
+  _best= _at=-1 _found=
+  _try() { # _try NAME FILE
+    [ -f "$2" ] || return 0
+    _m=$(stat -c %Y "$2" 2>/dev/null || stat -f %m "$2" 2>/dev/null || echo 0)
+    [ "$_m" -gt "$_at" ] && { _at=$_m; _best=$1; _found=1; }
+    return 0
+  }
+  for _f in "$_own"/$_pat; do _try "" "$_f"; done
+  for _d in "$PROFILES/$_h"/*; do
+    [ -d "$_d/$_sub" ] || continue
+    for _f in "$_d/$_sub"/$_pat; do _try "${_d##*/}" "$_f"; done
+  done
+  [ -n "$_found" ] || return 1
+  printf '%s\n' "$_best"
+}
+
 prof_parse() { # prof_parse SPEC: PH the harness, PN the name ("" for your own), P its folder
   case $1 in
     *\[*\]) PH=${1%%\[*}; PN=${1#*\[}; PN=${PN%\]} ;;
@@ -1926,7 +1958,11 @@ profile() {
     new) [ $# -eq 1 ] || die "profile new SPEC"; prof_parse "$1"; [ -n "$PN" ] || die "profile new: give it a name, ${PH}[NAME]"
       prof_make; echo "${PH}[$PN]: $P" ;;
     login) [ $# -ge 1 ] || die "profile login SPEC [PROVIDER]"; prof_parse "$1"; shift; prof_make; prof_login "$@" ;;
-    run) [ $# -ge 1 ] || die "profile run SPEC [ARG...]"; prof_parse "$1"; shift; prof_make; prof_exec "$PH" "$@" ;;
+    run) [ $# -ge 1 ] || die "profile run SPEC [ARG...]"; _spec=$1; prof_parse "$1"; shift
+      # A bare harness bringing a session back starts where that session was
+      # saved (your own login or a profile), not in this machine's default.
+      case $_spec in *\[*) ;; *) _held=$(prof_session_home "$PH" "$@") && { PN=$_held; P="$PROFILES/$PH/$PN"; } ;; esac
+      prof_make; prof_exec "$PH" "$@" ;;
     exec) [ $# -ge 2 ] || die "profile exec SPEC COMMAND..."; prof_parse "$1"; shift; prof_make; prof_exec "$@" ;;
     rm)
       [ $# -eq 2 ] && [ "$2" = --yes ] || die "profile rm SPEC --yes (its login and sessions are deleted)"
