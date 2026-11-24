@@ -331,9 +331,9 @@ export class Daemon {
 
   // Started in the core with the request as its first prompt (the agent's own
   // argument: nothing to type in, nothing to wait for).
-  async coreRun(id: number, m: string, cwd: string, kind: string, session: string, args: string[], text: string, profile: string): Promise<Res<string>> {
+  async coreRun(id: number, m: string, cwd: string, kind: string, session: string, args: string[], text: string, profile: string, pinned = false): Promise<Res<string>> {
     const name = agentName(id, Host.randomU32())
-    const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, text, profile)
+    const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, text, profile, pinned)
     if (!a.ok) return a
     // A request that went in counts as using its folder.
     await this.recordUse(!isEmpty(trim(text)), cwd)
@@ -361,9 +361,10 @@ export class Daemon {
     if (c) {
       // A resumed (or attached) session keeps its id; a fork's is new and
       // comes to light later (Claude's own session file).
-      if (mode !== 'attach') return this.coreRun(id, m, cwd, kind, mode === 'fork' ? '' : session, args, text, profile)
+      // (Pinned: it comes back in the profile it was saved in, your own included.)
+      if (mode !== 'attach') return this.coreRun(id, m, cwd, kind, mode === 'fork' ? '' : session, args, text, profile, true)
       const name = agentName(id, Host.randomU32())
-      const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, '', profile)
+      const a = await Hc.run(this.cfg.core, this.cfg.shell, name, m, Ix.pathOn(cwd), kind, session, args, '', profile, true)
       if (!a.ok) return a
       return this.resumed(isEmpty(text), this.cfg.core, m, cwd, name, a.v, text, Js.done(Js.NULL))
     }

@@ -49,6 +49,9 @@ test('a launch goes through the profile runner, labelled with its profile', () =
   expect(Js.textOf(Js.path(['labels', 'reflex.profile'], run))).toBe('tom')
   // A bare kind: the machine's default profile for it, if any; codex keeps its flag.
   expect(Hc.profiled('codex', '', Hc.argv('codex', ['resume', 'x'], ''))).toEqual(['sh', '-c', Hc.PROFILE_RUNNER, 'codex', '--no-daemon', 'resume', 'x'])
+  // A session brought back stays where it was saved: your own login, not the machine's default.
+  expect(Hc.profiled('claude', '', Hc.argv('claude', ['--resume', 'x'], ''), true)).toEqual(['sh', '-c', Hc.PROFILE_RUNNER, 'claude[]', '--resume', 'x'])
+  expect(Hc.profiled('claude', 'tom', Hc.argv('claude', ['--resume', 'x'], ''), true)).toEqual(['sh', '-c', Hc.PROFILE_RUNNER, 'claude[tom]', '--resume', 'x'])
   expect(Js.textOf(Js.path(['labels', 'reflex.profile'], json(Hc.pRun('/bin/zsh', 'n', '', '/w', 'pi', '', ['pi'], ''))))).toBe('')
   // On another machine, inside its own login shell.
   const far = Js.asList(Js.get(json(Hc.pRun('/bin/zsh', 'n', 'box', '/w', 'pi', '', Hc.profiled('pi', 'ann', ['pi']), 'ann')), 'argv')).map(Js.textOf)

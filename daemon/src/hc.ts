@@ -354,8 +354,12 @@ export const argv = (kind: string, args: string[], text: string): string[] => [.
 export const PROFILE_RUNNER =
   'if command -v reflex >/dev/null 2>&1 && reflex profile ls >/dev/null 2>&1; then exec reflex profile run "$0" "$@"; else exec "${0%%[*}" "$@"; fi'
 
-export function profiled(kind: string, profile: string, xs: string[]): string[] {
-  return ['sh', '-c', PROFILE_RUNNER, isEmpty(profile) ? kind : kind + '[' + profile + ']', ...xs.slice(1)]
+// `pinned`: a session brought back (resumed, attached, forked) stays in the
+// profile it was saved in, so one saved in your own login comes back as
+// `claude[]`, never in whatever that machine's default is now.
+export function profiled(kind: string, profile: string, xs: string[], pinned = false): string[] {
+  const spec = isEmpty(profile) ? (pinned ? kind + '[]' : kind) : kind + '[' + profile + ']'
+  return ['sh', '-c', PROFILE_RUNNER, spec, ...xs.slice(1)]
 }
 
 const labels = (kind: string, session: string, profile: string) =>
@@ -412,8 +416,9 @@ export async function run(
   args: string[],
   text: string,
   profile = '',
+  pinned = false,
 ): Promise<Res<string>> {
-  const r = await call(sock, 'terminal.run', pRun(shell, name, m, cwd, kind, session, profiled(kind, profile, argv(kind, args, text)), profile), 30000)
+  const r = await call(sock, 'terminal.run', pRun(shell, name, m, cwd, kind, session, profiled(kind, profile, argv(kind, args, text), pinned), profile), 30000)
   return r.ok ? Js.done(Js.textAt(r.v, 'address')) : r
 }
 

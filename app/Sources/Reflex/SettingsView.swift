@@ -1067,8 +1067,7 @@ private struct MachineCard: View {
                 Text(subtitle).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(1)
             }
             HStack(spacing: 6) {
-                Text(status.text).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2)
-                    .fixedSize(horizontal: false, vertical: true)
+                Text(status.text).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
                 Spacer(minLength: 0)
                 if let action {
                     Button(action.label, action: action.run).controlSize(.small).disabled(action.disabled)
@@ -1076,7 +1075,8 @@ private struct MachineCard: View {
             }
         }
         .padding(12)
-        .frame(maxWidth: .infinity, minHeight: 128, alignment: .topLeading)
+        // Every card the same size: a long status takes its two lines, never more.
+        .frame(maxWidth: .infinity, minHeight: 136, maxHeight: 136, alignment: .topLeading)
         .background(Color.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 14, style: .continuous).strokeBorder(Color.primary.opacity(0.08)))
         .help(hint)
@@ -1096,7 +1096,7 @@ private struct MachineCardsSection: View {
 
     var body: some View {
         Section {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10)], spacing: 10) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 10, alignment: .top)], alignment: .leading, spacing: 10) {
                 thisMac
                 ForEach(rows, id: \.name) { card($0) }
             }

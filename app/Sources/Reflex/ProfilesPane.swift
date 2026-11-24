@@ -173,13 +173,55 @@ enum HarnessLook {
     static func tint(_ h: String) -> Color {
         switch h {
         case "claude": return Color(red: 0.85, green: 0.47, blue: 0.34)
-        case "codex": return Color(red: 0.07, green: 0.64, blue: 0.53)
+        case "codex": return Color(red: 0.42, green: 0.45, blue: 0.98)
         case "agy": return Color(red: 0.26, green: 0.52, blue: 0.96)
         case "pi": return Color(red: 0.55, green: 0.36, blue: 0.96)
         case "opencode": return Color(red: 0.93, green: 0.62, blue: 0.16)
         case "amp": return Color(red: 0.95, green: 0.33, blue: 0.24)
         case "grok": return Color(white: 0.55)
         default: return Color(white: 0.45)
+        }
+    }
+}
+
+/// A harness's own mark (app/Resources/logos, see PROVENANCE.md), on a tile
+/// the same size for every harness. One-colour marks are drawn in the text
+/// colour; a harness with no mark gets its symbol.
+struct HarnessLogo: View {
+    let harness: String
+    var size: CGFloat = 30
+    var tile = true
+
+    nonisolated static let images: [String: NSImage] = {
+        var out: [String: NSImage] = [:]
+        // (The app's Resources/logos, or the checkout's app/Resources/logos under REFLEX_DEV_ROOT.)
+        let root = ProcessInfo.processInfo.environment["REFLEX_DEV_ROOT"].map { $0 + "/app/Resources" } ?? (Bundle.main.resourcePath ?? ".")
+        let dir = root + "/logos"
+        for h in ["claude", "codex", "agy", "amp", "grok", "opencode"] {
+            guard let im = NSImage(contentsOfFile: "\(dir)/\(h).png") else { continue }
+            im.isTemplate = ["grok", "opencode"].contains(h)
+            out[h] = im
+        }
+        return out
+    }()
+
+    var body: some View {
+        let mark = Group {
+            if let im = Self.images[harness] {
+                Image(nsImage: im).resizable().interpolation(.high).aspectRatio(contentMode: .fit)
+                    .foregroundStyle(.primary)
+            } else {
+                Image(systemName: HarnessLook.symbol(harness)).resizable().aspectRatio(contentMode: .fit)
+                    .fontWeight(.semibold).foregroundStyle(HarnessLook.tint(harness))
+            }
+        }
+        if tile {
+            mark.padding(size * 0.17)
+                .frame(width: size, height: size)
+                .background(Color.primary.opacity(0.07), in: RoundedRectangle(cornerRadius: size * 0.26, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: size * 0.26, style: .continuous).strokeBorder(Color.primary.opacity(0.1), lineWidth: 0.5))
+        } else {
+            mark.frame(width: size, height: size)
         }
     }
 }
@@ -232,7 +274,8 @@ struct ProfilesPane: View {
                 Text(model.loaded ? "No profile is kept here yet. Sign one in and hand it over (below)." : "Reading…")
                     .font(Type.meta).foregroundStyle(.secondary)
             } else {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 230), spacing: 10)], spacing: 10) {
+                LazyVGrid(columns: [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)],
+                          alignment: .leading, spacing: 10) {
                     ForEach(model.logins) { LoginCard(login: $0) }
                 }
                 .padding(.vertical, 4)
@@ -264,6 +307,7 @@ struct ProfilesPane: View {
 /// One profile's login: who keeps it, how long it lasts, where it is current.
 private struct LoginCard: View {
     let login: ProfileLogin
+    static let height: CGFloat = 112
 
     private var tone: Color {
         if login.error != nil || login.login == "missing" { return Tone.blocked }
@@ -295,7 +339,7 @@ private struct LoginCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                IconTile(symbol: HarnessLook.symbol(login.harness), tint: HarnessLook.tint(login.harness), size: 30)
+                HarnessLogo(harness: login.harness, size: 38)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 0) {
                         Text(login.harness).font(.system(size: 13, weight: .semibold))
@@ -303,23 +347,27 @@ private struct LoginCard: View {
                     }
                     HStack(spacing: 5) {
                         Circle().fill(tone).frame(width: 6, height: 6)
-                        Text(line).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2)
+                        Text(line).font(.system(size: 11)).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true)
                     }
                 }
                 Spacer(minLength: 0)
             }
             ForEach(login.warnings ?? [], id: \.self) { w in
-                Label(w, systemImage: "exclamationmark.triangle.fill").font(.system(size: 10.5)).foregroundStyle(Tone.blocked)
+                Label(w, systemImage: "exclamationmark.triangle.fill").font(.system(size: 10.5)).foregroundStyle(Tone.blocked).lineLimit(1)
             }
+            Spacer(minLength: 0)
             FlowChips(chips: chips)
         }
         .padding(11)
+        // Every card the same size, whatever it holds: two lines of status, two of machines.
+        .frame(maxWidth: .infinity, minHeight: LoginCard.height, maxHeight: LoginCard.height, alignment: .topLeading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
 
     private var chips: [Chip] {
-        var xs: [Chip] = [Chip(text: login.here == "holder" ? "This Mac" : login.holder, symbol: "key.fill", tint: HarnessLook.tint(login.harness))]
+        // (Who keeps it is in the status line: these are where it is current.)
+        var xs: [Chip] = []
         xs += login.current.map { Chip(text: $0, symbol: "checkmark", tint: Tone.done) }
         xs += login.behind.map { Chip(text: $0, symbol: "arrow.triangle.2.circlepath", tint: Tone.blocked) }
         return xs
@@ -377,6 +425,7 @@ private struct FlowLayout: Layout {
 
 /// A machine and, per harness it has profiles for, the one a bare agent starts in.
 private struct PlaceRow: View {
+    static let pickerWidth: CGFloat = 138
     @ObservedObject private var model = ProfilesModel.shared
     let place: ProfilesModel.Place
     let symbol: String
@@ -422,13 +471,15 @@ private struct PlaceRow: View {
             }
         } label: {
             HStack(spacing: 5) {
-                Image(systemName: HarnessLook.symbol(h)).font(.system(size: 9.5, weight: .bold))
+                HarnessLogo(harness: h, size: 14, tile: false)
                 Text(h).font(.system(size: 11, weight: .semibold))
                 Text(current.isEmpty ? "own" : current).font(.system(size: 11, weight: current.isEmpty ? .regular : .bold))
                     .foregroundStyle(current.isEmpty ? Color.secondary : HarnessLook.tint(h))
+                Spacer(minLength: 2)
                 if busy { ProgressView().controlSize(.mini) } else { Image(systemName: "chevron.up.chevron.down").font(.system(size: 7.5, weight: .bold)).foregroundStyle(.secondary) }
             }
             .padding(.horizontal, 9).padding(.vertical, 4)
+            .frame(width: PlaceRow.pickerWidth)
             .background(HarnessLook.tint(h).opacity(current.isEmpty ? 0.06 : 0.15), in: Capsule())
             .overlay(Capsule().strokeBorder(HarnessLook.tint(h).opacity(current.isEmpty ? 0.15 : 0.35), lineWidth: 0.5))
         }
