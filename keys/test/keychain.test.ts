@@ -20,7 +20,9 @@ import {storeFor} from '../src/stores'
 const mac = process.platform === 'darwin' && process.env.REFLEX_KEYS_KEYCHAIN_TESTS === '1'
 const realHome = process.env.HOME!
 const sec = (args: string[]) => spawnSync('/usr/bin/security', args, {encoding: 'utf8', timeout: 20_000})
-const real = () => ({def: sec(['default-keychain', '-d', 'user']).stdout, list: sec(['list-keychains', '-d', 'user']).stdout})
+// Your own Keychain setup, read with your real HOME (the tests run under a temp one).
+const secReal = (args: string[]) => spawnSync('/usr/bin/security', args, {encoding: 'utf8', timeout: 20_000, env: {...process.env, HOME: realHome}})
+const real = () => ({def: secReal(['default-keychain', '-d', 'user']).stdout, list: secReal(['list-keychains', '-d', 'user']).stdout})
 
 describe.skipIf(!mac)('Keychain stores', () => {
   let T = '', K = '', PK = '', before = {def: '', list: ''}

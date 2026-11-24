@@ -43,7 +43,8 @@ export function present(it: Item): boolean {
 function interactive(line: string, home?: string) {
   // security -i reads a line of at most about 4 KB
   if (line.length > 4000) fail('this login is too long to hand to security on stdin')
-  const r = spawnSync(SECURITY, ['-i'], {env: env(home), input: line + '\nquit\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 20_000})
+  // (It ends at the end of its input: this security has no `quit`, which fails the run.)
+  const r = spawnSync(SECURITY, ['-i'], {env: env(home), input: line + '\n', encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 20_000})
   if (r.status !== 0) fail(`security -i failed (exit ${r.status})`)
   return r
 }
