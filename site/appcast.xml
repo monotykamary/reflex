@@ -3,6 +3,16 @@
     <channel>
         <title>Reflex</title>
         <item>
+            <title>0.1.112</title>
+            <pubDate>Thu, 26 Nov 2026 00:49:49 +0700</pubDate>
+            <link>https://reflex.farm/</link>
+            <sparkle:version>433</sparkle:version>
+            <sparkle:shortVersionString>0.1.112</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.112/Reflex-0.1.112.dmg" length="93634531" type="application/octet-stream" sparkle:edSignature="hgGNYOR+o8enO3uEnaMBAlg6yb+PPvkisgOKgPtheJpEgb13ktUp4H1NdqnQNeP52l6VL1+mP6aDeXlw+VdkDQ=="/>
+        </item>
+        <item>
             <title>0.1.111</title>
             <pubDate>Wed, 25 Nov 2026 23:56:22 +0700</pubDate>
             <link>https://reflex.farm/</link>
@@ -21,16 +31,6 @@
             <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.110/Reflex-0.1.110.dmg" length="93612017" type="application/octet-stream" sparkle:edSignature="3uD2kC1A/W9+0vacAS0UMtDVbssD5a69of7dCeFhYUmPn0I8EjzSomgytK6/YDBScdXQE/3oKXmui9yizCqvBQ=="/>
-        </item>
-        <item>
-            <title>0.1.109</title>
-            <pubDate>Wed, 25 Nov 2026 20:35:18 +0700</pubDate>
-            <link>https://reflex.farm/</link>
-            <sparkle:version>423</sparkle:version>
-            <sparkle:shortVersionString>0.1.109</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/monotykamary/reflex/releases/download/v0.1.109/Reflex-0.1.109.dmg" length="93611512" type="application/octet-stream" sparkle:edSignature="ME2RdMjSjIkOo3lAcxOmFCuXRpjPmh3Dcrbv+A1aH7pOK2OFZp12GQxwgAeCpCHxx50at/L5i38mEYxCcBlFBQ=="/>
         </item>
     </channel>
 </rss>
