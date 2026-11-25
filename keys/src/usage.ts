@@ -85,11 +85,33 @@ export function codexWindows(j: any): Window[] {
 const CODEX_PLANS: Record<string, string> = {plus: 'Plus', pro: 'Pro', promax: 'Pro Max', team: 'Team', business: 'Business', enterprise: 'Enterprise', free: 'Free'}
 export const codexPlan = (j: any): string | null => (typeof j?.plan_type === 'string' ? CODEX_PLANS[j.plan_type] ?? words(j.plan_type) : null)
 
-// agy: Antigravity's own calls on cloudcode-pa.googleapis.com, loadCodeAssist (its project
-// and tier) then fetchAvailableModels, where each model has quotaInfo {remainingFraction,
-// resetTime}. One window per model family: the least left, and when that comes back.
+// agy: Antigravity's own calls, on the host agy itself uses (daily-cloudcode-pa: the
+// production host's numbers leave out what Gemini has used). loadCodeAssist gives its
+// project and tier; retrieveUserQuotaSummary the groups agy's "Models & Quota" shows, each
+// with a weekly and a 5-hour limit ({window, remainingFraction, resetTime}); and
+// fetchAvailableModels each model's quotaInfo, whose Gemini models carry the Gemini group's
+// 5-hour limit. (That group's weekly limit comes to agy from another service, AICode, that
+// isn't reachable from outside it, so it isn't shown here.)
 const FAMILY: Record<string, string> = {MODEL_PROVIDER_GOOGLE: 'Gemini', MODEL_PROVIDER_ANTHROPIC: 'Claude', MODEL_PROVIDER_OPENAI: 'GPT'}
-export function agyWindows(j: any): Window[] {
+const groupName = (s: string) => s.replace(/\s+models?$/i, '').replace(/\s+and\s+/i, ' & ')
+const windowName = (w: unknown) => (w === 'weekly' ? 'Week' : w === '5h' ? '5h' : words(String(w ?? '')))
+export function agyWindows(models: any, summary?: any): Window[] {
+  const groups: any[] = Array.isArray(summary?.groups) ? summary.groups : []
+  if (!groups.length) return agyFamilies(models)
+  const out: Window[] = []
+  // Gemini's 5-hour limit, from its models, unless the summary has a Gemini group itself.
+  if (!groups.some(g => /gemini/i.test(String(g?.displayName ?? '')))) {
+    const g = agyFamilies(models).find(w => w.label === 'Gemini')
+    if (g) out.push({...g, label: 'Gemini · 5h'})
+  }
+  for (const g of groups) for (const b of Array.isArray(g?.buckets) ? g.buckets : []) {
+    if (b?.disabled || typeof b?.remainingFraction !== 'number') continue
+    out.push({label: `${groupName(String(g.displayName ?? 'Models'))} · ${windowName(b.window)}`, percent: pct((1 - b.remainingFraction) * 100)!, resetsAt: time(b.resetTime)})
+  }
+  return out
+}
+// Without the summary: one window per model family, the least left, and when that comes back.
+function agyFamilies(j: any): Window[] {
   const fam = new Map<string, {left: number; reset: number | null}>()
   for (const m of Object.values<any>(j?.models ?? {})) {
     const q = m?.quotaInfo
@@ -152,10 +174,12 @@ async function read(p: Profile): Promise<Omit<Usage, 'profile' | 'at'>> {
       }
       // (These calls answer 403 to any client but agy's own name.)
       const h = {Authorization: `Bearer ${t.access}`, 'Content-Type': 'application/json', 'User-Agent': 'antigravity'}
-      const load = await getJson('https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist', {method: 'POST', headers: h, body: JSON.stringify({metadata: {ideType: 'ANTIGRAVITY'}})})
+      const api = (m: string, body: unknown) => getJson(`https://daily-cloudcode-pa.googleapis.com/v1internal:${m}`, {method: 'POST', headers: h, body: JSON.stringify(body)})
+      const load = await api('loadCodeAssist', {metadata: {ideType: 'ANTIGRAVITY'}})
       const proj = load?.cloudaicompanionProject, project = typeof proj === 'string' ? proj : proj?.id
-      const models = await getJson('https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels', {method: 'POST', headers: h, body: JSON.stringify(project ? {project} : {})})
-      return {plan: agyPlan(load), windows: agyWindows(models)}
+      const p0 = project ? {project} : {}
+      const [models, summary] = await Promise.all([api('fetchAvailableModels', p0), api('retrieveUserQuotaSummary', p0).catch(() => null)])
+      return {plan: agyPlan(load), windows: agyWindows(models, summary)}
     }
     default: throw new Error(`no usage for ${p.harness}`)
   }

@@ -504,7 +504,7 @@ private struct UsageBars: View {
                 ForEach(u.windows, id: \.self) { w in
                     HStack(spacing: 7) {
                         Text(w.label).font(.system(size: 10.5)).foregroundStyle(.secondary)
-                            .lineLimit(1).frame(width: 78, alignment: .leading)
+                            .lineLimit(1).frame(width: 108, alignment: .leading)
                         Bar(fraction: Double(w.percent) / 100, tint: Self.tint(w.percent, harness))
                         Text("\(w.percent)%").font(.system(size: 10.5, weight: .medium).monospacedDigit())
                             .frame(width: 32, alignment: .trailing)

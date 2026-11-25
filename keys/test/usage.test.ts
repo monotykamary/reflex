@@ -40,6 +40,16 @@ test('agy: one window per model family, the least left', () => {
     {label: 'Gemini', percent: 75, resetsAt: Date.parse('2026-11-24T22:00:00Z')},
     {label: 'Claude', percent: 0, resetsAt: Date.parse('2026-11-24T21:49:41Z')},
   ])
+  // With agy's quota summary: its groups' limits, and Gemini's 5-hour limit from its models.
+  const summary = {groups: [{displayName: 'Claude and GPT models', buckets: [
+    {bucketId: '3p-weekly', window: 'weekly', resetTime: '2026-12-02T16:33:33Z', remainingFraction: 0.9},
+    {bucketId: '3p-5h', window: '5h', resetTime: '2026-11-25T21:33:33Z', remainingFraction: 1},
+  ]}]}
+  expect(agyWindows(j, summary)).toEqual([
+    {label: 'Gemini · 5h', percent: 75, resetsAt: Date.parse('2026-11-24T22:00:00Z')},
+    {label: 'Claude & GPT · Week', percent: 10, resetsAt: Date.parse('2026-12-02T16:33:33Z')},
+    {label: 'Claude & GPT · 5h', percent: 0, resetsAt: Date.parse('2026-11-25T21:33:33Z')},
+  ])
   expect(agyPlan({currentTier: {id: 'free-tier', name: 'Antigravity'}})).toBe('Free')
   expect(agyPlan({paidTier: {id: 'g1-ultra-tier', name: 'Google AI Ultra'}, currentTier: {id: 'standard-tier'}})).toBe('Google AI Ultra')
 })
