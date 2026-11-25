@@ -49,6 +49,7 @@ struct LoginUsage: Codable, Identifiable, Hashable {
         let s = ms / 1000 - Date().timeIntervalSince1970
         if s <= 60 { return "now" }
         if s < 3600 { return "in \(Int(s / 60))m" }
+        if s < 36000 { return "in \(Int(s / 3600))h \(Int(s.truncatingRemainder(dividingBy: 3600) / 60))m" }
         if s < 86400 { return "in \(Int(s / 3600))h" }
         let d = Date(timeIntervalSince1970: ms / 1000)
         return s < 86400 * 6 ? d.formatted(.dateTime.weekday(.abbreviated).hour()) : d.formatted(.dateTime.month(.abbreviated).day())
@@ -489,6 +490,10 @@ private struct UsageBars: View {
                         Bar(fraction: Double(w.percent) / 100, tint: Self.tint(w.percent, harness))
                         Text("\(w.percent)%").font(.system(size: 10.5, weight: .medium).monospacedDigit())
                             .frame(width: 32, alignment: .trailing)
+                        // When it comes back (nothing to come back while none is used).
+                        Text(w.percent > 0 ? w.resetsAt.map(LoginUsage.until) ?? "" : "")
+                            .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
+                            .lineLimit(1).frame(width: 66, alignment: .trailing)
                     }
                     .frame(height: Self.row)
                     .help(w.resetsAt.map { "\(w.label): \(w.percent)% used, resets \(LoginUsage.until($0))" } ?? "\(w.label): \(w.percent)% used")
