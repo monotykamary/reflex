@@ -99,6 +99,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         view.selectedTextBackgroundColor = NSColor(hex: t.selection)
         view.font = font
         view.needsDisplay = true
+        // Tell herdr-core too: it answers the program's color queries (OSC 11) with these
+        // and, for one that asked to hear of it (mode 2031, as Claude Code's auto theme
+        // does), says the scheme changed, so the program redraws for light or dark.
+        stream?.facts(display(t))
     }
 
     // MARK: herdr-core
@@ -130,9 +134,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
 
     /// What this view looks like (the core answers programs' display
     /// queries with it): its colors, and its cell size in device pixels.
-    func display() -> [String: Any] {
-        var d: [String: Any] = ["fg": Themes.shared.current.foreground, "bg": Themes.shared.current.background,
-                                "cursor": Themes.shared.current.cursor]
+    /// (`theme`: the one being applied; `$current` publishes before `current` changes.)
+    func display(_ theme: TermTheme? = nil) -> [String: Any] {
+        let theme = theme ?? Themes.shared.current
+        var d: [String: Any] = ["fg": theme.foreground, "bg": theme.background, "cursor": theme.cursor]
         let t = view.getTerminal()
         let scale = view.window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
         if t.cols > 0, t.rows > 0, view.bounds.width > 0 {
