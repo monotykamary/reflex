@@ -1,5 +1,5 @@
 import {expect, test} from 'bun:test'
-import {agyPlan, agyWindows, claudePlan, claudeWindows, codexPlan, codexWindows} from '../src/usage'
+import {agyPlan, agyReportGroups, agyWindows, claudePlan, claudeWindows, codexPlan, codexWindows} from '../src/usage'
 
 test('Claude: limits, with the older fields only where limits leave a window out', () => {
   const j = {
@@ -50,6 +50,14 @@ test('agy: one window per model family, the least left', () => {
     {label: 'Claude & GPT · Week', percent: 10, resetsAt: Date.parse('2026-12-02T16:33:33Z')},
     {label: 'Claude & GPT · 5h', percent: 0, resetsAt: Date.parse('2026-11-25T21:33:33Z')},
   ])
+  // With agy's own report: Gemini's week too, its 5 hours live from the models.
+  const report = agyReportGroups({status: 'SUCCESS', command: {name: 'usage', data: {groups: [
+    {name: 'Gemini Models', buckets: [{id: 'gemini-weekly', window: 'weekly', remaining_fraction: 0.95, reset_time: '2026-12-01T02:05:21Z'}, {id: 'gemini-5h', window: '5h', remaining_fraction: 0.5, reset_time: '2026-11-25T19:24:26Z'}]},
+  ]}}})
+  expect(agyWindows(j, {groups: [...report, ...summary.groups]}).map(w => [w.label, w.percent])).toEqual([
+    ['Gemini · Week', 5], ['Gemini · 5h', 75], ['Claude & GPT · Week', 10], ['Claude & GPT · 5h', 0],
+  ])
+  expect(agyReportGroups({status: 'FAILED'})).toEqual([])
   expect(agyPlan({currentTier: {id: 'free-tier', name: 'Antigravity'}})).toBe('Free')
   expect(agyPlan({paidTier: {id: 'g1-ultra-tier', name: 'Google AI Ultra'}, currentTier: {id: 'standard-tier'}})).toBe('Google AI Ultra')
 })

@@ -8,8 +8,10 @@
 //
 // The last answers are kept in ~/.reflex/keys/usage.json: a login that fails now keeps its
 // last numbers, with when they were read.
+import {mkdirSync, mkdtempSync, rmSync, writeFileSync} from 'node:fs'
+import {tmpdir} from 'node:os'
 import {join} from 'node:path'
-import {parse, type Profile} from './profile'
+import {harnessPath, parse, type Profile} from './profile'
 import {keysDir, known} from './state'
 import {storeFor} from './stores'
 import {run} from './stores/store'
@@ -90,8 +92,9 @@ export const codexPlan = (j: any): string | null => (typeof j?.plan_type === 'st
 // project and tier; retrieveUserQuotaSummary the groups agy's "Models & Quota" shows, each
 // with a weekly and a 5-hour limit ({window, remainingFraction, resetTime}); and
 // fetchAvailableModels each model's quotaInfo, whose Gemini models carry the Gemini group's
-// 5-hour limit. (That group's weekly limit comes to agy from another service, AICode, that
-// isn't reachable from outside it, so it isn't shown here.)
+// 5-hour limit. The Gemini group itself (its weekly limit too) comes to agy from AICode, not
+// reachable from outside it; agy's own usage report (`agy -p /usage --output-format json`,
+// no prompt, no tokens) has every group, and is read at most every 15 minutes (agyReport).
 const FAMILY: Record<string, string> = {MODEL_PROVIDER_GOOGLE: 'Gemini', MODEL_PROVIDER_ANTHROPIC: 'Claude', MODEL_PROVIDER_OPENAI: 'GPT'}
 const groupName = (s: string) => s.replace(/\s+models?$/i, '').replace(/\s+and\s+/i, ' & ')
 const windowName = (w: unknown) => (w === 'weekly' ? 'Week' : w === '5h' ? '5h' : words(String(w ?? '')))
@@ -99,16 +102,58 @@ export function agyWindows(models: any, summary?: any): Window[] {
   const groups: any[] = Array.isArray(summary?.groups) ? summary.groups : []
   if (!groups.length) return agyFamilies(models)
   const out: Window[] = []
-  // Gemini's 5-hour limit, from its models, unless the summary has a Gemini group itself.
-  if (!groups.some(g => /gemini/i.test(String(g?.displayName ?? '')))) {
-    const g = agyFamilies(models).find(w => w.label === 'Gemini')
-    if (g) out.push({...g, label: 'Gemini · 5h'})
-  }
+  // Gemini's 5-hour limit is live in its models: it leads, and stands in for a report's older one.
+  const live = agyFamilies(models).find(w => w.label === 'Gemini')
+  if (live) out.push({...live, label: 'Gemini · 5h'})
   for (const g of groups) for (const b of Array.isArray(g?.buckets) ? g.buckets : []) {
     if (b?.disabled || typeof b?.remainingFraction !== 'number') continue
-    out.push({label: `${groupName(String(g.displayName ?? 'Models'))} · ${windowName(b.window)}`, percent: pct((1 - b.remainingFraction) * 100)!, resetsAt: time(b.resetTime)})
+    const label = `${groupName(String(g.displayName ?? 'Models'))} · ${windowName(b.window)}`
+    const w = {label, percent: pct((1 - b.remainingFraction) * 100)!, resetsAt: time(b.resetTime)}
+    const i = out.findIndex(x => x.label === label)
+    if (i < 0) out.push(w)
   }
+  // The Gemini group in agy's order: its week before its 5 hours.
+  const gi = out.findIndex(w => w.label === 'Gemini · Week'), fi = out.findIndex(w => w.label === 'Gemini · 5h')
+  if (gi > fi && fi >= 0) out.splice(fi, 0, out.splice(gi, 1)[0])
   return out
+}
+
+// agy's own usage report's groups, as retrieveUserQuotaSummary names them.
+export function agyReportGroups(j: any): any[] {
+  const groups = j?.status === 'SUCCESS' ? j?.command?.data?.groups : null
+  if (!Array.isArray(groups)) return []
+  return groups.map((g: any) => ({
+    displayName: g?.name,
+    buckets: (Array.isArray(g?.buckets) ? g.buckets : []).map((b: any) => ({window: b?.window, remainingFraction: b?.remaining_fraction, resetTime: b?.reset_time, disabled: b?.disabled})),
+  }))
+}
+
+// `agy -p /usage --output-format json` in the profile, at most every 15 minutes (it starts
+// agy, ~3 s): in a folder of its own, never updating agy, and never opening a browser to
+// sign in (a login that needs one fails here instead). Nil when it can't be read.
+const REPORT_EVERY = 15 * 60_000
+async function agyReport(p: Profile): Promise<any[] | null> {
+  const file = join(keysDir(), `agy-report-${p.key.replace(/[^a-zA-Z0-9._-]/g, '_')}.json`)
+  const last = readJson<{at: number; groups: any[]}>(file)
+  if (last && now() - last.at < REPORT_EVERY) return last.groups
+  const dir = mkdtempSync(join(tmpdir(), 'reflex-agy-usage-'))
+  try {
+    const bin = join(dir, 'bin')
+    mkdirSync(bin)
+    for (const n of ['open', 'xdg-open']) writeFileSync(join(bin, n), '#!/bin/sh\nexit 1\n', {mode: 0o755})
+    const env = {...process.env, ...p.env, PATH: `${bin}:${harnessPath()}`, BROWSER: join(bin, 'open'), AGY_CLI_DISABLE_AUTO_UPDATE: 'true'}
+    const proc = Bun.spawn(['agy', '-p', '/usage', '--output-format', 'json'], {cwd: dir, env: env as any, stdin: 'ignore', stdout: 'pipe', stderr: 'ignore', timeout: 60_000, killSignal: 'SIGTERM'})
+    const out = (await new Response(proc.stdout).text()).slice(0, 1 << 20)
+    await proc.exited
+    const groups = agyReportGroups(JSON.parse(out))
+    if (!groups.length) return last?.groups ?? null
+    try { writeJson(file, {at: now(), groups}) } catch {}
+    return groups
+  } catch {
+    return last?.groups ?? null
+  } finally {
+    rmSync(dir, {recursive: true, force: true})
+  }
 }
 // Without the summary: one window per model family, the least left, and when that comes back.
 function agyFamilies(j: any): Window[] {
@@ -178,8 +223,12 @@ async function read(p: Profile): Promise<Omit<Usage, 'profile' | 'at'>> {
       const load = await api('loadCodeAssist', {metadata: {ideType: 'ANTIGRAVITY'}})
       const proj = load?.cloudaicompanionProject, project = typeof proj === 'string' ? proj : proj?.id
       const p0 = project ? {project} : {}
-      const [models, summary] = await Promise.all([api('fetchAvailableModels', p0), api('retrieveUserQuotaSummary', p0).catch(() => null)])
-      return {plan: agyPlan(load), windows: agyWindows(models, summary)}
+      const [models, summary, report] = await Promise.all([api('fetchAvailableModels', p0), api('retrieveUserQuotaSummary', p0).catch(() => null), agyReport(p)])
+      // The live summary's groups, then the report's others (Gemini, with its week).
+      const live: any[] = Array.isArray(summary?.groups) ? summary.groups : []
+      const name = (g: any) => groupName(String(g?.displayName ?? '')).toLowerCase()
+      const groups = [...(report ?? []).filter(g => !live.some(l => name(l) === name(g))), ...live]
+      return {plan: agyPlan(load), windows: agyWindows(models, {groups})}
     }
     default: throw new Error(`no usage for ${p.harness}`)
   }

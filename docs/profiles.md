@@ -34,7 +34,7 @@ already there. It never refreshes for this. Last answers are kept in `~/.reflex/
 |---|---|---|
 | Claude | `GET api.anthropic.com/api/oauth/usage` (`anthropic-beta: oauth-2025-04-20`) | `limits[]` {kind, percent, resets_at}; older `five_hour`, `seven_day` |
 | Codex | `GET chatgpt.com/backend-api/wham/usage` (`ChatGPT-Account-Id`) | `rate_limit.primary_window` / `secondary_window` {used_percent, limit_window_seconds, reset_at}, `plan_type` |
-| agy | `POST daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then `:retrieveUserQuotaSummary` and `:fetchAvailableModels` (`User-Agent: antigravity`, else 403; agy's own host: `cloudcode-pa` leaves out Gemini's use) | quota groups with weekly and 5-hour buckets {window, remainingFraction, resetTime}; per model `quotaInfo`, whose Gemini models carry Gemini's 5-hour limit (its weekly one comes to agy from AICode, not reachable outside agy); tier |
+| agy | `POST daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist`, then `:retrieveUserQuotaSummary` and `:fetchAvailableModels` (`User-Agent: antigravity`, else 403; agy's own host: `cloudcode-pa` leaves out Gemini's use) | quota groups with weekly and 5-hour buckets {window, remainingFraction, resetTime}; per model `quotaInfo`, whose Gemini models carry Gemini's 5-hour limit; the Gemini group (and its week), which agy gets from AICode, from agy's own report `agy -p /usage --output-format json` (no prompt, no tokens; at most every 15 min, `AGY_CLI_DISABLE_AUTO_UPDATE=true`, no browser); tier |
 
 The token agy keeps runs out after an hour while agy refreshes in memory: when it has, `agy models`
 runs in the profile, which refreshes and saves it (Google's tokens don't rotate).
