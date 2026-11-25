@@ -55,7 +55,53 @@ struct LoginUsage: Codable, Identifiable, Hashable {
         if times.count == windows.count, let t = times.first, times.allSatisfy({ abs($0 - t) < 60_000 }) {
             return "resets " + Self.until(t)
         }
-        return used.map { "\($0.label) resets \(Self.until($0.resetsAt!))" }.joined(separator: " · ")
+        // Else by limit, "resets: 5h in 2h 37m · week 2 Dec", naming the group only where two
+        // groups' same limit comes back at different times (each row's tooltip has them all).
+        let spans = rows.flatMap { r in
+            [(r.short, "5h"), (r.week, "week"), (r.other, r.name)].compactMap { w, span in
+                w.flatMap { $0.percent > 0 ? $0.resetsAt.map { (span: span, group: r.name, at: $0) } : nil }
+            }
+        }
+        var parts: [String] = []
+        for x in spans {
+            let same = spans.filter { $0.span == x.span }
+            let clash = same.contains { abs($0.at - x.at) >= 60_000 }
+            let text = (clash ? "\(x.group) \(x.span)" : x.span) + " " + Self.until(x.at)
+            if !parts.contains(text) { parts.append(text) }
+        }
+        return "resets: " + parts.joined(separator: " · ")
+    }
+
+    /// A group's limits on one row: its week and its 5 hours (either may be missing), or a
+    /// window that is neither on a row of its own. "Week" and "5 hours" are the plan's
+    /// whole ("All models"); "Gemini · 5h", "Claude & GPT · Week" and Claude's "Week · Fable" a group's.
+    struct Row: Hashable {
+        let name: String
+        var week: Window?
+        var short: Window?
+        var other: Window?
+        var windows: [Window] { [week, short, other].compactMap { $0 } }
+        var paired: Bool { week != nil && short != nil }
+    }
+
+    var rows: [Row] {
+        var out: [Row] = []
+        func span(_ s: String) -> Bool? { s == "Week" ? true : (s == "5h" || s == "5 hours") ? false : nil }
+        func add(_ name: String, _ w: Window, week: Bool) {
+            if let i = out.firstIndex(where: { $0.name == name && $0.other == nil && (week ? $0.week : $0.short) == nil }) {
+                if week { out[i].week = w } else { out[i].short = w }
+            } else {
+                out.append(Row(name: name, week: week ? w : nil, short: week ? nil : w))
+            }
+        }
+        for w in windows {
+            let parts = w.label.components(separatedBy: " · ")
+            if parts.count == 1, let wk = span(parts[0]) { add("All models", w, week: wk) }
+            else if parts.count == 2, let wk = span(parts[1]) { add(parts[0], w, week: wk) }
+            else if parts.count == 2, let wk = span(parts[0]) { add(parts[1], w, week: wk) }
+            else { out.append(Row(name: w.label, other: w)) }
+        }
+        return out
     }
 
     static func until(_ ms: Double) -> String {
@@ -376,7 +422,7 @@ struct ProfilesPane: View {
                     .font(Type.meta).foregroundStyle(.secondary)
             } else {
                 // Every card as tall as the one with the most usage lines.
-                let rows = model.usage.values.map { $0.windows.count + ($0.resets == nil ? 0 : 1) }.max() ?? 0
+                let rows = model.usage.values.map { $0.rows.count + ($0.resets == nil ? 0 : 1) }.max() ?? 0
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 10) {
                     ForEach(model.logins) { LoginCard(login: $0, usage: model.usage[$0.profile], rows: rows) }
@@ -386,7 +432,7 @@ struct ProfilesPane: View {
         } header: {
             Text("Accounts")
         } footer: {
-            Text("A login's refresh token works once, so one Mac (its keeper) refreshes it early and pushes it to every other machine, which never holds a usable one. Claude's own daemon refreshes Claude's. Usage is each plan's, as Claude, ChatGPT and Antigravity report it, read every few minutes.")
+            Text("A login's refresh token works once, so one Mac (its keeper) refreshes it early and pushes it to every other machine, which never holds a usable one. Claude's own daemon refreshes Claude's. Usage is each plan's, as Claude, ChatGPT and Antigravity report it, read every few minutes: where a plan has both, a bar is its week and the bright line through it its 5 hours.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
     }
@@ -490,7 +536,8 @@ private struct LoginCard: View {
     }
 }
 
-/// A plan's windows: how much is used, and when it comes back.
+/// A plan's limits, a row a group: its week as a bar, its 5 hours as the bright line
+/// through it, and when what is used comes back.
 private struct UsageBars: View {
     let usage: LoginUsage?
     let harness: String
@@ -500,17 +547,22 @@ private struct UsageBars: View {
 
     var body: some View {
         if let u = usage, !u.windows.isEmpty {
+            let rows = u.rows, paired = rows.contains(where: \.paired)
             VStack(alignment: .leading, spacing: 0) {
-                ForEach(u.windows, id: \.self) { w in
+                ForEach(rows, id: \.self) { r in
                     HStack(spacing: 7) {
-                        Text(w.label).font(.system(size: 10.5)).foregroundStyle(.secondary)
-                            .lineLimit(1).frame(width: 108, alignment: .leading)
-                        Bar(fraction: Double(w.percent) / 100, tint: Self.tint(w.percent, harness))
-                        Text("\(w.percent)%").font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                            .frame(width: 32, alignment: .trailing)
+                        Text(r.name).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                            .lineLimit(1).frame(width: 86, alignment: .leading)
+                        Stack(week: (r.week ?? r.other).map { Double($0.percent) / 100 },
+                              short: r.short.map { Double($0.percent) / 100 },
+                              paired: paired, tint: Self.tint(r.windows.map(\.percent).max() ?? 0, harness))
+                        Text(Self.numbers(r, paired: paired)).font(.system(size: 10.5, weight: .medium).monospacedDigit())
+                            .lineLimit(1).frame(width: paired ? 66 : 32, alignment: .trailing)
                     }
                     .frame(height: Self.row)
-                    .help(w.resetsAt.map { "\(w.label): \(w.percent)% used, resets \(LoginUsage.until($0))" } ?? "\(w.label): \(w.percent)% used")
+                    .help(r.windows.map { w in
+                        "\(w.label): \(w.percent)% used" + (w.resetsAt.map { ", resets \(LoginUsage.until($0))" } ?? "")
+                    }.joined(separator: "\n"))
                 }
                 if let r = u.resets {
                     Text(r).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
@@ -522,19 +574,33 @@ private struct UsageBars: View {
         }
     }
 
+    /// "31%" for one limit; "31% · 12%", week then 5 hours, where a card pairs them
+    /// ("– · 15%" for a group whose week isn't known).
+    static func numbers(_ r: LoginUsage.Row, paired: Bool) -> String {
+        guard paired, r.other == nil, r.short != nil else { return "\((r.week ?? r.short ?? r.other)?.percent ?? 0)%" }
+        return "\(r.week.map { "\($0.percent)%" } ?? "–") · \(r.short!.percent)%"
+    }
+
     static func tint(_ p: Int, _ harness: String) -> Color { p >= 90 ? Tone.blocked : p >= 75 ? .orange : HarnessLook.tint(harness) }
 
-    private struct Bar: View {
-        let fraction: Double
+    /// The week fills the track, pale when a 5-hour line runs through it; the 5 hours is
+    /// that thin bright line. Either alone is drawn as it is.
+    private struct Stack: View {
+        let week: Double?
+        let short: Double?
+        /// On a card that pairs them, a 5 hours alone is still the thin line.
+        var paired = false
         let tint: Color
         var body: some View {
             GeometryReader { g in
+                let w = { (f: Double) in max(f > 0 ? 4 : 0, g.size.width * min(1, f)) }
                 ZStack(alignment: .leading) {
                     Capsule().fill(Color.primary.opacity(0.08))
-                    Capsule().fill(tint).frame(width: max(fraction > 0 ? 4 : 0, g.size.width * min(1, fraction)))
+                    if let week { Capsule().fill(short == nil ? tint : tint.opacity(0.38)).frame(width: w(week)) }
+                    if let short { Capsule().fill(tint).frame(width: w(short), height: week == nil && !paired ? 7 : 3) }
                 }
             }
-            .frame(height: 5)
+            .frame(height: 7)
         }
     }
 }
