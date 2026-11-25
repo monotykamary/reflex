@@ -469,9 +469,8 @@ private struct LoginCard: View {
         }
         .padding(11)
         // Every card the same size, whatever it holds: two lines of status, the
-        // usage lines of the card with the most, two of machines.
-        .frame(maxWidth: .infinity, minHeight: LoginCard.height + UsageBars.height(rows),
-               maxHeight: LoginCard.height + UsageBars.height(rows), alignment: .topLeading)
+        // usage lines of the card with the most, two of machines (taller only if they need more).
+        .frame(maxWidth: .infinity, minHeight: LoginCard.height + UsageBars.height(rows), alignment: .topLeading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(.separator.opacity(0.6), lineWidth: 0.5))
     }
@@ -480,7 +479,13 @@ private struct LoginCard: View {
         // (Who keeps it is in the status line: these are where it is current.)
         var xs: [Chip] = []
         xs += login.current.map { Chip(text: $0, symbol: "checkmark", tint: Tone.done) }
-        xs += login.behind.map { Chip(text: $0, symbol: "arrow.triangle.2.circlepath", tint: Tone.blocked) }
+        // "anh-1 (gen 18)": the machine on the chip, which copy it has in its tooltip, so a
+        // refresh still on its way to every machine keeps to one line.
+        xs += login.behind.map { b in
+            let name = b.range(of: " (").map { String(b[..<$0.lowerBound]) } ?? b
+            return Chip(text: name, symbol: "arrow.triangle.2.circlepath", tint: Tone.blocked,
+                        help: "\(name) has an older copy\(name == b ? "" : " " + b.dropFirst(name.count + 1)); the newest is on its way")
+        }
         return xs
     }
 }
@@ -538,6 +543,7 @@ private struct Chip: Hashable {
     let text: String
     let symbol: String
     let tint: Color
+    var help = ""
 }
 
 /// Small capsules that wrap onto more lines.
@@ -553,6 +559,7 @@ private struct FlowChips: View {
                 .foregroundStyle(c.tint)
                 .padding(.horizontal, 7).padding(.vertical, 2.5)
                 .background(c.tint.opacity(0.13), in: Capsule())
+                .help(c.help)
             }
         }
     }
