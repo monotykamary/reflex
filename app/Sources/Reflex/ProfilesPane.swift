@@ -45,6 +45,19 @@ struct LoginUsage: Codable, Identifiable, Hashable {
         return lines.joined(separator: "\n")
     }
 
+    /// When the used windows come back, said once: "resets in 6h 28m" when every window
+    /// resets together, else "Week resets 2 Dec" for each one used. Nil when none is used
+    /// (an unused window's time only says when it would start counting).
+    var resets: String? {
+        let used = windows.filter { $0.percent > 0 && $0.resetsAt != nil }
+        guard !used.isEmpty else { return nil }
+        let times = windows.compactMap(\.resetsAt)
+        if times.count == windows.count, let t = times.first, times.allSatisfy({ abs($0 - t) < 60_000 }) {
+            return "resets " + Self.until(t)
+        }
+        return used.map { "\($0.label) resets \(Self.until($0.resetsAt!))" }.joined(separator: " · ")
+    }
+
     static func until(_ ms: Double) -> String {
         let s = ms / 1000 - Date().timeIntervalSince1970
         if s <= 60 { return "now" }
@@ -52,7 +65,7 @@ struct LoginUsage: Codable, Identifiable, Hashable {
         if s < 36000 { return "in \(Int(s / 3600))h \(Int(s.truncatingRemainder(dividingBy: 3600) / 60))m" }
         if s < 86400 { return "in \(Int(s / 3600))h" }
         let d = Date(timeIntervalSince1970: ms / 1000)
-        return s < 86400 * 6 ? d.formatted(.dateTime.weekday(.abbreviated).hour()) : d.formatted(.dateTime.month(.abbreviated).day())
+        return s < 86400 * 6 ? d.formatted(.dateTime.weekday(.abbreviated).hour().minute()) : d.formatted(.dateTime.month(.abbreviated).day())
     }
 
     static func ago(_ ms: Double) -> String {
@@ -363,7 +376,7 @@ struct ProfilesPane: View {
                     .font(Type.meta).foregroundStyle(.secondary)
             } else {
                 // Every card as tall as the one with the most usage lines.
-                let rows = model.usage.values.map(\.windows.count).max() ?? 0
+                let rows = model.usage.values.map { $0.windows.count + ($0.resets == nil ? 0 : 1) }.max() ?? 0
                 LazyVGrid(columns: [GridItem(.flexible(), spacing: 10, alignment: .top), GridItem(.flexible(), spacing: 10, alignment: .top)],
                           alignment: .leading, spacing: 10) {
                     ForEach(model.logins) { LoginCard(login: $0, usage: model.usage[$0.profile], rows: rows) }
@@ -490,13 +503,13 @@ private struct UsageBars: View {
                         Bar(fraction: Double(w.percent) / 100, tint: Self.tint(w.percent, harness))
                         Text("\(w.percent)%").font(.system(size: 10.5, weight: .medium).monospacedDigit())
                             .frame(width: 32, alignment: .trailing)
-                        // When it comes back (nothing to come back while none is used).
-                        Text(w.percent > 0 ? w.resetsAt.map(LoginUsage.until) ?? "" : "")
-                            .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
-                            .lineLimit(1).frame(width: 66, alignment: .trailing)
                     }
                     .frame(height: Self.row)
                     .help(w.resetsAt.map { "\(w.label): \(w.percent)% used, resets \(LoginUsage.until($0))" } ?? "\(w.label): \(w.percent)% used")
+                }
+                if let r = u.resets {
+                    Text(r).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
+                        .lineLimit(1).truncationMode(.middle).frame(height: Self.row)
                 }
             }
             .opacity(u.error == nil ? 1 : 0.55)
