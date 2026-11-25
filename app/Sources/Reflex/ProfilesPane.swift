@@ -432,7 +432,7 @@ struct ProfilesPane: View {
         } header: {
             Text("Accounts")
         } footer: {
-            Text("A login's refresh token works once, so one Mac (its keeper) refreshes it early and pushes it to every other machine, which never holds a usable one. Claude's own daemon refreshes Claude's. Usage is each plan's, as Claude, ChatGPT and Antigravity report it, read every few minutes: where a plan has both, a bar is its week and the bright line through it its 5 hours.")
+            Text("A login's refresh token works once, so one Mac (its keeper) refreshes it early and pushes it to every other machine, which never holds a usable one. Claude's own daemon refreshes Claude's. Usage is each plan's, as Claude, ChatGPT and Antigravity report it, read every few minutes: where a plan has both, a bar is its week and the bright line through it its 5 hours. Hover a bar for its numbers.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
     }
@@ -556,13 +556,10 @@ private struct UsageBars: View {
                         Stack(week: (r.week ?? r.other).map { Double($0.percent) / 100 },
                               short: r.short.map { Double($0.percent) / 100 },
                               paired: paired, tint: Self.tint(r.windows.map(\.percent).max() ?? 0, harness))
-                        Text(Self.numbers(r, paired: paired)).font(.system(size: 10.5, weight: .medium).monospacedDigit())
-                            .lineLimit(1).frame(width: paired ? 66 : 32, alignment: .trailing)
                     }
                     .frame(height: Self.row)
-                    .help(r.windows.map { w in
-                        "\(w.label): \(w.percent)% used" + (w.resetsAt.map { ", resets \(LoginUsage.until($0))" } ?? "")
-                    }.joined(separator: "\n"))
+                    .contentShape(Rectangle())
+                    .modifier(HoverCard(row: r, harness: harness, tint: Self.tint))
                 }
                 if let r = u.resets {
                     Text(r).font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.tertiary)
@@ -574,14 +571,65 @@ private struct UsageBars: View {
         }
     }
 
-    /// "31%" for one limit; "31% · 12%", week then 5 hours, where a card pairs them
-    /// ("– · 15%" for a group whose week isn't known).
-    static func numbers(_ r: LoginUsage.Row, paired: Bool) -> String {
-        guard paired, r.other == nil, r.short != nil else { return "\((r.week ?? r.short ?? r.other)?.percent ?? 0)%" }
-        return "\(r.week.map { "\($0.percent)%" } ?? "–") · \(r.short!.percent)%"
-    }
-
     static func tint(_ p: Int, _ harness: String) -> Color { p >= 90 ? Tone.blocked : p >= 75 ? .orange : HarnessLook.tint(harness) }
+
+    /// A row taken apart on hover: each of its limits on a bar of its own, how much is
+    /// used, and when it comes back (in a while, and the day and time). Shown a moment
+    /// after the pointer settles, so passing over the rows doesn't flash them.
+    private struct HoverCard: ViewModifier {
+        let row: LoginUsage.Row
+        let harness: String
+        let tint: (Int, String) -> Color
+        @State private var shown = false
+        @State private var pending: DispatchWorkItem?
+
+        func body(content: Content) -> some View {
+            content
+                .onHover { inside in
+                    pending?.cancel()
+                    if inside {
+                        let w = DispatchWorkItem { shown = true }
+                        pending = w
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: w)
+                    } else {
+                        shown = false
+                    }
+                }
+                .popover(isPresented: $shown, arrowEdge: .bottom) { detail }
+        }
+
+        private var limits: [(name: String, w: LoginUsage.Window)] {
+            [(row.week, "Week"), (row.short, "5 hours"), (row.other, row.name)].compactMap { w, n in w.map { (n, $0) } }
+        }
+
+        private var detail: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text(row.name).font(.system(size: 12, weight: .semibold))
+                ForEach(limits, id: \.w) { l in
+                    VStack(alignment: .leading, spacing: 3) {
+                        HStack {
+                            Text(l.name).font(.system(size: 11))
+                            Spacer()
+                            Text("\(l.w.percent)% used").font(.system(size: 11, weight: .medium).monospacedDigit())
+                        }
+                        Stack(week: Double(l.w.percent) / 100, short: nil, tint: tint(l.w.percent, harness))
+                        Text(l.w.resetsAt.map { at in
+                            l.w.percent > 0
+                                ? "resets \(LoginUsage.until(at)) · \(Date(timeIntervalSince1970: at / 1000).formatted(.dateTime.weekday(.abbreviated).month(.abbreviated).day().hour().minute()))"
+                                : "nothing used yet"
+                        } ?? "no reset time reported")
+                        .font(.system(size: 10.5).monospacedDigit()).foregroundStyle(.secondary)
+                    }
+                }
+                if harness == "agy", row.week == nil, row.short != nil {
+                    Text("Its weekly limit isn't readable outside agy; agy's own Models & Quota shows it.")
+                        .font(.system(size: 10.5)).foregroundStyle(.tertiary).fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(12)
+            .frame(width: 250, alignment: .leading)
+        }
+    }
 
     /// The week fills the track, pale when a 5-hour line runs through it; the 5 hours is
     /// that thin bright line. Either alone is drawn as it is.
