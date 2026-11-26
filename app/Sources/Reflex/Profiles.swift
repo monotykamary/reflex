@@ -41,15 +41,15 @@ enum Profiles {
         return out
     }
 
-    /// What new sessions can start with: each harness's profiles where it has
-    /// any (profiles only: a bare "agy" is not offered beside "agy[tom]"),
-    /// the bare harness where it has none.
-    static func choices() -> [String] {
-        let profiles = local()
-        return Onboarding.harnesses.flatMap { h -> [String] in
-            let mine = profiles.filter { split($0).kind == h }
-            return mine.isEmpty ? [h] : mine
-        } + profiles.filter { !Onboarding.harnesses.contains(split($0).kind) }
+    /// What new sessions can start with: this Mac's profiles, in Reflex's
+    /// harness order, only those signed in where that is known (`signedIn`).
+    /// Your own logins (a bare harness) aren't offered while any profile is:
+    /// only on a Mac with no profile yet.
+    static func choices(signedIn: Set<String>? = nil) -> [String] {
+        let order = ProfilesModel.harnesses
+        let rank = { (x: String) in (order.firstIndex(of: split(x).kind) ?? order.count, x) }
+        let ps = local().filter { signedIn?.contains($0) ?? true }.sorted { rank($0) < rank($1) }
+        return ps.isEmpty ? Onboarding.harnesses : ps
     }
 
     /// This Mac's default profile for each harness (`reflex profile default`:
@@ -64,15 +64,18 @@ enum Profiles {
         return out
     }
 
-    /// A stored default as one of `choices()`: a bare harness that has
-    /// profiles becomes its default profile (else its first); a profile
-    /// that is gone becomes its harness's.
+    /// A stored default as one of `choices()`: a harness's default profile
+    /// here (else its first) for a bare one or a profile that is gone, and
+    /// for a harness with no profile at all, Claude's.
     static func resolve(_ stored: String) -> String {
         let options = choices()
         if options.contains(stored) { return stored }
-        let kind = split(stored).kind
-        let mine = options.filter { split($0).kind == kind }
-        if let d = defaults()[kind], mine.contains(spec(kind, d)) { return spec(kind, d) }
-        return mine.first ?? options.first ?? stored
+        let d = defaults()
+        func of(_ kind: String) -> String? {
+            let mine = options.filter { split($0).kind == kind }
+            if let p = d[kind], mine.contains(spec(kind, p)) { return spec(kind, p) }
+            return mine.first
+        }
+        return of(split(stored).kind) ?? of("claude") ?? options.first ?? stored
     }
 }

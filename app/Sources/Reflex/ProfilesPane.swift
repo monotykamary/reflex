@@ -151,6 +151,11 @@ final class ProfilesModel: ObservableObject {
     @Published var failure: String?
     @Published private(set) var loaded = false
 
+    /// The profiles whose login works (nil until their status is known).
+    var signedIn: Set<String>? {
+        logins.isEmpty ? nil : Set(logins.filter { $0.error == nil && $0.login != "missing" }.map(\.profile))
+    }
+
     /// The harnesses in the order Reflex shows them (most used first).
     nonisolated static let harnesses = ["claude", "codex", "agy", "pi", "opencode", "amp", "grok"]
 
@@ -376,12 +381,14 @@ struct HarnessLogo: View {
 struct ProfilesPane: View {
     @ObservedObject private var model = ProfilesModel.shared
     @ObservedObject private var kinds = MachineKinds.shared
+    @ObservedObject private var settings = Settings.shared
     @State private var copied = false
 
     var body: some View {
         Form {
             Section { PaneHeader(pane: .profiles) }
             accounts
+            startAs
             defaults
             Section {
                 HStack(alignment: .firstTextBaseline) {
@@ -437,6 +444,28 @@ struct ProfilesPane: View {
         }
     }
 
+    // MARK: New sessions
+
+    private var startAs: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 128), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(Profiles.choices(signedIn: model.signedIn), id: \.self) { spec in
+                    StartTile(spec: spec, on: settings.harness == spec) {
+                        guard settings.harness != spec else { return }
+                        settings.harness = spec
+                        Daemon.shared.restart()
+                    }
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            Text("New sessions start as")
+        } footer: {
+            Text("When Jev or the ⌥⌥ bar starts a session in a folder. Only profiles signed in here are offered; /agy[mono] in the bar picks another for one session.")
+                .font(Type.meta).foregroundStyle(.secondary)
+        }
+    }
+
     // MARK: Defaults
 
     private var defaults: some View {
@@ -450,6 +479,44 @@ struct ProfilesPane: View {
             Text("A bare agent on that machine (claude, codex, agy…) starts in its default. /claude[tom] in the ⌥⌥ bar picks one for a single session. A session stays in the profile it started in.")
                 .font(Type.meta).foregroundStyle(.secondary)
         }
+    }
+}
+
+/// A profile new sessions can start as: its harness's mark and colour, the
+/// chosen one filled in.
+private struct StartTile: View {
+    let spec: String
+    let on: Bool
+    let pick: () -> Void
+
+    var body: some View {
+        let (h, p) = Profiles.split(spec)
+        let tint = HarnessLook.tint(h)
+        let shape = RoundedRectangle(cornerRadius: 11, style: .continuous)
+        Button(action: pick) {
+            HStack(spacing: 8) {
+                HarnessLogo(harness: h, size: 26)
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(h).font(.system(size: 12, weight: .semibold)).lineLimit(1)
+                    Text(p.isEmpty ? "your own login" : "[\(p)]").font(.system(size: 11, weight: .semibold)).lineLimit(1)
+                        .foregroundStyle(p.isEmpty ? Color.secondary : tint)
+                }
+                Spacer(minLength: 4)
+                Image(systemName: on ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14, weight: on ? .semibold : .regular))
+                    .foregroundStyle(on ? tint : Color.secondary.opacity(0.35))
+            }
+            .padding(.horizontal, 10).padding(.vertical, 8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(tint.opacity(on ? 0.17 : 0.045), in: shape)
+            .overlay(shape.strokeBorder(tint.opacity(on ? 0.6 : 0.14), lineWidth: on ? 1 : 0.5))
+            .shadow(color: tint.opacity(on ? 0.25 : 0), radius: 6, y: 1)
+            .contentShape(shape)
+        }
+        .buttonStyle(Pressable())
+        .animation(.snappy(duration: 0.18), value: on)
+        .help(on ? "New sessions start as \(spec)" : "Start new sessions as \(spec)")
+        .accessibilityLabel("\(spec)\(on ? ", chosen" : "")")
     }
 }
 

@@ -71,7 +71,7 @@ enum SlashCommand: Equatable, Hashable {
     }
 
     @MainActor static var all: [SlashCommand] {
-        [.resume] + Profiles.choices().map { .harness($0) } + [.newFolder, .btw, .folder]
+        [.resume] + Profiles.choices(signedIn: ProfilesModel.shared.signedIn).map { .harness($0) } + [.newFolder, .btw, .folder]
     }
 }
 

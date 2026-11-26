@@ -918,7 +918,7 @@ struct OnboardingView: View {
                 }
                 Text("New sessions start with").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).padding(.top, 6)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), alignment: .leading, spacing: 6) {
-                    ForEach(Profiles.choices(), id: \.self) { h in
+                    ForEach(Profiles.choices(signedIn: ProfilesModel.shared.signedIn), id: \.self) { h in
                         let on = settings.harness == h
                         let have = model.installed.contains(Profiles.split(h).kind)
                         Button { model.pick(h) } label: {
