@@ -49,6 +49,11 @@ test('a launch goes through the profile runner, labelled with its profile', () =
   expect(Js.textOf(Js.path(['labels', 'reflex.profile'], run))).toBe('tom')
   // A bare kind: the machine's default profile for it, if any; codex keeps its flag.
   expect(Hc.profiled('codex', '', Hc.argv('codex', ['resume', 'x'], ''))).toEqual(['sh', '-c', Hc.PROFILE_RUNNER, 'codex', '--no-daemon', 'resume', 'x'])
+  // agy takes its first prompt only after -i; a bare one is refused.
+  expect(Hc.argv('agy', [], 'hi')).toEqual(['agy', '-i', 'hi'])
+  expect(Hc.argv('agy', ['--conversation', 'c1'], 'hi')).toEqual(['agy', '--conversation', 'c1', '-i', 'hi'])
+  expect(Hc.argv('agy', [], ' ')).toEqual(['agy'])
+  expect(Hc.argv('claude', [], 'hi')).toEqual(['claude', 'hi'])
   // A session brought back stays where it was saved: your own login, not the machine's default.
   expect(Hc.profiled('claude', '', Hc.argv('claude', ['--resume', 'x'], ''), true)).toEqual(['sh', '-c', Hc.PROFILE_RUNNER, 'claude[]', '--resume', 'x'])
   expect(Hc.profiled('claude', 'tom', Hc.argv('claude', ['--resume', 'x'], ''), true)).toEqual(['sh', '-c', Hc.PROFILE_RUNNER, 'claude[tom]', '--resume', 'x'])

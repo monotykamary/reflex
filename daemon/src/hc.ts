@@ -342,9 +342,13 @@ export function uuid(a: number, b: number, c: number, d: number): string {
 // this terminal, unseen.
 const cmdOf = (kind: string) => (kind === 'codex' ? ['codex', '--no-daemon'] : [kind])
 
+// A first prompt on the command line. agy (1.5) takes one only after -i
+// (--prompt-interactive) and refuses a bare one, leaving a shell behind.
+const promptOf = (kind: string, text: string): string[] => (isEmpty(trim(text)) ? [] : kind === 'agy' ? ['-i', text] : [text])
+
 // The agent's command line: its command, how to bring its session back (or
 // the id to start one with), then the request as its first prompt.
-export const argv = (kind: string, args: string[], text: string): string[] => [...cmdOf(kind), ...args, ...(isEmpty(trim(text)) ? [] : [text])]
+export const argv = (kind: string, args: string[], text: string): string[] => [...cmdOf(kind), ...args, ...promptOf(kind, text)]
 
 // Through the profile runner where the machine has one (`reflex profile run
 // SPEC ARGS...`: the profile named, or for a bare kind that machine's default
