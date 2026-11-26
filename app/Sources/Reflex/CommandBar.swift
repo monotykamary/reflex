@@ -71,7 +71,7 @@ enum SlashCommand: Equatable, Hashable {
     }
 
     @MainActor static var all: [SlashCommand] {
-        [.resume] + Onboarding.harnesses.map { .harness($0) } + Profiles.local().map { .harness($0) } + [.newFolder, .btw, .folder]
+        [.resume] + Profiles.choices().map { .harness($0) } + [.newFolder, .btw, .folder]
     }
 }
 

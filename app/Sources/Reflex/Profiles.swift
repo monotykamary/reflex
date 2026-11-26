@@ -40,4 +40,39 @@ enum Profiles {
         }
         return out
     }
+
+    /// What new sessions can start with: each harness's profiles where it has
+    /// any (profiles only: a bare "agy" is not offered beside "agy[tom]"),
+    /// the bare harness where it has none.
+    static func choices() -> [String] {
+        let profiles = local()
+        return Onboarding.harnesses.flatMap { h -> [String] in
+            let mine = profiles.filter { split($0).kind == h }
+            return mine.isEmpty ? [h] : mine
+        } + profiles.filter { !Onboarding.harnesses.contains(split($0).kind) }
+    }
+
+    /// This Mac's default profile for each harness (`reflex profile default`:
+    /// ~/.reflex/profiles/defaults, "claude tom" lines).
+    static func defaults() -> [String: String] {
+        let text = (try? String(contentsOfFile: NSHomeDirectory() + "/.reflex/profiles/defaults", encoding: .utf8)) ?? ""
+        var out: [String: String] = [:]
+        for line in text.split(separator: "\n") {
+            let w = line.split(separator: " ", omittingEmptySubsequences: true)
+            if w.count == 2 { out[String(w[0])] = String(w[1]) }
+        }
+        return out
+    }
+
+    /// A stored default as one of `choices()`: a bare harness that has
+    /// profiles becomes its default profile (else its first); a profile
+    /// that is gone becomes its harness's.
+    static func resolve(_ stored: String) -> String {
+        let options = choices()
+        if options.contains(stored) { return stored }
+        let kind = split(stored).kind
+        let mine = options.filter { split($0).kind == kind }
+        if let d = defaults()[kind], mine.contains(spec(kind, d)) { return spec(kind, d) }
+        return mine.first ?? options.first ?? stored
+    }
 }

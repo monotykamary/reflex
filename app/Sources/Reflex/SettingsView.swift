@@ -345,7 +345,7 @@ private struct GeneralPane: View {
             KeepAwakeSection()
             Section("New sessions") {
                 Picker(selection: $s.harness) {
-                    ForEach(Onboarding.harnesses, id: \.self) { Text($0) }
+                    ForEach(Profiles.choices(), id: \.self) { Text($0) }
                 } label: {
                     RowLabel("Default agent", "Used when Jev starts a session in a folder.")
                 }

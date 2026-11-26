@@ -91,7 +91,9 @@ final class Settings: ObservableObject {
 
     private init() {
         roots = d.string(forKey: "roots") ?? (NSHomeDirectory() + "/VCS")
-        harness = d.string(forKey: "harness") ?? "claude"
+        // Profiles only where a harness has them: a bare "agy" saved before
+        // becomes "agy[tom]" (this Mac's default profile for it).
+        harness = Profiles.resolve(d.string(forKey: "harness") ?? "claude")
         newKeyword = d.string(forKey: "newKeyword") ?? "new project"
         newRoot = d.string(forKey: "newRoot") ?? ""
         extraFolders = d.stringArray(forKey: "extraFolders") ?? []

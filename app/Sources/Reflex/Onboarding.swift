@@ -60,7 +60,7 @@ final class Onboarding: ObservableObject {
     private(set) var isOpen = false
     private var poll: Timer?
 
-    static let harnesses = ["claude", "codex", "pi", "grok", "opencode", "amp", "agy"]
+    nonisolated static let harnesses = ["claude", "codex", "pi", "grok", "opencode", "amp", "agy"]
 
     /// Where `herdr integration install <agent>` puts each agent's hook.
     static let integrationFiles = [
@@ -918,9 +918,9 @@ struct OnboardingView: View {
                 }
                 Text("New sessions start with").font(.system(size: 12)).foregroundStyle(.primary.opacity(0.5)).padding(.top, 6)
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 6), count: 4), alignment: .leading, spacing: 6) {
-                    ForEach(Onboarding.harnesses, id: \.self) { h in
+                    ForEach(Profiles.choices(), id: \.self) { h in
                         let on = settings.harness == h
-                        let have = model.installed.contains(h)
+                        let have = model.installed.contains(Profiles.split(h).kind)
                         Button { model.pick(h) } label: {
                             Text(h).font(.system(size: 12, weight: on ? .semibold : .regular))
                                 .lineLimit(1).fixedSize()
@@ -931,7 +931,7 @@ struct OnboardingView: View {
                         .buttonStyle(Pressable())
                         .background(on ? Tone.working.opacity(0.35) : Color.primary.opacity(0.1), in: Capsule())
                         .disabled(!have)
-                        .help(have ? h : "\(h) is not installed")
+                        .help(have ? h : "\(Profiles.split(h).kind) is not installed")
                     }
                 }
             }

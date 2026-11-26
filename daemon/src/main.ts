@@ -746,8 +746,10 @@ export class Daemon {
       // `profile`: the harness profile to start it in ("" or none: your own,
       // or the machine's default for that harness).
       case '/api/spawn': {
-        const kind = orElse(t('kind'), c.harness)
-        const profile = t('profile')
+        // No kind: the default, a spec ("agy[tom]") taken apart.
+        const dflt = R.splitSpec(c.harness)
+        const kind = orElse(t('kind'), dflt.kind)
+        const profile = isEmpty(t('kind')) ? orElse(t('profile'), dflt.profile) : t('profile')
         const action: Action = profile ? {type: 'spawn', cwd: t('cwd'), kind, text: t('text'), profile} : {type: 'spawn', cwd: t('cwd'), kind, text: t('text')}
         return ok(this.askText({m: 'enqueue', action, label: 'new ' + spec(kind, profile) + ' in ' + R.leaf(t('cwd')), item: 0}))
       }
