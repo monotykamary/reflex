@@ -1228,6 +1228,7 @@ struct AgentPopout: View {
                 .foregroundStyle(Color(hex: theme.foreground).opacity(0.6))
                 .help("Share: let another window or Mac have the size and mouse; this one still sees and types")
             }
+            SandboxPauseButton(machine: Machines.machine(of: session.pane), tint: Color(hex: theme.foreground).opacity(0.6))
             MoveButton(agent: agent, tint: Color(hex: theme.foreground).opacity(0.6))
             OpenInButton(agent: agent, pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
             CloseSessionButton(pane: session.pane, tint: Color(hex: theme.foreground).opacity(0.6))
@@ -1236,6 +1237,87 @@ struct AgentPopout: View {
         .padding(.leading, 78)
         .padding(.trailing, 10)
         .frame(height: titlebar)
+    }
+}
+
+/// Pauses the sandbox a session runs in (an instabox box keeps its programs
+/// and costs only its disk), or stops it (boat has no pause; its disk is
+/// kept), as Settings → Machines does: one click arms it, the next acts.
+/// Only for a sandbox Reflex made or was given, and only while it's up: the
+/// window's own overlay offers Resume once it's down.
+struct SandboxPauseButton: View {
+    let machine: String
+    var size: CGFloat = 22
+    var tint: SwiftUI.Color = Ink.text
+    @ObservedObject private var lifetime = BoatLifetime.shared
+    @ObservedObject private var store = Store.shared
+    @State private var armed = false
+    @State private var disarm: Task<Void, Never>?
+
+    /// boat has no pause: its sandboxes only stop (disk kept).
+    private var stops: Bool { Sandbox.of(machine) == .boat }
+    private var word: String { stops ? "Stop" : "Pause" }
+    private var shown: Bool {
+        Sandbox.of(machine) != nil && (Boat.made(machine) || CoreMachines.sharedByReflex(machine))
+            && !lifetime.isDown(machine) && !lifetime.resuming.contains(machine)
+    }
+    private var help: String {
+        if armed { return "Click again to \(word.lowercased()) \(machine)" }
+        let what = stops ? "Its programs end and its disk is kept for 14 days; Resume starts its sessions again."
+            : "Its programs and memory are kept and only its disk costs; Resume carries on in seconds."
+        let n = store.state.agents.filter { $0.machine == machine }.count
+        let sessions = n <= 1 ? "" : " Its \(n) sessions \(stops ? "stop" : "pause") with it."
+        let failed = lifetime.problem[machine].map { "Couldn't: \($0)\n" } ?? ""
+        return failed + "\(word) \(machine). " + what + sessions
+    }
+
+    var body: some View {
+        if shown {
+            if lifetime.sleeping.contains(machine) {
+                ProgressView().controlSize(.mini).frame(width: size, height: size)
+                    .help("\(stops ? "Stopping" : "Pausing") \(machine)…")
+            } else {
+                Button(action: tap) { label.contentShape(Rectangle()) }
+                    .buttonStyle(Pressable())
+                    .help(help)
+                    .accessibilityLabel("\(word) \(machine)")
+            }
+        }
+    }
+
+    @ViewBuilder private var label: some View {
+        if armed {
+            Label("\(word) \(machine)", systemImage: stops ? "stop.fill" : "pause.fill")
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(.white)
+                .padding(.horizontal, 8)
+                .frame(height: size - 4)
+                .background(SwiftUI.Color.orange.opacity(0.9), in: Capsule())
+                .transition(.opacity.combined(with: .scale(scale: 0.9)))
+        } else {
+            Image(systemName: stops ? "stop.circle" : "pause.circle")
+                .font(.system(size: size * 0.55, weight: .medium))
+                .foregroundStyle(tint)
+                .frame(width: size, height: size)
+                .transition(.opacity)
+        }
+    }
+
+    private func tap() {
+        if armed {
+            disarm?.cancel()
+            armed = false
+            lifetime.sleep(machine, off: stops)
+            return
+        }
+        withAnimation(Motion.micro) { armed = true }
+        disarm?.cancel()
+        disarm = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            withAnimation(Motion.exit) { armed = false }
+        }
     }
 }
 
