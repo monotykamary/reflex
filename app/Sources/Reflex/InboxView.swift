@@ -230,19 +230,16 @@ struct InboxView: View {
     }
 
     private func answer(_ item: ItemInfo, _ key: String) {
-        Task { await Client.local.answer(item: item.id, key: key); await store.refresh() }
+        store.answer(item: item, key: key)
     }
 
     private func dismiss(_ item: ItemInfo) {
-        Task { await Client.local.dismiss(item.id); await store.refresh() }
+        store.dismiss([item.id])
     }
 
     private func clearUpdates() {
         let ids = items.filter { !asks($0) }.map(\.id)
-        Task {
-            for id in ids { await Client.local.dismiss(id) }
-            await store.refresh()
-        }
+        store.dismiss(ids)
     }
 
     private func move(_ delta: Int) {

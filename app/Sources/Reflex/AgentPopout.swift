@@ -131,6 +131,11 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
     /// Another window sets the size: this one watches at it (see CoreSize)
     /// until it is used again.
     @Published var sizedElsewhere = false
+    /// Why a herdr-core stream ended ("killed", "exited", "not_found", "detached", …).
+    @Published private(set) var endReason: String?
+    /// The terminal itself ended (killed, exited, or already removed) rather than
+    /// merely detaching or dropping the connection: reattaching won't bring it back.
+    var terminalGone: Bool { ["killed", "exited", "not_found"].contains(endReason ?? "") }
 
     /// What this view looks like (the core answers programs' display
     /// queries with it): its colors, and its cell size in device pixels.
@@ -159,6 +164,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         stream?.close()
         stream = nil
         ended = false
+        endReason = nil
         elsewhere = false
         watching = false
         attached = true
@@ -223,6 +229,12 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         stream = nil
         endFacts()
         guard attached else { return }
+        // Closed intentionally from Reflex: the window is closing, don't retry
+        // or flash a Detached overlay.
+        if Store.shared.isClosing(pane) {
+            attached = false
+            return
+        }
         let back = ["lost", "unavailable", "timeout", "signaled", "server_stop", "stopped_by_restart", "holder_lost"]
         // (A boat machine that stopped isn't coming back by itself: Resume.)
         let stopped = BoatLifetime.shared.isDown(Machines.machine(of: pane))
@@ -239,6 +251,10 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         }
         NSLog("Reflex: %@ ended in herdr-core (%@)", pane, why)
         attached = false
+        endReason = why
+        if terminalGone, !HerdrMove.shared.moving.contains(pane) {
+            Store.shared.terminalEnded(pane)
+        }
         withAnimation(Motion.enter) { ended = true }
     }
 
@@ -377,6 +393,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         if switchFromRunning({ [weak self] in self?.attach(takeover: takeover, reason: reason) }) { return }
         NSLog("Reflex: attach %@ (%@%@)", pane, reason, takeover ? ", taking over" : "")
         ended = false
+        endReason = nil
         elsewhere = false
         watching = false
         view.resetKeys()
@@ -416,6 +433,7 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
         if switchFromRunning({ [weak self] in self?.watch(reason: reason) }) { return }
         NSLog("Reflex: watch %@ (%@)", pane, reason)
         ended = false
+        endReason = nil
         elsewhere = false
         view.resetKeys()
         let script = """
@@ -1127,6 +1145,12 @@ struct AgentPopout: View {
                             Text("herdr shows \(agent?.kind ?? "an agent") in one window at a time.")
                                 .font(.system(size: 12)).foregroundStyle(Ink.dim)
                             Button("Take It Back") { session.attach(takeover: true, reason: "take back") }.buttonStyle(.glassProminent)
+                        } else if session.terminalGone {
+                            Text("Session ended").font(Type.title)
+                            Text(session.endReason == "exited" ? "The terminal exited." : "This terminal was closed.")
+                                .font(.system(size: 12)).foregroundStyle(Ink.dim)
+                            Button("Close Window") { AppDelegate.current?.closedSession(session.pane) }
+                                .buttonStyle(.glassProminent)
                         } else {
                             Text("Detached from \(agent?.kind ?? "the agent")").font(Type.title)
                             Button("Reattach") { session.attach(reason: "reattach") }.buttonStyle(.glassProminent)

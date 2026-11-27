@@ -1086,6 +1086,8 @@ private struct MachineCardsSection: View {
     @State private var rows: [CoreMachines.Machine] = CoreMachines.listed ? CoreMachines.known : (ViewCache.load("machines") ?? [])
     @State private var loaded = false
     @State private var removing: CoreMachines.Machine?
+    @State private var removingNames: Set<String> = []
+    @State private var reconnecting: Set<String> = []
     @State private var failure: String?
 
     var body: some View {
@@ -1116,7 +1118,13 @@ private struct MachineCardsSection: View {
         .confirmationDialog("Remove \(removing?.name ?? "")?", isPresented: Binding(get: { removing != nil }, set: { if !$0 { removing = nil } }), titleVisibility: .visible) {
             Button("Remove Machine", role: .destructive) {
                 guard let m = removing else { return }
+                removing = nil
+                removingNames.insert(m.name)
+                rows.removeAll { $0.name == m.name }
+                ViewCache.save("machines", rows)
+                Store.shared.forgetMachine(m.name)
                 Task { @MainActor in
+                    defer { removingNames.remove(m.name) }
                     do {
                         if Boat.made(m.name) { try await Boat.remove(m.name) } else { try await CoreMachines.remove(m.name) }
                     } catch { failure = error.localizedDescription }
@@ -1140,7 +1148,7 @@ private struct MachineCardsSection: View {
     }
 
     private func load() async {
-        let fresh = await CoreMachines.list(fresh: 2)
+        let fresh = (await CoreMachines.list(fresh: 2)).filter { !removingNames.contains($0.name) }
         // (An answer that didn't come keeps what is shown.)
         guard CoreMachines.listed else { return }
         if fresh != rows { rows = fresh; ViewCache.save("machines", fresh) }
@@ -1163,7 +1171,8 @@ private struct MachineCardsSection: View {
 
     private func status(_ m: CoreMachines.Machine, agents: Int) -> (tone: Color, text: String) {
         if lifetime.resuming.contains(m.name) { return (Tone.working, "Resuming…") }
-        if lifetime.sleeping.contains(m.name) { return (Tone.working, "Pausing…") }
+        if lifetime.sleeping.contains(m.name) { return (Tone.working, lifetime.turningOff.contains(m.name) ? "Turning off…" : "Pausing…") }
+        if reconnecting.contains(m.name) { return (Tone.working, "Connecting…") }
         if lifetime.isDown(m.name) {
             let svc = Sandbox.of(m.name) ?? .boat
             if lifetime.putDown[m.name] != nil {
@@ -1190,9 +1199,16 @@ private struct MachineCardsSection: View {
         let name = m.name
         if lifetime.resuming.contains(name) { return ("Resuming…", {}, true) }
         if lifetime.isDown(name) { return ("Resume", { BoatLifetime.shared.resume(name) }, false) }
+        if reconnecting.contains(name) { return ("Connecting…", {}, true) }
         if m.state == "connected" || m.state == "connecting" { return nil }
         return ("Reconnect", {
-            Task { _ = try? await HerdrCore.call("machine.connect", ["machine": name], timeout: 30) }
+            reconnecting.insert(name)
+            Task { @MainActor in
+                defer { reconnecting.remove(name) }
+                _ = try? await HerdrCore.call("machine.connect", ["machine": name], timeout: 30)
+                _ = await CoreMachines.list(fresh: 0)
+                await load()
+            }
         }, false)
     }
 
@@ -1257,7 +1273,8 @@ private struct SessionsSection: View {
     @ObservedObject var s = Settings.shared
     @ObservedObject private var store = Store.shared
     @ObservedObject private var move = HerdrMove.shared
-    @State private var machines: [String] = []
+    @State private var machines: [String] = (CoreMachines.listed ? CoreMachines.known : (ViewCache.load("machines") ?? []))
+        .filter { $0.state == "connected" }.map(\.name)
     @State private var from = Boat.here
     @State private var to = ""
 

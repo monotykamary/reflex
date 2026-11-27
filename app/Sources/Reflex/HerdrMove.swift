@@ -198,6 +198,7 @@ final class HerdrMove: ObservableObject {
             return
         }
         await Client.local.close(a.pane)
+        Store.shared.forgetMissing(a.pane)
         guard await until(seconds: 10, { !Store.shared.state.agents.contains { $0.pane == a.pane } }) else {
             problem = "herdr didn't close \(name): it's still there, unmoved."
             return
@@ -253,6 +254,7 @@ final class HerdrMove: ObservableObject {
         }
         notes[a.pane] = "Moving \(a.kind) to \(place)…"
         await Client.local.close(a.pane)
+        Store.shared.forgetMissing(a.pane)
         guard await until(seconds: 10, { !Store.shared.state.agents.contains { $0.pane == a.pane } }) else {
             return fail(a.pane, "\(name) didn't close: it's still there, unmoved.")
         }

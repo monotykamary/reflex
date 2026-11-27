@@ -9,7 +9,7 @@ struct MoveButton: View {
     @ObservedObject private var move = HerdrMove.shared
     @ObservedObject private var template = BoatTemplate.shared
     @ObservedObject private var instabox = BoatTemplate.instabox
-    @State private var machines: [CoreMachines.Machine] = CoreMachines.known
+    @State private var machines: [CoreMachines.Machine] = CoreMachines.listed ? CoreMachines.known : (ViewCache.load("machines") ?? [])
 
     var body: some View {
         Menu {

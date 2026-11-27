@@ -72,13 +72,18 @@ enum Sessions {
     /// is up; the lost one is forgotten (a kept shell closed, a finished
     /// record removed).
     @MainActor static func resume(_ s: StoppedInfo) async throws {
-        // In the profile it ran in: a resume comes back where it was saved.
-        let d = try await Client.local.resume(cwd: s.place, kind: s.kind, profile: s.profile, session: s.session,
-                                              mode: s.session.isEmpty ? "continue" : "resume",
-                                              label: "\(s.kind) · \(s.title_.prefix(40))")
         Store.shared.leave(s.pane)
-        watchStart(d.id, cwd: s.place, open: true)
-        await Client.local.close(s.pane)
+        // In the profile it ran in: a resume comes back where it was saved.
+        do {
+            let d = try await Client.local.resume(cwd: s.place, kind: s.kind, profile: s.profile, session: s.session,
+                                                  mode: s.session.isEmpty ? "continue" : "resume",
+                                                  label: "\(s.kind) · \(s.title_.prefix(40))")
+            watchStart(d.id, cwd: s.place, open: true)
+            await Client.local.close(s.pane)
+        } catch {
+            Store.shared.unleave(s.pane)
+            throw error
+        }
     }
 
     /// Forget an agent the core lost; its conversation stays (search, /resume).
@@ -168,14 +173,10 @@ enum Sessions {
         return p
     }
 
-    /// End a session: herdr closes its pane and the agent in it; an open
-    /// terminal window for it closes too.
+    /// End a session: removed optimistically from lists and its window closed
+    /// at once while herdr closes the pane and agent in the background.
     @MainActor static func close(_ pane: String) {
-        Task {
-            await Client.local.close(pane)
-            AppDelegate.current?.closedSession(pane)
-            await Store.shared.refresh()
-        }
+        Store.shared.close(pane)
     }
 }
 

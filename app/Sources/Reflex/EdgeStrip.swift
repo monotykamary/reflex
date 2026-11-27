@@ -467,7 +467,7 @@ extension Rail {
         }
         guard let c = card(rail, store.state.inbox), press.characters.count == 1,
               c.options.contains(where: { $0.key == press.characters }) else { return .ignored }
-        Task { await Client.local.answer(item: c.id, key: press.characters); await Store.shared.refresh() }
+        Store.shared.answer(item: c, key: press.characters)
         return .handled
     }
 
@@ -882,7 +882,8 @@ struct SteadyRows {
         return out
     }
 
-    @MainActor mutating func update(_ agents: [AgentInfo], folder: (AgentInfo) -> String, now: Date = Date()) {
+    @MainActor mutating func update(_ agents: [AgentInfo], folder: (AgentInfo) -> String,
+                                    closed: Set<String> = [], now: Date = Date()) {
         var fresh: [String: AgentInfo] = [:]
         for a in agents where fresh[a.pane] == nil { fresh[a.pane] = a }
         guard !groups.isEmpty else {
@@ -911,8 +912,12 @@ struct SteadyRows {
         }
         let known = Set(groups.flatMap(\.panes))
         for (p, a) in fresh { info[p] = a; goneAt[p] = nil }
-        for p in known where fresh[p] == nil && goneAt[p] == nil { goneAt[p] = now }
-        let expired = Set(goneAt.filter { now.timeIntervalSince($0.value) > Self.grace }.keys)
+        // Intentionally closed (or confirmed ended) panes leave immediately;
+        // unexpectedly missing ones stay dimmed for `grace` so a poll blip
+        // never shifts rows under the pointer.
+        let removedNow = known.filter { fresh[$0] == nil && closed.contains($0) }
+        for p in known where fresh[p] == nil && !removedNow.contains(p) && goneAt[p] == nil { goneAt[p] = now }
+        let expired = Set(goneAt.filter { now.timeIntervalSince($0.value) > Self.grace }.keys).union(removedNow)
         if !expired.isEmpty {
             for i in groups.indices { groups[i].panes.removeAll { expired.contains($0) } }
             groups.removeAll { $0.panes.isEmpty }
@@ -1164,7 +1169,7 @@ struct AgentList: View {
 
     private func keep(_ agents: [AgentInfo]) {
         var next = steady
-        next.update(agents, folder: AgentList.folder(in: AgentList.projects(of: agents)))
+        next.update(agents, folder: AgentList.folder(in: AgentList.projects(of: agents)), closed: Store.shared.closingPanes)
         guard next.groups != steady.groups || next.info != steady.info || next.goneAt != steady.goneAt else { return }
         // (Rows coming and going ease; ones already there don't move.)
         if next.groups != steady.groups { withAnimation(Motion.swap) { steady = next } } else { steady = next }
@@ -1523,7 +1528,7 @@ struct QuestionCard: View {
                     .help("All agents")
                 }
                 Button {
-                    Task { await Client.local.dismiss(item.id); await Store.shared.refresh() }
+                    Store.shared.dismiss([item.id])
                 } label: {
                     Image(systemName: "xmark").font(.system(size: 11, weight: .semibold)).foregroundStyle(Ink.dim)
                 }
@@ -1559,7 +1564,7 @@ struct QuestionCard: View {
             VStack(spacing: 6) {
                 ForEach(item.options) { o in
                     Button {
-                        Task { await Client.local.answer(item: item.id, key: o.key); await Store.shared.refresh() }
+                        Store.shared.answer(item: item, key: o.key)
                     } label: {
                         HStack(spacing: 10) {
                             Text(o.key).font(.system(size: 10.5, weight: .semibold, design: .rounded))

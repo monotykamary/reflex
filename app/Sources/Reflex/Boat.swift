@@ -500,15 +500,36 @@ final class BoatLifetime: ObservableObject {
     /// Paused or turned off by you: down until you resume it, even with a
     /// window open on it here, and when.
     @Published private(set) var putDown: [String: Date] = [:]
+    /// Machines being turned off (vs paused), so Settings says "Turning off…".
+    @Published private(set) var turningOff: Set<String> = []
+
+    /// Drop an intentionally closed or ended pane from cached machine state so
+    /// pausing right afterwards doesn't record or resume a dead session.
+    func forget(_ pane: String) {
+        let m = Machines.machine(of: pane)
+        guard !m.isEmpty else { return }
+        if var xs = seen[m] {
+            xs.removeAll { $0.pane == pane }
+            seen[m] = xs.isEmpty ? nil : xs
+        }
+        if var xs = down[m] {
+            xs.removeAll { $0.pane == pane }
+            down[m] = xs
+        }
+    }
 
     /// Paused (an instabox box: its programs kept, only its disk costs) or
     /// turned off (stopped; a boat sandbox can only be this), now.
     func sleep(_ m: String, off: Bool) {
         guard !sleeping.contains(m), !resuming.contains(m), down[m] == nil else { return }
         sleeping.insert(m)
+        if off { turningOff.insert(m) }
         problem[m] = nil
         Task {
-            defer { sleeping.remove(m) }
+            defer {
+                sleeping.remove(m)
+                turningOff.remove(m)
+            }
             do {
                 let s = try await Boat.reflex(["machine", off ? "off" : "pause", m], timeout: 600)
                 putDown[m] = Date()
@@ -516,6 +537,7 @@ final class BoatLifetime: ObservableObject {
                 downWhy[m] = s == "paused" ? "suspended" : "stopped"
                 working[m] = nil
                 held[m] = nil
+                Store.shared.forgetMachine(m)
                 NSLog("Reflex: %@ %@ (asked here)", m, s)
             } catch {
                 problem[m] = error.localizedDescription

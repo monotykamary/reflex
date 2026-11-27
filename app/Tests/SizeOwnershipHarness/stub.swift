@@ -10,6 +10,15 @@ enum Machines { static func machine(of pane: String) -> String { pane.contains("
     static let shared = BoatLifetime()
     func isDown(_ machine: String) -> Bool { false }
 }
+@MainActor final class Store {
+    static let shared = Store()
+    func isClosing(_ pane: String) -> Bool { false }
+    func terminalEnded(_ pane: String) {}
+}
+@MainActor final class HerdrMove {
+    static let shared = HerdrMove()
+    var moving: Set<String> = []
+}
 func withAnimation(_ animation: Int, _ body: () -> Void) { body() }
 enum HerdrCore {
     struct Failure: Error { let kind: String }

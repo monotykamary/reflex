@@ -82,8 +82,16 @@ struct Client {
         return try await post("/api/spawn", ["cwd": cwd, "kind": k, "profile": profile, "text": text], as: PendingInfo.self)
     }
 
-    func answer(item: Int, key: String) async { await post("/api/answer", ["item": item, "key": key]) }
-    func dismiss(_ item: Int) async { await post("/api/dismiss", ["item": item]) }
+    private struct OkReply: Decodable { var ok: Bool }
+
+    @discardableResult
+    func answer(item: Int, key: String) async -> Bool {
+        (try? await post("/api/answer", ["item": item, "key": key], as: OkReply.self))?.ok ?? false
+    }
+    @discardableResult
+    func dismiss(_ item: Int) async -> Bool {
+        (try? await post("/api/dismiss", ["item": item], as: OkReply.self))?.ok ?? false
+    }
     func note(pane: String, agent: String, title: String, body: String) async {
         await post("/api/note", ["pane": pane, "agent": agent, "title": title, "body": body])
     }
@@ -106,7 +114,14 @@ struct Client {
     }
 
     /// Ends the session: herdr closes the pane and the agent in it.
-    func close(_ pane: String) async { await post("/api/close", ["pane": pane]) }
+    /// Returns true if closed (or already gone), false if closing failed.
+    @discardableResult
+    func close(_ pane: String) async -> Bool {
+        guard let r = try? await post("/api/close", ["pane": pane], as: PaneResponse.self) else { return false }
+        if r.ok { return true }
+        let err = (r.error ?? "").lowercased()
+        return err.contains("not_found") || err.contains("no terminal") || err.contains("not found")
+    }
     func reindex() async { await post("/api/reindex", [:]) }
     /// Another Mac's folders changed (RemoteIndex): merged in, this Mac not scanned again.
     func reindexMachines() async { await post("/api/reindex", ["machines": true]) }
@@ -138,6 +153,18 @@ final class Store: ObservableObject {
     private var stoppedAt = Date.distantPast
     /// Resumed or dismissed: gone at once, not back while the core still lists it.
     private var leaving: Set<String> = []
+    /// Panes being closed (or confirmed ended by herdr-core): gone at once from
+    /// lists, windows and MissingHold until the daemon poll drops them.
+    private struct ClosingEntry {
+        var at: Date
+        var confirmed: Bool
+    }
+    private var closing: [String: ClosingEntry] = [:]
+    /// Published for SteadyRows so intentionally closed rows leave immediately
+    /// instead of sitting dimmed for the unexpected-blip grace period.
+    @Published private(set) var closingPanes: Set<String> = []
+    /// Optimistic pending answers until reflexd reports the real pending/clear.
+    private var answering: [Int: (pending: PendingInfo, at: Date)] = [:]
     /// Bumped per pane when a dispatch to it ran — the receiving bead pulses.
     @Published private(set) var pulses: [String: Int] = [:]
     /// A question that just arrived, surfaced at the edge for a few seconds.
@@ -152,6 +179,9 @@ final class Store: ObservableObject {
     private var clearing: Set<Int> = []
     /// Another machine's agents a slow answer left out of the list, kept.
     private var missing = MissingHold()
+    /// Panes currently being probed via `terminal.get` to tell a slow machine
+    /// from a closed remote agent.
+    private var probingMissing: Set<String> = []
 
     func start() {
         loop?.cancel()
@@ -168,9 +198,37 @@ final class Store: ObservableObject {
     func refresh() async {
         do {
             var next = try await Client.local.state()
+            let now = Date()
+            // Expire closing entries once confirmed and absent from the daemon's
+            // list (or past the safety cap).
+            let rawPanes = Set(next.agents.map(\.pane))
+            for (pane, entry) in closing {
+                let stale = now.timeIntervalSince(entry.at) > (entry.confirmed ? 15 : 30)
+                if (entry.confirmed && !rawPanes.contains(pane)) || stale {
+                    closing[pane] = nil
+                    closingPanes.remove(pane)
+                }
+            }
+            if !closing.isEmpty {
+                for pane in closing.keys { missing.forget(pane) }
+                next.agents.removeAll { closing[$0.pane] != nil }
+                next.inbox.removeAll { closing[$0.pane] != nil && $0.kind != "route" }
+                next.pending.removeAll { p in p.action.pane.map { closing[$0] != nil } ?? false }
+            }
             // Being cleared: gone at once, not back for a poll or two.
             clearing.formIntersection(next.inbox.map(\.id))
             next.inbox.removeAll { clearing.contains($0.id) }
+            // Optimistic answers stay visible until reflexd's real pending or
+            // cleared inbox reflects them.
+            let inboxIDs = Set(next.inbox.map(\.id))
+            let pendingItems = Set(next.pending.map(\.item))
+            for (id, entry) in answering {
+                if !inboxIDs.contains(id) || pendingItems.contains(id) || now.timeIntervalSince(entry.at) > 10 {
+                    answering[id] = nil
+                } else {
+                    next.pending.append(entry.pending)
+                }
+            }
             holdMissing(&next)
             observe(next)
             state = next
@@ -188,21 +246,61 @@ final class Store: ObservableObject {
     }
 
     /// A connected machine that listed agents and now lists none: its agents
-    /// as last seen, up to `holdMissing` (then it really has none).
+    /// as last seen, up to `holdMissing` (then it really has none). Probes
+    /// held herdr-core terminals in the background so one intentionally closed
+    /// from another Mac or the CLI leaves right away instead of lingering 90 s.
     private func holdMissing(_ next: inout StateInfo) {
         let connected = Set(CoreMachines.known.filter { $0.state == "connected" }.map(\.name))
         let r = missing.apply(next.agents, connected: connected) { $0.machine }
         for (m, n) in r.started {
             NSLog("Reflex: herdr-core's list left out %@'s %d agents (it says connected); kept as they were", m, n)
+            let heldPanes = missing.held(on: m).map(\.pane).filter(HerdrCore.isCore)
+            if !heldPanes.isEmpty { verifyMissing(heldPanes) }
         }
         next.agents = r.agents
+    }
+
+    /// Ask herdr-core directly about held remote panes: if one really ended
+    /// (not_found, finished, or back at a plain shell), drop it right away
+    /// instead of waiting out MissingHold's 90 s window.
+    private func verifyMissing(_ panes: [String]) {
+        for pane in panes where probingMissing.insert(pane).inserted {
+            Task { [weak self] in
+                defer { self?.probingMissing.remove(pane) }
+                let gone: Bool
+                do {
+                    let info = try await HerdrCore.call("terminal.get", ["terminal": pane], timeout: 3)
+                    gone = Self.isEndedOrShell(info)
+                } catch let err as HerdrCore.Failure where err.kind == "not_found" {
+                    gone = true
+                } catch {
+                    // Timeout / unreachable: genuine slow machine, keep holding.
+                    gone = false
+                }
+                if gone { self?.terminalEnded(pane) }
+            }
+        }
+    }
+
+    /// Mirrors daemon/src/hc.ts: finished, or back at a plain shell with no
+    /// OSC 7501 app reported.
+    private static let shells: Set<String> = ["zsh", "bash", "sh", "fish", "dash", "ksh", "tcsh", "nu", "login"]
+    private static func isEndedOrShell(_ t: [String: Any]) -> Bool {
+        if (t["state"] as? String) == "finished" { return true }
+        let app = (t["status"] as? [String: Any])?["app"] as? String ?? ""
+        guard app.isEmpty else { return false }
+        guard let fg = t["foreground"] as? [String: Any],
+              let argv = fg["argv"] as? [String], let first = argv.first else { return false }
+        var name = (first as NSString).lastPathComponent
+        if name.hasPrefix("-") { name.removeFirst() }
+        return shells.contains(name)
     }
 
     func refreshStopped() async {
         stoppedAt = Date()
         guard let s = try? await Client.local.stopped() else { return }
         leaving.formIntersection(s.map(\.pane))
-        let next = s.filter { !leaving.contains($0.pane) }
+        let next = s.filter { !leaving.contains($0.pane) && closing[$0.pane] == nil }
         if next != stopped { stopped = next }
     }
 
@@ -210,6 +308,120 @@ final class Store: ObservableObject {
     func leave(_ pane: String) {
         leaving.insert(pane)
         stopped.removeAll { $0.pane == pane }
+    }
+
+    /// Roll back an optimistic `leave` when resuming a stopped agent fails.
+    func unleave(_ pane: String) {
+        leaving.remove(pane)
+        Task { await refreshStopped() }
+    }
+
+    func isClosing(_ pane: String) -> Bool { closing[pane] != nil }
+
+    /// Forget a pane from MissingHold without changing the open window (e.g.
+    /// HerdrMove closing the old pane while keeping the window for the move).
+    func forgetMissing(_ pane: String) {
+        missing.forget(pane)
+    }
+
+    /// Forget every held agent on a machine that was paused, stopped or removed.
+    func forgetMachine(_ machine: String) {
+        missing.forgetMachine(machine)
+    }
+
+    /// Close a session optimistically: drop it from the UI, MissingHold and its
+    /// terminal window immediately, close it in the background, and roll back
+    /// only if the close fails while the terminal still exists.
+    func close(_ pane: String) {
+        closing[pane] = ClosingEntry(at: Date(), confirmed: false)
+        closingPanes.insert(pane)
+        leaving.insert(pane)
+        missing.forget(pane)
+        BoatLifetime.shared.forget(pane)
+        removePaneLocally(pane)
+        AppDelegate.current?.closedSession(pane)
+        Task {
+            let ok = await Client.local.close(pane)
+            if ok {
+                if closing[pane] != nil { closing[pane]?.confirmed = true }
+            } else {
+                closing[pane] = nil
+                closingPanes.remove(pane)
+                leaving.remove(pane)
+            }
+            await refresh()
+        }
+    }
+
+    /// herdr-core confirmed this terminal ended (killed, exited, not_found, or
+    /// returned to a plain shell): drop it from MissingHold and the UI now.
+    func terminalEnded(_ pane: String) {
+        if closing[pane] == nil {
+            closing[pane] = ClosingEntry(at: Date(), confirmed: true)
+            closingPanes.insert(pane)
+        } else {
+            closing[pane]?.confirmed = true
+        }
+        missing.forget(pane)
+        BoatLifetime.shared.forget(pane)
+        removePaneLocally(pane)
+    }
+
+    private func removePaneLocally(_ pane: String) {
+        var s = state
+        let beforeAgents = s.agents.count, beforeInbox = s.inbox.count, beforePending = s.pending.count
+        s.agents.removeAll { $0.pane == pane }
+        s.inbox.removeAll { $0.pane == pane && $0.kind != "route" }
+        s.pending.removeAll { $0.action.pane == pane }
+        if s.agents.count != beforeAgents || s.inbox.count != beforeInbox || s.pending.count != beforePending {
+            state = s
+        }
+        if peek?.pane == pane { peek = nil }
+        stopped.removeAll { $0.pane == pane }
+    }
+
+    /// Dismiss inbox items optimistically, sending all dismissals concurrently
+    /// and rolling back any that fail.
+    func dismiss(_ ids: [Int]) {
+        guard !ids.isEmpty else { return }
+        let set = Set(ids)
+        clearing.formUnion(set)
+        var s = state
+        s.inbox.removeAll { set.contains($0.id) }
+        state = s
+        if let p = peek, set.contains(p.id) { peek = nil }
+        Task {
+            let failed: [Int] = await withTaskGroup(of: (Int, Bool).self) { group in
+                for id in ids {
+                    group.addTask { (id, await Client.local.dismiss(id)) }
+                }
+                var bad: [Int] = []
+                for await (id, ok) in group where !ok { bad.append(id) }
+                return bad
+            }
+            if !failed.isEmpty { clearing.subtract(failed) }
+            await refresh()
+        }
+    }
+
+    /// Answer a question optimistically: disable its buttons and show the
+    /// chosen option immediately while the answer goes to reflexd.
+    func answer(item: ItemInfo, key: String) {
+        guard answering[item.id] == nil, !state.pending.contains(where: { $0.item == item.id }) else { return }
+        let opt = item.options.first { $0.key == key }
+        let label = "→ " + (opt?.label ?? key)
+        let action = opt?.action ?? ActionInfo(type: "press", pane: item.pane, key: key)
+        let optimistic = PendingInfo(id: -item.id, label: label, action: action,
+                                     due: state.now + state.undo, left: state.undo, item: item.id)
+        answering[item.id] = (optimistic, Date())
+        var s = state
+        s.pending.append(optimistic)
+        state = s
+        Task {
+            let ok = await Client.local.answer(item: item.id, key: key)
+            if !ok { answering[item.id] = nil }
+            await refresh()
+        }
     }
 
     private func observe(_ next: StateInfo) {
@@ -259,14 +471,6 @@ final class Store: ObservableObject {
     /// questions are not the session's, and stay.)
     func seen(_ pane: String) {
         let ids = state.inbox.filter { clears($0, pane) }.map(\.id)
-        guard !ids.isEmpty else { return }
-        clearing.formUnion(ids)
-        var s = state
-        s.inbox.removeAll { ids.contains($0.id) }
-        state = s
-        Task {
-            for id in ids { await Client.local.dismiss(id) }
-            await refresh()
-        }
+        dismiss(ids)
     }
 }

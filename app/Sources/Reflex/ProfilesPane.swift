@@ -148,6 +148,9 @@ final class ProfilesModel: ObservableObject {
     private var usageAt: Date = .distantPast
     private var usageBusy = false
     @Published private(set) var busy: Set<String> = []
+    /// In-flight default changes (`key(place, harness)` → chosen profile name)
+    /// so a concurrent `load()` doesn't overwrite an optimistic selection.
+    private var pendingDefaults: [String: String] = [:]
     @Published var failure: String?
     @Published private(set) var loaded = false
 
@@ -217,12 +220,18 @@ final class ProfilesModel: ObservableObject {
 
     /// One machine's row, replaced where it is (or added: this Mac first, the rest in order).
     private func put(_ p: Place, at index: Int? = nil) {
-        if let i = places.firstIndex(where: { $0.id == p.id }) {
-            if places[i] != p { places[i] = p }
+        var next = p
+        for h in Self.harnesses {
+            if let want = pendingDefaults[key(next, h)] {
+                next.defaults[h] = want.isEmpty ? nil : want
+            }
+        }
+        if let i = places.firstIndex(where: { $0.id == next.id }) {
+            if places[i] != next { places[i] = next }
         } else if let index {
-            places.insert(p, at: min(index, places.count))
+            places.insert(next, at: min(index, places.count))
         } else {
-            places.append(p)
+            places.append(next)
         }
     }
 
@@ -251,10 +260,17 @@ final class ProfilesModel: ObservableObject {
     func key(_ p: Place, _ harness: String) -> String { "\(p.id)|\(harness)" }
 
     /// Make `name` (or "" for your own) what a bare `harness` starts as on that machine.
+    /// Applied optimistically and persisted to the cache; rolled back if the machine refuses.
     func setDefault(_ p: Place, harness: String, to name: String) {
         let k = key(p, harness)
         guard !busy.contains(k) else { return }
+        let previous = places.first(where: { $0.id == p.id })?.defaults[harness]
         busy.insert(k)
+        pendingDefaults[k] = name
+        if let i = places.firstIndex(where: { $0.id == p.id }) {
+            places[i].defaults[harness] = name.isEmpty ? nil : name
+            ViewCache.save("profile-places", places)
+        }
         let spec = "\(harness)[\(name)]"
         Task {
             let ok: Bool
@@ -268,9 +284,12 @@ final class ProfilesModel: ObservableObject {
                                       input: "", timeout: 20) != nil
                 }
             }
-            if ok, let i = places.firstIndex(where: { $0.id == p.id }) {
-                places[i].defaults[harness] = name.isEmpty ? nil : name
-            } else if !ok {
+            pendingDefaults[k] = nil
+            if !ok {
+                if let i = places.firstIndex(where: { $0.id == p.id }) {
+                    places[i].defaults[harness] = previous
+                    ViewCache.save("profile-places", places)
+                }
                 failure = "Couldn't set \(spec) as \(p.name.isEmpty ? "this Mac" : p.name)'s default."
             }
             busy.remove(k)

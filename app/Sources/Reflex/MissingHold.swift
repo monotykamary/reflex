@@ -12,6 +12,31 @@ struct MissingHold {
     private var lastOn: [String: [AgentInfo]] = [:]
     private(set) var missingSince: [String: Date] = [:]
 
+    /// Explicitly drop a pane (closed intentionally or confirmed ended by
+    /// herdr-core), so a connected machine that now lists no agents doesn't
+    /// keep it alive for `limit` seconds as a phantom.
+    mutating func forget(_ pane: String) {
+        for m in Array(lastOn.keys) {
+            guard var xs = lastOn[m], xs.contains(where: { $0.pane == pane }) else { continue }
+            xs.removeAll { $0.pane == pane }
+            if xs.isEmpty {
+                lastOn[m] = nil
+                missingSince[m] = nil
+            } else {
+                lastOn[m] = xs
+            }
+        }
+    }
+
+    /// Explicitly drop a machine (paused, turned off, or removed).
+    mutating func forgetMachine(_ m: String) {
+        lastOn[m] = nil
+        missingSince[m] = nil
+    }
+
+    /// The agents currently held for a machine, if any.
+    func held(on m: String) -> [AgentInfo] { lastOn[m] ?? [] }
+
     /// The agents to show: `agents` plus those held. `machine` is an agent's
     /// machine ("" for this Mac's, never held).
     mutating func apply(_ agents: [AgentInfo], connected: Set<String>, now: Date = Date(),

@@ -38,4 +38,23 @@ var l = MissingHold()
 _ = l.apply(all, connected: up, now: t0, machine: machine)
 r = l.apply([a("boat/t1"), a("boat/t2")], connected: up, now: t0 + 2, machine: machine)
 check(panes(r.agents) == ["boat/t1", "boat/t2"], "this Mac's agents are never held")
+
+// Intentionally closing the last agent on a connected remote machine: not resurrected.
+var c = MissingHold()
+_ = c.apply([a("t1"), a("boat/t1")], connected: up, now: t0, machine: machine)
+c.forget("boat/t1")
+r = c.apply([a("t1")], connected: up, now: t0 + 1, machine: machine)
+check(panes(r.agents) == ["t1"] && r.started.isEmpty, "forgetting the last remote agent prevents 90s ghost hold")
+
+// Forgetting one of two remote agents: if the machine then lags, only the live one is held.
+var c2 = MissingHold()
+_ = c2.apply([a("t1"), a("boat/t1"), a("boat/t2")], connected: up, now: t0, machine: machine)
+c2.forget("boat/t1")
+r = c2.apply([a("t1")], connected: up, now: t0 + 1, machine: machine)
+check(panes(r.agents) == ["t1", "boat/t2"] && r.started["boat"] == 1, "forgetting one remote agent only holds the remaining live one")
+
+// Forgetting a whole machine (paused/stopped/removed) clears any held agents at once.
+c2.forgetMachine("boat")
+r = c2.apply([a("t1")], connected: up, now: t0 + 2, machine: machine)
+check(panes(r.agents) == ["t1"] && c2.held(on: "boat").isEmpty, "forgetMachine drops held agents immediately")
 exit(fails == 0 ? 0 : 1)

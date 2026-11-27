@@ -68,5 +68,16 @@ MainActor.assumeIsolated {
     var ring = SteadyRows()
     ring.update([a("x", "idle", "/p/x", from: "y"), a("y", "idle", "/p/y", from: "x")], folder: folder, now: t0)
     check(Set(flat(ring)) == ["x", "y"], "agents naming each other are both listed (\(flat(ring)))")
+
+    // Intentionally closed pane leaves at once (no 6 s dimmed grace), while an
+    // unexpectedly missing pane still stays dimmed for the grace period.
+    var cl = SteadyRows()
+    cl.update([a("1", "idle", "/p/x"), a("2", "working", "/p/x"), a("3", "idle", "/p/y")], folder: folder, now: t0)
+    cl.update([a("2", "working", "/p/x")], folder: folder, closed: ["1"], now: t0 + 1)
+    check(flat(cl) == ["2", "3"] && !cl.gone("1") && cl.info["1"] == nil && cl.gone("3"),
+          "intentionally closed pane leaves immediately; unexpectedly missing stays dimmed (\(flat(cl)))")
+    // A pane already dimmed (blip) that is then closed leaves immediately too.
+    cl.update([a("2", "working", "/p/x")], folder: folder, closed: ["3"], now: t0 + 2)
+    check(flat(cl) == ["2"] && cl.info["3"] == nil, "already-dimmed pane leaves immediately when closed (\(flat(cl)))")
 }
 exit(fails == 0 ? 0 : 1)
