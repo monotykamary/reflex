@@ -29,5 +29,11 @@ let package = Package(
             path: "Tests/TerminalLinkTests",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
+        .testTarget(
+            name: "InlineEmulationTests",
+            dependencies: [.product(name: "SwiftTerm", package: "SwiftTerm")],
+            path: "Tests/InlineEmulationTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

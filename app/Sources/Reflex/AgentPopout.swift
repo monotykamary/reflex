@@ -42,7 +42,8 @@ final class TerminalSession: NSObject, ObservableObject, LocalProcessTerminalVie
 
     init(pane: String) {
         self.pane = pane
-        view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 680, height: 420))
+        view = AgentTerminalView(frame: NSRect(x: 0, y: 0, width: 680, height: 420),
+                                 options: TerminalOptions(scrollback: 2000))
         super.init()
         view.processDelegate = self
         view.optionAsMetaKey = true
