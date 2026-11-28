@@ -228,58 +228,160 @@ final class SessionArchive: ObservableObject {
             if let s { out.append(s) }
         }
         // agy's, opencode's and amp's, which keep theirs in a database or one file per thread.
-        let homes = [home] + profileHomes(home + "/.reflex/profiles")
-        for h in homes {
-            out += agy(h + "/.gemini/antigravity-cli/conversation_summaries.db")
+        // Each harness scans only its own profile homes (another harness's profile home symlinks
+        // unrelated config folders back to the real home).
+        for h in [home] + profileHomes(profiles, for: "agy") {
+            out += agy(h + "/.gemini/antigravity-cli/conversation_summaries.db", fallbackCwd: home)
+        }
+        for h in [home] + profileHomes(profiles, for: "opencode") {
             out += opencode(h + "/.local/share/opencode/opencode.db")
+        }
+        for h in [home] + profileHomes(profiles, for: "amp") {
             out += amp(h + "/.local/share/amp/threads", cache: &cache, seen: &seen)
         }
         cache = cache.filter { seen.contains($0.key) }
         return out
     }
 
-    /// The homes of profiles that have one (agy, opencode, amp, grok: reflex profile).
-    nonisolated static func profileHomes(_ root: String) -> [String] {
+    /// The homes of profiles for one harness (`reflex profile`: agy, opencode, amp).
+    nonisolated static func profileHomes(_ root: String, for harness: String) -> [String] {
         let fm = FileManager.default
-        return ["agy", "opencode", "amp"].flatMap { h -> [String] in
-            ((try? fm.contentsOfDirectory(atPath: "\(root)/\(h)")) ?? []).filter { !$0.hasPrefix(".") }.map { "\(root)/\(h)/\($0)/home" }
-        }
+        return ((try? fm.contentsOfDirectory(atPath: "\(root)/\(harness)")) ?? [])
+            .filter { !$0.hasPrefix(".") }
+            .map { "\(root)/\(harness)/\($0)/home" }
     }
 
-    /// Rows from a SQLite database, opened without writing (its WAL left alone);
-    /// fields split by U+001F. Empty when there is no database or no sqlite3.
+    /// Rows from a SQLite database, opened read-only (reading its WAL without
+    /// writing or checkpointing; falling back to immutable when the folder is
+    /// read-only). Fields split by U+001F. Empty when there is no database or
+    /// no sqlite3.
     nonisolated static func rows(_ db: String, _ sql: String) -> [[String]] {
         guard FileManager.default.fileExists(atPath: db) else { return [] }
+        if let r = query(db, sql) { return r }
+        let uri = "file:" + (db.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db) + "?immutable=1"
+        return query(uri, sql) ?? []
+    }
+
+    nonisolated private static func query(_ target: String, _ sql: String) -> [[String]]? {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
-        let uri = "file:" + (db.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? db) + "?immutable=1"
-        p.arguments = ["-readonly", "-separator", "\u{1F}", "-newline", "\u{1E}", uri, sql]
+        p.arguments = ["-readonly", "-cmd", ".timeout 500", "-separator", "\u{1F}", "-newline", "\u{1E}", target, sql]
         let out = Pipe()
         p.standardOutput = out
         p.standardError = FileHandle.nullDevice
         p.standardInput = FileHandle.nullDevice
-        guard (try? p.run()) != nil else { return [] }
+        guard (try? p.run()) != nil else { return nil }
         let d = out.fileHandleForReading.readDataToEndOfFile()
         p.waitUntilExit()
-        guard p.terminationStatus == 0 else { return [] }
+        guard p.terminationStatus == 0 else { return nil }
         return String(decoding: d, as: UTF8.self).split(separator: "\u{1E}", omittingEmptySubsequences: true)
             .map { $0.split(separator: "\u{1F}", omittingEmptySubsequences: false).map(String.init) }
     }
 
     /// agy's conversations (not the ones its agents started).
-    nonisolated static func agy(_ db: String) -> [PastSession] {
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime, .withFractionalSeconds, .withTimeZone]
+    /// agy sometimes clears `workspace_uris` on longer sessions; fall back to
+    /// `history.jsonl`, the conversation DB's `executor_metadata`, and finally
+    /// the real home directory so sessions aren't silently dropped.
+    nonisolated static func agy(_ db: String, fallbackCwd: String = NSHomeDirectory()) -> [PastSession] {
+        let isoFrac = ISO8601DateFormatter()
+        isoFrac.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime, .withFractionalSeconds, .withTimeZone]
+        let isoWhole = ISO8601DateFormatter()
+        isoWhole.formatOptions = [.withFullDate, .withTime, .withColonSeparatorInTime, .withSpaceBetweenDateAndTime, .withTimeZone]
         let profile = PastSession.profile(of: db)
-        return rows(db, "select conversation_id, title, preview, workspace_uris, last_modified_time from conversation_summaries where parent_conversation_id = '' and killed = 0 order by last_modified_time desc limit 150").compactMap { r in
+        let agyDir = (db as NSString).deletingLastPathComponent
+        var history: [String: String]? = nil
+        func historyCwd(_ id: String) -> String? {
+            if history == nil { history = agyHistory(agyDir + "/history.jsonl") }
+            return history?[id]
+        }
+        return rows(db, "select conversation_id, title, preview, workspace_uris, last_modified_time from conversation_summaries where parent_conversation_id = '' and killed = 0 and (title != '' or preview != '') and last_modified_time > '0001-01-02' order by last_modified_time desc limit 150").compactMap { r in
             guard r.count == 5, !r[0].isEmpty else { return nil }
-            let uris = (try? JSONSerialization.jsonObject(with: Data(r[3].utf8)) as? [String]) ?? []
-            guard let u = uris.first, let cwd = URL(string: u)?.path, !cwd.isEmpty else { return nil }
-            let modified = iso.date(from: r[4]) ?? .distantPast
+            let id = r[0]
             let title = clean(r[1].isEmpty ? r[2] : r[1])
-            return PastSession(agent: "agy", id: r[0], cwd: cwd, title: String(title.prefix(120)), last: String(clean(r[2]).prefix(300)),
+            guard !title.isEmpty else { return nil }
+            let uris = (try? JSONSerialization.jsonObject(with: Data(r[3].utf8)) as? [String]) ?? []
+            var cwd = uris.first.flatMap { URL(string: $0)?.path } ?? ""
+            if cwd.isEmpty { cwd = historyCwd(id) ?? "" }
+            if cwd.isEmpty { cwd = agyConversationWorkspace(agyDir + "/conversations/\(id).db") ?? "" }
+            if cwd.isEmpty { cwd = fallbackCwd }
+            guard !cwd.isEmpty else { return nil }
+            let modified = isoFrac.date(from: r[4]) ?? isoWhole.date(from: r[4]) ?? .distantPast
+            return PastSession(agent: "agy", id: id, cwd: cwd, title: String(title.prefix(120)), last: String(clean(r[2]).prefix(300)),
                                modified: modified, state: .past, profile: profile)
         }
+    }
+
+    /// Map conversationId -> latest workspace path from agy's history.jsonl.
+    nonisolated static func agyHistory(_ path: String) -> [String: String] {
+        guard let data = FileManager.default.contents(atPath: path) else { return [:] }
+        var out: [String: String] = [:]
+        for line in data.split(separator: UInt8(ascii: "\n")) {
+            guard let j = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  let id = j["conversationId"] as? String, !id.isEmpty,
+                  let ws = j["workspace"] as? String, ws.hasPrefix("/") else { continue }
+            out[id] = ws
+        }
+        return out
+    }
+
+    /// Recover a workspace path from a conversation DB's `executor_metadata`
+    /// protobuf when `conversation_summaries.workspace_uris` was cleared.
+    nonisolated static func agyConversationWorkspace(_ convDb: String) -> String? {
+        guard FileManager.default.fileExists(atPath: convDb) else { return nil }
+        let rs = rows(convDb, "select hex(data) from executor_metadata where instr(data, X'66696c653a2f2f2f') > 0 order by idx asc limit 3")
+        for r in rs {
+            guard let hex = r.first, !hex.isEmpty else { continue }
+            if let path = agyProtobufURI(hexData(hex)) { return path }
+        }
+        return nil
+    }
+
+    /// First workspace `file:///` URI stored as a length-delimited protobuf
+    /// string in `data`, skipping agy's own config/skill folders.
+    nonisolated static func agyProtobufURI(_ data: Data) -> String? {
+        let needle = Data("file:///".utf8)
+        var at = data.startIndex
+        while let r = data.range(of: needle, in: at..<data.endIndex) {
+            at = r.upperBound
+            var lens: [Int] = []
+            if r.lowerBound >= 2, data[r.lowerBound - 2] >= 0x80, data[r.lowerBound - 1] < 0x80 {
+                lens.append(Int(data[r.lowerBound - 2] & 0x7f) | (Int(data[r.lowerBound - 1]) << 7))
+            }
+            if r.lowerBound >= 1, data[r.lowerBound - 1] < 0x80 {
+                lens.append(Int(data[r.lowerBound - 1]))
+            }
+            for len in lens {
+                guard len > needle.count, r.lowerBound + len <= data.endIndex,
+                      let uri = String(data: data[r.lowerBound..<(r.lowerBound + len)], encoding: .utf8),
+                      let path = URL(string: uri)?.path,
+                      path.hasPrefix("/"),
+                      !path.contains("/.gemini/"), !path.contains("/.agents/"), !path.contains("/.reflex/") else { continue }
+                var isDir: ObjCBool = false
+                if FileManager.default.fileExists(atPath: path, isDirectory: &isDir), isDir.boolValue { return path }
+            }
+        }
+        return nil
+    }
+
+    nonisolated private static func hexData(_ hex: String) -> Data {
+        let bytes = Array(hex.utf8)
+        guard bytes.count >= 2 else { return Data() }
+        func nib(_ b: UInt8) -> UInt8? {
+            switch b {
+            case 48...57: return b - 48
+            case 65...70: return b - 55
+            case 97...102: return b - 87
+            default: return nil
+            }
+        }
+        var out = Data()
+        out.reserveCapacity(bytes.count / 2)
+        var i = 0
+        while i + 1 < bytes.count {
+            if let hi = nib(bytes[i]), let lo = nib(bytes[i + 1]) { out.append((hi << 4) | lo) }
+            i += 2
+        }
+        return out
     }
 
     /// opencode's sessions (not its subagents').

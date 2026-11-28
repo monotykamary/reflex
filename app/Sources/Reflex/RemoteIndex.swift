@@ -118,6 +118,7 @@ final class RemoteIndex: @unchecked Sendable {
                                     last: String(f[6].prefix(300)), modified: Date(timeIntervalSince1970: TimeInterval(f[3]) ?? 0),
                                     state: .past, profile: f[7].isEmpty ? nil : f[7])
                 if s.title.isEmpty { s.title = s.last }
+                guard !s.title.isEmpty else { continue }
                 next["S:" + f[1] + ":" + f[2]] = (f[3], s)
                 continue
             }
